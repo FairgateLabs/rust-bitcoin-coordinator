@@ -1,0 +1,9 @@
+# rust builds
+/target
+
+# configuration
+config/*
+!config/development.yaml
+
+# databases
+data
