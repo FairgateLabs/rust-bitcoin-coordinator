@@ -1,6 +1,21 @@
 # BitVMX unstable
 Rust implementation of BitVMX. Unstable package for the actively developed version.
 
+## Installation
+Clone the repository and initialize the submodules:
+```bash
+$ git clone --recurse-submodules git@github.com:FairgateLabs/bitvmx-unstable.git
+```
+
+OR manually initialize the submodules (if you already cloned the repo without the `--recurse-submodules` option):
+ 
+```bash
+$ git clone git@github.com:FairgateLabs/bitvmx-unstable.git
+$ git submodule init
+$ git submodule update --remote --checkout
+```
+
+## Usage
 For now, this is just one big test. To execute it, run:
 
 ```bash

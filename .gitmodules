@@ -1,0 +1,8 @@
+[submodule "storage"]
+	path = storage
+	url = git@github.com:FairgateLabs/rust-bitvmx-storage-backend.git
+	branch = integration
+[submodule "dispatcher"]
+	path = dispatcher
+	url = git@github.com:FairgateLabs/rust-bitvmx-transaction-dispatcher.git
+	branch = integration
