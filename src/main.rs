@@ -6,7 +6,7 @@ use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 use console::style;
 use rust_bitvmx_storage_backend::storage::{KeyValueStore, Storage};
 use serde_json::json;
-use tracing::error;
+use tracing::{error, Level};
 
 use bitvmx_unstable::{config::Config, errors::BitVMXError, model::{DispatcherTask, DispatcherTaskKind, DispatcherTaskStatus}};
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::{Account, Signer}};
@@ -21,11 +21,11 @@ fn main() -> Result<()> {
         style("Hi!").cyan()
     );
 
-    // uncomment to enable logs from other modules
-    // tracing_subscriber::fmt()
-    //     .without_time()
-    //     .with_target(false)
-    //     .init();
+    tracing_subscriber::fmt()
+        .without_time()
+        // .with_target(false)
+        .with_max_level(Level::ERROR)
+        .init();
 
     let test = match Test::new() {
         Ok(test) => test,
@@ -34,7 +34,7 @@ fn main() -> Result<()> {
             std::process::exit(1);
         },
     };
-    
+
     if let Err(e) = test.run() {
         error!("{:?}", e);
         std::process::exit(1);
