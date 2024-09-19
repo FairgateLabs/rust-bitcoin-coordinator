@@ -6,3 +6,7 @@
 	path = dispatcher
 	url = git@github.com:FairgateLabs/rust-bitvmx-transaction-dispatcher.git
 	branch = integration
+[submodule "key_manager"]
+	path = key_manager
+	url = git@github.com:FairgateLabs/rust-bitvmx-key-manager.git
+	branch = integration
