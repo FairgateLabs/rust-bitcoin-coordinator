@@ -14,10 +14,12 @@ thiserror = "1.0.63"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 uuid = "1.10.0"
+hex = "0.4.3"
 
 # BitVMX dependencies
 rust-bitvmx-storage-backend = { path = "storage" }
 bitvmx-transaction-dispatcher = { path = "dispatcher" }
+bitvmx-key-manager = {path = "key_manager" }
 
 [dependencies.bitcoin]
 version = "0.32.2"
