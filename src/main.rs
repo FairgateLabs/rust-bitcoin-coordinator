@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use anyhow::{Context, Result};
-use bitcoin::{absolute, consensus, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction, Address, Amount, EcdsaSighashType, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
+use bitcoin::{absolute, consensus, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction, Address, Amount, EcdsaSighashType, Network, OutPoint, PrivateKey, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 use console::style;
 use storage_backend::storage::{KeyValueStore, Storage};
@@ -76,11 +76,14 @@ impl Test {
 
         let mut key_manager = create_key_manager(&config ,network)?;
         // create a user account whose keys we control and persist it to db
-        let user = Account::new(network, &mut key_manager);
+        let user = Account::new(network);
         db.write(
             &user.address_checked(network)?.to_string(),
             &serde_json::to_string(&user)?
         )?;
+        let private_key = PrivateKey::new(user.sk, network);
+        let _ = key_manager.import_private_key(&private_key.to_wif()).unwrap();
+
         println!("{} User address: {:#?}", style("→").cyan(), user.address_checked(network)?.to_string());
 
         Ok( Self { config, network, rpc, db, miner, user})
@@ -215,7 +218,7 @@ impl Test {
 
         // create a signer for the dispatcher
 
-        Ok(TransactionDispatcher::new(rpc, self.network, key_manager))
+        Ok(TransactionDispatcher::new(rpc, key_manager))
     }
 
     fn test_send_drp_transaction(&self, transaction_id: &Txid) -> Result<String>{
