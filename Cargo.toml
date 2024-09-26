@@ -18,7 +18,7 @@ uuid = "1.10.0"
 # BitVMX dependencies
 rust-bitvmx-storage-backend = { path = "storage" }
 bitvmx-transaction-dispatcher = { path = "dispatcher" }
-
+bitvmx-transaction-monitor = { git = "https://github.com/FairgateLabs/rust-bitvmx-transaction-monitor", branch = "main" }
 [dependencies.bitcoin]
 version = "0.32.2"
 features = ["rand-std", "serde"]
