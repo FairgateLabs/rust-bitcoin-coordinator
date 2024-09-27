@@ -13,14 +13,14 @@ use bitvmx_transaction_monitor::{
 };
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Signer};
 
-pub struct BitVMXOrchestrator {
+pub struct Orchestrator {
     monitor: Box<dyn MonitorApi>,
     dispatcher: TransactionDispatcher,
     store: BitvmxStore,
     current_height: BlockHeight,
 }
 
-pub trait BitVMXOrchestratorApi {
+pub trait OrchestratorApi {
     const CONFIRMATIONS_THRESHOLD: u32 = 6;
 
     fn new(
@@ -39,7 +39,7 @@ pub trait BitVMXOrchestratorApi {
     fn tick(&mut self) -> Result<()>;
 }
 
-impl BitVMXOrchestrator {
+impl Orchestrator {
     fn send_pending_txs(&mut self) -> Result<()> {
         // Get pending instance transactions to be send to the blockchain
         let pending_txs = self.store.get_pending_list()?;
@@ -223,7 +223,7 @@ impl BitVMXOrchestrator {
     }
 }
 
-impl BitVMXOrchestratorApi for BitVMXOrchestrator {
+impl OrchestratorApi for Orchestrator {
     fn new(
         node_rpc_url: &str,
         db_file_path: &str,
