@@ -8,8 +8,8 @@ use bitcoin::{
 };
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 use console::style;
-use rust_bitvmx_storage_backend::storage::{KeyValueStore, Storage};
 use serde_json::json;
+use storage_backend::storage::{KeyValueStore, Storage};
 use tracing::{error, Level};
 
 use bitvmx_unstable::{

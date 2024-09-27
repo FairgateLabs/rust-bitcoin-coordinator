@@ -10,3 +10,8 @@
 	path = key_manager
 	url = git@github.com:FairgateLabs/rust-bitvmx-key-manager.git
 	branch = integration
+[submodule "monitor"]
+	path = monitor
+	url = git@github.com:FairgateLabs/rust-bitvmx-transaction-monitor.git
+	branch = main
+

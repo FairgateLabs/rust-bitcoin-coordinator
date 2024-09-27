@@ -337,8 +337,7 @@ dependencies = [
 
 [[package]]
 name = "bitvmx-transaction-monitor"
-version = "0.1.0"
-source = "git+https://github.com/FairgateLabs/rust-bitvmx-transaction-monitor?branch=main#43aa58c2cab1938ec30fac231ff407f393d0be0b"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "bitcoin",
@@ -1590,7 +1589,7 @@ dependencies = [
 [[package]]
 name = "rust-bitvmx-storage-backend"
 version = "0.1.0"
-source = "git+https://github.com/FairgateLabs/rust-bitvmx-storage-backend?branch=integration# "
+source = "git+https://github.com/FairgateLabs/rust-bitvmx-storage-backend?branch=integration#717a20fc074163169e10f8f4a1b65cfeb0543630"
 dependencies = [
  "clap",
  "rocksdb",
