@@ -3,7 +3,7 @@ use std::str::FromStr;
 use bitcoin::{absolute::LockTime, Amount, Transaction, Txid};
 use bitvmx_unstable::{
     storage::{BitvmxStore, InProgressApi, InstanceApi},
-    types::BitvmxInstance,
+    types::{BitvmxInstance, InProgressTx},
 };
 
 #[test]
@@ -15,28 +15,11 @@ fn instances_store() -> Result<(), anyhow::Error> {
         Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
             .unwrap();
 
-    let bitvmx_store = BitvmxStore::new_with_path("test_output")?;
+    let bitvmx_store = BitvmxStore::new_with_path("test_output/test1")?;
 
     let instance = BitvmxInstance {
         instance_id: 1,
-        txs: vec![
-            // FundingTx {
-            //     tx_id,
-            //     utxo_index: 1,
-            //     utxo_output: TxOut {
-            //         value: Amount::default(),
-            //         script_pubkey: ScriptBuf::new(),
-            //     },
-            // },
-            // FundingTx {
-            //     tx_id: tx_id_2,
-            //     utxo_index: 0,
-            //     utxo_output: TxOut {
-            //         value: Amount::default(),
-            //         script_pubkey: ScriptBuf::new(),
-            //     },
-            // },
-        ],
+        txs: vec![tx_id, tx_id_2],
     };
 
     //add instance
@@ -65,7 +48,7 @@ fn instances_store() -> Result<(), anyhow::Error> {
 
 #[test]
 fn in_progress_tx_store() -> Result<(), anyhow::Error> {
-    let bitvmx_store = BitvmxStore::new_with_path("test_output")?;
+    let bitvmx_store = BitvmxStore::new_with_path("test_output/test2")?;
     let tx = Transaction {
         version: bitcoin::transaction::Version::TWO,
         lock_time: LockTime::from_time(1653195600).unwrap(),
@@ -84,27 +67,43 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     bitvmx_store.add_in_progress_instance_tx(1, &tx, Amount::default(), 2)?;
     bitvmx_store.add_in_progress_instance_tx(1, &tx2, Amount::default(), 2)?;
 
-    //get in progress txs
-    let txs = bitvmx_store.get_in_progress_instances_txs()?;
-    assert_eq!(txs.len(), 2);
-
     //get in progress tx by id
     let instance = bitvmx_store.get_in_progress_instance_tx(1, &tx.compute_txid())?;
     assert!(instance.is_some());
-
     //get in progress tx by id
     let instance = bitvmx_store.get_in_progress_instance_tx(1, &tx2.compute_txid())?;
     assert!(instance.is_some());
-
     //remove in progress tx
     bitvmx_store.remove_in_progress_instance_tx(1, &tx.compute_txid())?;
-    let txs = bitvmx_store.get_in_progress_instances_txs()?;
-    assert_eq!(txs.len(), 1);
+
+    let instance = bitvmx_store.get_in_progress_instance_tx(1, &tx.compute_txid())?;
+    assert!(instance.is_none());
 
     //remove in progress tx2
     bitvmx_store.remove_in_progress_instance_tx(2, &tx2.compute_txid())?;
-    let txs = bitvmx_store.get_in_progress_instances_txs()?;
-    assert_eq!(txs.len(), 0);
+
+    let instance = bitvmx_store.get_in_progress_instance_tx(2, &tx2.compute_txid())?;
+    assert!(instance.is_none());
+
+    //Add the instance again :
+    bitvmx_store.add_in_progress_instance_tx(1, &tx, Amount::default(), 2)?;
+
+    let _ = bitvmx_store.update_in_progress_instance_tx(
+        1,
+        &tx.compute_txid(),
+        Amount::from_sat(1000),
+        10,
+    )?;
+
+    let check_instance = InProgressTx {
+        tx: tx.clone(),
+        fee_rate: Amount::from_sat(1000),
+        block_height: 10,
+        was_speed_up: true,
+    };
+
+    let instance = bitvmx_store.get_in_progress_instance_tx(1, &tx.compute_txid())?;
+    assert_eq!(instance.unwrap(), check_instance);
 
     Ok(())
 }

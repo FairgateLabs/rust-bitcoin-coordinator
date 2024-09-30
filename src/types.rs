@@ -3,7 +3,7 @@ use bitvmx_transaction_monitor::types::BlockHeight;
 use serde::{Deserialize, Serialize};
 
 pub type InstanceId = u32;
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct InProgressTx {
     pub tx: Transaction,
 

@@ -1,11 +1,11 @@
 use std::env;
 
+use bitvmx_transaction_monitor::types::BlockHeight;
 use config as settings;
 use serde::Deserialize;
 use tracing::warn;
 
 use crate::errors::ConfigError;
-
 
 static DEFAULT_ENV: &str = "development";
 static CONFIG_PATH: &str = "config";
@@ -15,6 +15,7 @@ static CONFIG_PATH: &str = "config";
 pub struct Config {
     pub database: DatabaseConfig,
     pub rpc: RpcConfig,
+    pub monitor: MonitorConfig,
     pub dispatcher: DispatcherConfig,
 }
 
@@ -33,7 +34,12 @@ pub struct RpcConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct  DispatcherConfig {
+pub struct MonitorConfig {
+    pub checkpoint_height: Option<BlockHeight>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DispatcherConfig {
     // amount in sats of the output used to bump the fee of the DRP transaction
     pub cpfp_amount: u64,
     // fee in sats for the DRP transaction
@@ -47,13 +53,14 @@ impl Config {
     }
 
     fn get_env() -> String {
-        env::var("BITVMX_ENV")
-            .unwrap_or_else(|_| {
-                let default_env = DEFAULT_ENV.to_string();
-                warn!("BITVMX_ENV not set. Using default environment: {}", default_env);
+        env::var("BITVMX_ENV").unwrap_or_else(|_| {
+            let default_env = DEFAULT_ENV.to_string();
+            warn!(
+                "BITVMX_ENV not set. Using default environment: {}",
                 default_env
-            }
-        )
+            );
+            default_env
+        })
     }
 
     fn parse_config(env: String) -> Result<Config, ConfigError> {
@@ -64,7 +71,8 @@ impl Config {
             .build()
             .map_err(ConfigError::ConfigFileError)?;
 
-        settings.try_deserialize::<Config>()
+        settings
+            .try_deserialize::<Config>()
             .map_err(ConfigError::ConfigFileError)
     }
 }

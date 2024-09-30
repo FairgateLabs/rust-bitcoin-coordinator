@@ -9,3 +9,5 @@ rpc:
     username: foo
     password: rpcpassword
     wallet: test_wallet
+monitor:
+    checkpoint_height: 10

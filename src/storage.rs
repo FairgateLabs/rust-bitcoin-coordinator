@@ -1,5 +1,5 @@
 use crate::types::{BitvmxInstance, FundingTx, InProgressTx, InstanceId};
-use anyhow::{Context, Ok, Result};
+use anyhow::{bail, Context, Ok, Result};
 use bitcoin::{Amount, Transaction, Txid};
 use bitvmx_transaction_monitor::types::BlockHeight;
 use std::path::PathBuf;
@@ -15,7 +15,6 @@ enum StoreKey<'a> {
     PendingList,
 
     InProgressInstanceTx(InstanceId, &'a Txid),
-    InProgressInstanceList,
 
     FundingTx,
 
@@ -38,7 +37,6 @@ pub trait PendingApi {
 }
 
 pub trait InProgressApi {
-    fn get_in_progress_instances_txs(&self) -> Result<Vec<InProgressTx>>;
     fn get_in_progress_instance_tx(
         &self,
         instance: InstanceId,
@@ -72,7 +70,8 @@ pub trait FundingApi {
 
 impl BitvmxStore {
     pub fn new_with_path(store_path: &str) -> Result<Self> {
-        let store = Storage::new_with_path(&PathBuf::from(format!("{}/monitor", store_path)))?;
+        let store = Storage::new_with_path(&PathBuf::from(format!("{}", store_path)))
+            .context("There is an error creating storage in BitvmxStore")?;
         Ok(Self { store })
     }
 
@@ -86,7 +85,6 @@ impl BitvmxStore {
             StoreKey::InProgressInstanceTx(instance_id, tx_id) => {
                 format!("in_progress/instance/{}/tx/{}", instance_id, tx_id)
             }
-            StoreKey::InProgressInstanceList => "in_progress/instance/list".to_string(),
             StoreKey::FundingTx => "funding_tx".to_string(),
             StoreKey::CompletedInstanceTxs(instance_id) => {
                 format!("completed/instance/{}/txs", instance_id)
@@ -185,28 +183,6 @@ impl InProgressApi for BitvmxStore {
         Ok(pending_instance_tx)
     }
 
-    fn get_in_progress_instances_txs(&self) -> Result<Vec<InProgressTx>> {
-        let in_progress_key = self.get_key(StoreKey::InProgressInstanceList);
-
-        let in_progress_instances_txs = self
-            .store
-            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&in_progress_key)
-            .context("Failed to retrieve stalled transactions")?
-            .unwrap_or_default();
-
-        let mut in_progress_intances_txs = Vec::<InProgressTx>::new();
-
-        for (instance_id, txs) in in_progress_instances_txs {
-            for tx_id in txs {
-                if let Some(tx) = self.get_in_progress_instance_tx(instance_id, &tx_id)? {
-                    in_progress_intances_txs.push(tx);
-                }
-            }
-        }
-
-        Ok(in_progress_intances_txs)
-    }
-
     fn add_in_progress_instance_tx(
         &self,
         instance_id: InstanceId,
@@ -225,21 +201,6 @@ impl InProgressApi for BitvmxStore {
         let pending_tx_key = self.get_key(StoreKey::InProgressInstanceTx(instance_id, &tx_id));
         self.store.set(pending_tx_key, in_progress_tx)?;
 
-        // 2. Maintain the list of all stalled txs
-        let in_progress_key = self.get_key(StoreKey::InProgressInstanceList);
-        let mut all = self
-            .store
-            .get::<_, Vec<Txid>>(&in_progress_key)?
-            .unwrap_or_default();
-
-        // Add the new tx id to the list if it's not already present
-        if !all.contains(&tx_id) {
-            all.push(tx_id);
-            self.store
-                .set(in_progress_key, &all)
-                .context("Failed to update in progress txs list")?;
-        }
-
         Ok(())
     }
 
@@ -247,18 +208,6 @@ impl InProgressApi for BitvmxStore {
         // 1. Remove the tx from the specific instance's in-progress list
         let instance_tx_key = self.get_key(StoreKey::InProgressInstanceTx(instance_id, tx_id));
         self.store.delete(&instance_tx_key)?;
-
-        // 2. Remove the tx from the global in-progress list
-        let in_progress_key = self.get_key(StoreKey::InProgressInstanceList);
-        let mut all = self
-            .store
-            .get::<_, Vec<Txid>>(&in_progress_key)?
-            .unwrap_or_default();
-
-        all.retain(|&x| x != *tx_id);
-        self.store
-            .set(&in_progress_key, &all)
-            .context("Failed to update in progress txs list")?;
 
         Ok(())
     }
@@ -285,7 +234,7 @@ impl InProgressApi for BitvmxStore {
 
             Ok(())
         } else {
-            Err(anyhow::anyhow!("In-progress transaction not found"))
+            bail!("In-progress transaction not found");
         }
     }
 }
