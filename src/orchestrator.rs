@@ -11,6 +11,7 @@ use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
     types::{BlockHeight, TxStatus},
 };
+use tracing::trace;
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Signer};
 
 pub struct Orchestrator {
@@ -61,6 +62,8 @@ impl Orchestrator {
                 self.current_height,
             )?;
 
+            // TODO: check atomics transactions. to perform add and remove.
+
             // Instance tx is not more pending, it belongs into progress queue
             self.store
                 .remove_pending_instance_tx(instance_id, &tx.compute_txid())?;
@@ -69,33 +72,24 @@ impl Orchestrator {
         Ok(())
     }
 
-    //TODO: This should be done inside the dispatcher
     fn speed_up(
         &mut self,
         tx: &Transaction,
         funding_txid: Txid,
         funding_utxo: (u32, TxOut),
-    ) -> Result<(Txid, Amount, FundingTx)> {
-        let (tx_id, amount) = self.dispatcher.speed_up(tx, funding_txid, funding_utxo)?;
+    ) -> Result<(Amount, FundingTx)> {
+        let (tx_id, amount) = self
+            .dispatcher
+            .speed_up(tx, funding_txid, funding_utxo.clone())?;
 
-        //Todo this is mock
-        let funding_tx = Transaction {
-            version: Version::TWO,     // Post BIP-68.
-            lock_time: LockTime::ZERO, // Ignore the locktime.
-            input: vec![],
-            output: vec![],
-        };
-
+        //TODO: We are using the child id tx with the same outputs for the new funding tx
         let new_funding_tx = FundingTx {
-            tx_id: funding_tx.compute_txid(),
-            utxo_index: 1,
-            utxo_output: TxOut {
-                value: Amount::default(),
-                script_pubkey: ScriptBuf::default(),
-            },
+            tx_id: tx_id,
+            utxo_index: funding_utxo.0,
+            utxo_output: funding_utxo.1,
         };
 
-        Ok((tx_id, amount, new_funding_tx))
+        Ok((amount, new_funding_tx))
     }
 
     fn notify_protocol_tx_changes(&self, instance: InstanceId, tx: &Txid) -> Result<()> {
@@ -130,6 +124,8 @@ impl Orchestrator {
             Some(pending_tx) => pending_tx,
             None => {
                 // Notify the protocol if no pending transaction is found
+                //TODO: first time we see the transaction we should save it.
+                //TODO: when txid was confirmed , we should notify to protocol.
                 self.notify_protocol_tx_changes(instance_id, &tx_id)?;
                 return Ok(());
             }
@@ -160,7 +156,10 @@ impl Orchestrator {
         if tx_status.tx_was_seen && tx_status.confirmations > Self::CONFIRMATIONS_THRESHOLD {
             // Transaction was mined and has sufficient confirmations
             self.complete_transaction(instance_id, tx_status)?;
-        } else if !tx_status.tx_was_seen {
+            return Ok(());
+        }
+
+        if !tx_status.tx_was_seen {
             // Transaction was not seen, consider speeding up
             self.handle_unseen_transaction(instance_id, in_progress_tx)?;
         }
@@ -187,19 +186,19 @@ impl Orchestrator {
         instance_id: InstanceId,
         in_progress_tx: &InProgressTx,
     ) -> Result<()> {
-        // Check if the transaction should be sped up
+        // Check if the transaction should be speed up
         let should_speed_up = self.dispatcher.should_speed_up(in_progress_tx.fee_rate)?;
 
         if should_speed_up {
-            let funding_tx = self.store.get_funding_tx()?;
+            //TODO: We are gonna have a funding transaction for each instance.
+            let funding_tx = self.store.get_funding_tx(instance_id)?;
 
             let funding_tx = match funding_tx {
                 Some(funding_tx) => funding_tx,
                 None => panic!("No funding transaction available for speed up"),
             };
 
-            // Speed up the transaction
-            let (_tx_id, fee_rate, new_funding) = self.speed_up(
+            let (fee_rate, new_funding) = self.speed_up(
                 &in_progress_tx.tx,
                 funding_tx.tx_id,
                 (funding_tx.utxo_index, funding_tx.utxo_output),
@@ -213,10 +212,8 @@ impl Orchestrator {
                 self.current_height,
             )?;
 
-            // Create FundingTx struct
-
             // Add the new funding transaction to the store
-            self.store.add_funding_tx(&new_funding)?;
+            self.store.add_funding_tx(instance_id, &new_funding)?;
         }
 
         Ok(())
@@ -232,12 +229,14 @@ impl OrchestratorApi for Orchestrator {
         password: &str,
         network: Network,
     ) -> Result<Self> {
+        trace!("Creating a new instance of Orchestrator");
         let store = BitvmxStore::new_with_path(db_file_path)?;
         let monitor = Monitor::new_with_paths(node_rpc_url, db_file_path, checkpoint_height)?;
         let auth = Auth::UserPass(username.to_string(), password.to_string());
         let client = Client::new(node_rpc_url, auth)?;
         let signer = Signer::new(None);
         let dispatcher = TransactionDispatcher::new(client, signer, network);
+        trace!("TransactionDispatcher instance created successfully");
 
         Ok(Self {
             monitor: Box::new(monitor),
@@ -248,11 +247,16 @@ impl OrchestratorApi for Orchestrator {
     }
 
     fn tick(&mut self) -> Result<()> {
-        // Monitor detects new blocks and transactions in the blockchain and
-        // saves any changes related to BitVMX instances.
-        self.monitor
-            .detect_instances()
-            .context("Error detecting instances")?;
+        //TODO: This could be improved in the future.
+        // The monitor detects instance transactions until it is ready.
+        // The detect_instances method synchronizes the indexer at current height.
+        // This is why we iterate until syn to the top.
+        // ALERT: This could take a long time if the number of blocks is large
+        while !self.monitor.is_ready()? {
+            self.monitor
+                .detect_instances()
+                .context("Error detecting instances")?;
+        }
 
         // Send pending transactions that were queued.
         self.send_pending_txs()
@@ -277,6 +281,8 @@ impl OrchestratorApi for Orchestrator {
 
     fn monitor_new_instance(&self, instance: BitvmxInstance) -> Result<()> {
         self.store.add_instance(&instance)?;
+
+        //TODO: we should tell the monitor in some way the new instances to track. or new txns.
         Ok(())
     }
 }

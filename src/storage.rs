@@ -16,7 +16,7 @@ enum StoreKey<'a> {
 
     InProgressInstanceTx(InstanceId, &'a Txid),
 
-    FundingTx,
+    FundingInstance(InstanceId),
 
     CompletedInstanceTxs(InstanceId),
 }
@@ -64,8 +64,8 @@ pub trait CompletedApi {
     fn get_completed_instance_txs(&self, instance_id: InstanceId) -> Result<Vec<Txid>>;
 }
 pub trait FundingApi {
-    fn get_funding_tx(&self) -> Result<Option<FundingTx>>;
-    fn add_funding_tx(&self, tx: &FundingTx) -> Result<()>;
+    fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>>;
+    fn add_funding_tx(&self, instance_id: InstanceId, tx: &FundingTx) -> Result<()>;
 }
 
 impl BitvmxStore {
@@ -85,7 +85,9 @@ impl BitvmxStore {
             StoreKey::InProgressInstanceTx(instance_id, tx_id) => {
                 format!("in_progress/instance/{}/tx/{}", instance_id, tx_id)
             }
-            StoreKey::FundingTx => "funding_tx".to_string(),
+            StoreKey::FundingInstance(instance_id) => {
+                format!("in_progress/instance/{}", instance_id)
+            }
             StoreKey::CompletedInstanceTxs(instance_id) => {
                 format!("completed/instance/{}/txs", instance_id)
             }
@@ -333,15 +335,15 @@ impl CompletedApi for BitvmxStore {
 }
 
 impl FundingApi for BitvmxStore {
-    fn get_funding_tx(&self) -> Result<Option<FundingTx>> {
-        let funding_tx_key = self.get_key(StoreKey::FundingTx);
+    fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>> {
+        let funding_tx_key = self.get_key(StoreKey::FundingInstance(instance_id));
         self.store
             .get::<&str, FundingTx>(&funding_tx_key)
             .context("Failed to retrieve funding transaction")
     }
 
-    fn add_funding_tx(&self, funding_tx: &FundingTx) -> Result<()> {
-        let funding_tx_key = self.get_key(StoreKey::FundingTx);
+    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<()> {
+        let funding_tx_key = self.get_key(StoreKey::FundingInstance(instance_id));
 
         self.store
             .set(funding_tx_key, funding_tx)

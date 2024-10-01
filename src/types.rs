@@ -28,4 +28,5 @@ pub struct FundingTx {
 pub struct BitvmxInstance {
     pub instance_id: InstanceId,
     pub txs: Vec<Txid>,
+    pub funding_tx: FundingTx,
 }
