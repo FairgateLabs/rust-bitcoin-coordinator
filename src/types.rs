@@ -23,10 +23,14 @@ pub struct FundingTx {
     pub utxo_index: u32,
     pub utxo_output: TxOut,
 }
-
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct TxInstance {
+    tx_id: Txid,
+    owner: bool,
+}
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct BitvmxInstance {
     pub instance_id: InstanceId,
-    pub txs: Vec<Txid>,
+    pub txs: Vec<TxInstance>,
     pub funding_tx: FundingTx,
 }

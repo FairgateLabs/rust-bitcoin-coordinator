@@ -2,10 +2,8 @@ use crate::{
     storage::{BitvmxStore, CompletedApi, FundingApi, InProgressApi, InstanceApi, PendingApi},
     types::{BitvmxInstance, FundingTx, InProgressTx, InstanceId},
 };
-use anyhow::{bail, Context, Ok, Result};
-use bitcoin::{
-    absolute::LockTime, transaction::Version, Amount, Network, ScriptBuf, Transaction, TxOut, Txid,
-};
+use anyhow::{Context, Ok, Result};
+use bitcoin::{Amount, Network, Transaction, TxOut, Txid};
 use bitcoincore_rpc::{Auth, Client};
 use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
@@ -47,9 +45,11 @@ impl Orchestrator {
 
         // For each pending pair
         for (instance_id, tx) in pending_txs {
-            //TODO: send should return the fee_remove_pending_instance_txrate was send the transaction.
-            //Dispatch transaction.
-            let _ = self.dispatcher.send(tx.clone())?;
+            //TODO: Dispatch transaction and retrieve the fee rate used for dispatching.
+            let _ = self
+                .dispatcher
+                .send(tx.clone())
+                .context("Error dispatching transaction")?;
 
             //TODO: This should be get from the send.
             let fee_rate = Amount::default();
@@ -92,10 +92,15 @@ impl Orchestrator {
         Ok((amount, new_funding_tx))
     }
 
-    fn notify_protocol_tx_changes(&self, instance: InstanceId, tx: &Txid) -> Result<()> {
+    fn notify_protocol_tx_changes(
+        &self,
+        instance: InstanceId,
+        tx: &Txid,
+        tx_hex: &str,
+    ) -> Result<()> {
         // Implement the notification logic here
         println!(
-            "Notifying protocol about changes in instance {:?}, tx: {}",
+            "Notification sent to protocol for instance_id: {:?}  tx_id: {}",
             instance, tx
         );
         Ok(())
@@ -116,52 +121,34 @@ impl Orchestrator {
     }
 
     fn process_instance_tx(&mut self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
-        // Get information for the last time the transaction was sent
-        let in_progress_tx = match self
-            .store
-            .get_in_progress_instance_tx(instance_id, &tx_id)?
-        {
-            Some(pending_tx) => pending_tx,
-            None => {
-                // Notify the protocol if no pending transaction is found
-                //TODO: first time we see the transaction we should save it.
-                //TODO: when txid was confirmed , we should notify to protocol.
-                self.notify_protocol_tx_changes(instance_id, &tx_id)?;
-                return Ok(());
-            }
-        };
-
         // Get the transaction status from the monitor
-        let tx_status = match self.monitor.get_instance_tx_status(instance_id, tx_id)? {
-            Some(tx_status) => tx_status,
-            None => bail!(
-                "No status for tx_id: {} , instance_id: {}",
+
+        let tx_status = self
+            .monitor
+            .get_instance_tx_status(instance_id, tx_id)?
+            .ok_or(anyhow::anyhow!(
+                "No transaction status found for transaction ID: {} and instance ID: {}",
                 tx_id,
                 instance_id
-            ),
-        };
+            ))?;
 
-        // Handle the transaction based on its status
-        self.handle_tx_status(instance_id, &in_progress_tx, &tx_status)?;
-
-        Ok(())
-    }
-
-    fn handle_tx_status(
-        &mut self,
-        instance_id: InstanceId,
-        in_progress_tx: &InProgressTx,
-        tx_status: &TxStatus,
-    ) -> Result<()> {
         if tx_status.tx_was_seen && tx_status.confirmations > Self::CONFIRMATIONS_THRESHOLD {
             // Transaction was mined and has sufficient confirmations
-            self.complete_transaction(instance_id, tx_status)?;
+            self.complete_transaction(instance_id, &tx_status)?;
             return Ok(());
         }
 
         if !tx_status.tx_was_seen {
-            // Transaction was not seen, consider speeding up
-            self.handle_unseen_transaction(instance_id, in_progress_tx)?;
+            // Get information for the last time the transaction was sent
+            let in_progress_tx = self
+                .store
+                .get_in_progress_instance_tx(instance_id, &tx_id)?;
+
+            if let Some(in_progress_tx) = in_progress_tx {
+                // The transaction is in progress for us, and was not seen yet in the chain.
+                // It means we have to resend or speed up the tx.
+                self.handle_unseen_transaction(instance_id, &in_progress_tx)?;
+            }
         }
 
         Ok(())
@@ -172,12 +159,19 @@ impl Orchestrator {
         instance_id: InstanceId,
         tx_status: &TxStatus,
     ) -> Result<()> {
+        // Notify the protocol about the transaction changes, specifically for confirmed transactions.
+        self.notify_protocol_tx_changes(
+            instance_id,
+            &tx_status.tx_id,
+            &tx_status.tx_hex.clone().unwrap(),
+        )?;
+
         self.store
             .add_completed_instance_tx(instance_id, &tx_status.tx_id)?;
         self.store
             .remove_in_progress_instance_tx(instance_id, &tx_status.tx_id)?;
         self.monitor
-            .acknowledge_instance_tx_news(instance_id, tx_status.tx_id)?;
+            .acknowledge_instance_tx_news(instance_id, &tx_status.tx_id)?;
         Ok(())
     }
 

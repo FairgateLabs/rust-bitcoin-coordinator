@@ -35,7 +35,7 @@ fn main() -> Result<()> {
     .context("Failed to create Orchestrator instance")?;
 
     loop {
-        orchestrator.tick().context("Failed to tick orchestrator")?;
+        orchestrator.tick().context("Failed tick orchestrator")?;
 
         sleep(std::time::Duration::from_secs(1000));
     }
