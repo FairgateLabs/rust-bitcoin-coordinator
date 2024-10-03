@@ -25,8 +25,8 @@ pub struct FundingTx {
 }
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TxInstance {
-    tx_id: Txid,
-    owner: bool,
+    pub tx_id: Txid,
+    pub owner: bool,
 }
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct BitvmxInstance {

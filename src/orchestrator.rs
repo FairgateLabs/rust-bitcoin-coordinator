@@ -7,7 +7,7 @@ use bitcoin::{Amount, Network, Transaction, TxOut, Txid};
 use bitcoincore_rpc::{Auth, Client};
 use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
-    types::{BlockHeight, TxStatus},
+    types::{BlockHeight, InstanceData, TxStatus},
 };
 use tracing::trace;
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Signer};
@@ -33,7 +33,7 @@ pub trait OrchestratorApi {
     where
         Self: Sized;
 
-    fn monitor_new_instance(&self, instance: BitvmxInstance) -> Result<()>;
+    fn monitor_new_instance(&self, instance: &BitvmxInstance) -> Result<()>;
 
     fn is_ready(&mut self) -> Result<bool>;
 
@@ -47,7 +47,7 @@ impl Orchestrator {
 
         // For each pending pair
         for (instance_id, tx) in pending_txs {
-            //TODO: Dispatch transaction and retrieve the fee rate used for dispatching.
+            //TODO:  Send should retrieve the fee rate used to be saved.
             let _ = self
                 .dispatcher
                 .send(tx.clone())
@@ -84,12 +84,14 @@ impl Orchestrator {
             .dispatcher
             .speed_up(tx, funding_txid, funding_utxo.clone())?;
 
-        //TODO: We are using the child id tx with the same outputs for the new funding tx
+        //TODO: Is this correct? We are using the child id tx with the same outputs for the new funding tx
         let new_funding_tx = FundingTx {
             tx_id: tx_id,
             utxo_index: funding_utxo.0,
             utxo_output: funding_utxo.1,
         };
+
+        // TODO: Consider saving the child transaction to the monitor for future accounting purposes
 
         Ok((amount, new_funding_tx))
     }
@@ -186,7 +188,7 @@ impl Orchestrator {
         let should_speed_up = self.dispatcher.should_speed_up(in_progress_tx.fee_rate)?;
 
         if should_speed_up {
-            //TODO: We are gonna have a funding transaction for each instance.
+            //We are gonna have a funding transaction for each Bitvmx instance.
             let funding_tx = self.store.get_funding_tx(instance_id)?;
 
             let funding_tx = match funding_tx {
@@ -274,10 +276,21 @@ impl OrchestratorApi for Orchestrator {
         Ok(())
     }
 
-    fn monitor_new_instance(&self, instance: BitvmxInstance) -> Result<()> {
+    fn monitor_new_instance(&self, instance: &BitvmxInstance) -> Result<()> {
         self.store.add_instance(&instance)?;
 
-        //TODO: we should tell the monitor in some way the new instances to track. or new txns.
+        let instance_new = InstanceData {
+            id: instance.instance_id,
+            txs: instance.txs.iter().map(|tx| tx.tx_id).collect(),
+        };
+
+        // When an instance is saved in the monitor for tracking,
+        // the current height of the indexer is used as the starting point for tracking.
+        // This is not currently configurable.
+        // It may change if we found a case where it should be configurable.
+        self.monitor
+            .save_instances_for_tracking(vec![instance_new])?;
+
         Ok(())
     }
 
