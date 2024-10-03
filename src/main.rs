@@ -35,9 +35,14 @@ fn main() -> Result<()> {
     .context("Failed to create Orchestrator instance")?;
 
     loop {
-        orchestrator.tick().context("Failed tick orchestrator")?;
+        if orchestrator.is_ready()? {
+            // Since the orchestrator is ready, indicating it's caught up with the blockchain, we can afford to wait for a minute
+            //TODO: this may change for sure.
+            std::time::Duration::from_secs(60);
+        }
 
-        sleep(std::time::Duration::from_secs(1000));
+        // If the orchestrator is not ready, it may require multiple ticks to become ready. No need to wait.
+        orchestrator.tick().context("Failed tick orchestrator")?;
     }
 
     Ok(())

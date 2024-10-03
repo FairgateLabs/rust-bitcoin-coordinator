@@ -35,6 +35,8 @@ pub trait OrchestratorApi {
 
     fn monitor_new_instance(&self, instance: BitvmxInstance) -> Result<()>;
 
+    fn is_ready(&mut self) -> Result<bool>;
+
     fn tick(&mut self) -> Result<()>;
 }
 
@@ -241,15 +243,14 @@ impl OrchestratorApi for Orchestrator {
     }
 
     fn tick(&mut self) -> Result<()> {
-        //TODO: This could be improved in the future.
-        // The monitor detects instance transactions until it is ready.
-        // The detect_instances method synchronizes the indexer at current height.
-        // This is why we iterate until syn to the top.
-        // ALERT: This could take a long time if the number of blocks is large
-        while !self.monitor.is_ready()? {
+        // The monitor is considered ready when it has fully indexed the blockchain and is up to date with the latest block.
+        // Note that if there is a significant gap in the indexing process, it may take multiple ticks for the monitor to become ready.
+        if !self.monitor.is_ready()? {
             self.monitor
                 .detect_instances()
                 .context("Error detecting instances")?;
+
+            return Ok(());
         }
 
         // Send pending transactions that were queued.
@@ -278,5 +279,11 @@ impl OrchestratorApi for Orchestrator {
 
         //TODO: we should tell the monitor in some way the new instances to track. or new txns.
         Ok(())
+    }
+
+    fn is_ready(&mut self) -> Result<bool> {
+        //TODO: The orchestrator is currently considered ready when the monitor is ready.
+        // However, we may decide to take into consideration the pending and in progress transactions in the future.
+        self.monitor.is_ready()
     }
 }
