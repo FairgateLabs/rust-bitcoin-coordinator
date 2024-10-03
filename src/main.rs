@@ -1,12 +1,10 @@
-use std::{str::FromStr, thread::sleep};
-
 use anyhow::{Context, Ok, Result};
-
 use bitcoin::Network;
 use bitvmx_unstable::{
     config::Config,
     orchestrator::{Orchestrator, OrchestratorApi},
 };
+use std::str::FromStr;
 use tracing::Level;
 
 fn main() -> Result<()> {
@@ -38,7 +36,7 @@ fn main() -> Result<()> {
         if orchestrator.is_ready()? {
             // Since the orchestrator is ready, indicating it's caught up with the blockchain, we can afford to wait for a minute
             //TODO: this may change for sure.
-            std::time::Duration::from_secs(60);
+            std::thread::sleep(std::time::Duration::from_secs(60));
         }
 
         // If the orchestrator is not ready, it may require multiple ticks to become ready. No need to wait.

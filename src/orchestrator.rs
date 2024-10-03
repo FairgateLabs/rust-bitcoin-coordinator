@@ -76,6 +76,7 @@ impl Orchestrator {
 
     fn speed_up(
         &mut self,
+        instance_id: InstanceId,
         tx: &Transaction,
         funding_txid: Txid,
         funding_utxo: (u32, TxOut),
@@ -91,7 +92,10 @@ impl Orchestrator {
             utxo_output: funding_utxo.1,
         };
 
-        // TODO: Consider saving the child transaction to the monitor for future accounting purposes
+        // TODO: Saving the child transaction to the monitor for future accounting purposes,
+        // we should save owner true otherwise it can be confuse with txs from the protocol are not owers
+        self.monitor
+            .save_transaction_for_tracking(instance_id, tx_id)?;
 
         Ok((amount, new_funding_tx))
     }
@@ -197,6 +201,7 @@ impl Orchestrator {
             };
 
             let (fee_rate, new_funding) = self.speed_up(
+                instance_id,
                 &in_progress_tx.tx,
                 funding_tx.tx_id,
                 (funding_tx.utxo_index, funding_tx.utxo_output),
