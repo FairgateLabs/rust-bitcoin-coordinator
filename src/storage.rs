@@ -70,7 +70,7 @@ pub trait FundingApi {
 
 impl BitvmxStore {
     pub fn new_with_path(store_path: &str) -> Result<Self> {
-        let store = Storage::new_with_path(&PathBuf::from(format!("{}", store_path)))
+        let store = Storage::new_with_path(&PathBuf::from(store_path.to_string()))
             .context("There is an error creating storage in BitvmxStore")?;
         Ok(Self { store })
     }

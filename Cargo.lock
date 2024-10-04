@@ -367,6 +367,7 @@ dependencies = [
  "chrono",
  "config",
  "console",
+ "ctrlc",
  "rand",
  "rust-bitvmx-storage-backend 0.1.0",
  "serde",

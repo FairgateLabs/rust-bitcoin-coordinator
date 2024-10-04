@@ -5,9 +5,15 @@ use bitvmx_unstable::{
     orchestrator::{Orchestrator, OrchestratorApi},
 };
 use std::str::FromStr;
-use tracing::Level;
+use std::sync::mpsc::channel;
+use tracing::{info, Level};
 
 fn main() -> Result<()> {
+    let (tx, rx) = channel();
+
+    ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
+        .expect("Error setting Ctrl-C handler");
+
     tracing_subscriber::fmt()
         .without_time()
         // .with_target(false)
@@ -33,6 +39,11 @@ fn main() -> Result<()> {
     .context("Failed to create Orchestrator instance")?;
 
     loop {
+        if rx.try_recv().is_ok() {
+            info!("Stop Bitvmx");
+            break;
+        }
+
         if orchestrator.is_ready()? {
             // Since the orchestrator is ready, indicating it's caught up with the blockchain, we can afford to wait for a minute
             //TODO: this may change for sure.

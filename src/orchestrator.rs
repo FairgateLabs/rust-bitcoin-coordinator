@@ -87,7 +87,7 @@ impl Orchestrator {
 
         //TODO: Is this correct? We are using the child id tx with the same outputs for the new funding tx
         let new_funding_tx = FundingTx {
-            tx_id: tx_id,
+            tx_id,
             utxo_index: funding_utxo.0,
             utxo_output: funding_utxo.1,
         };
@@ -108,8 +108,8 @@ impl Orchestrator {
     ) -> Result<()> {
         // Implement the notification logic here
         println!(
-            "Notification sent to protocol for instance_id: {:?}  tx_id: {}",
-            instance, tx
+            "Notification sent to protocol for instance_id: {:?}  tx_id: {} tx_hex {}",
+            instance, tx, tx_hex
         );
         Ok(())
     }
@@ -282,7 +282,7 @@ impl OrchestratorApi for Orchestrator {
     }
 
     fn monitor_new_instance(&self, instance: &BitvmxInstance) -> Result<()> {
-        self.store.add_instance(&instance)?;
+        self.store.add_instance(instance)?;
 
         let instance_new = InstanceData {
             id: instance.instance_id,
