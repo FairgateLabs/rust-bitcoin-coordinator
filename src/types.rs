@@ -2,24 +2,39 @@ use bitcoin::{Amount, Transaction, TxOut, Txid};
 use bitvmx_transaction_monitor::types::BlockHeight;
 use serde::{Deserialize, Serialize};
 
-pub type InstanceId = u32;
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct InProgressTx {
-    pub tx: Transaction,
-
-    //Fee rate was used to send the transacion
+pub struct DeliverData {
+    // Fee rate was used to send the transacion
     pub fee_rate: Amount,
 
     // Block height when transaction was sent
     pub block_height: BlockHeight,
+}
 
-    // If transaction was speed up then we save that information
-    pub was_speed_up: bool,
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct InProgressSpeedUpTx {
+    // Information about dispatch tx
+    pub deliver_data: DeliverData,
+
+    pub child_tx_id: Txid,
+}
+
+pub type InstanceId = u32;
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct InProgressTx {
+    // main transaction
+    pub tx_id: Transaction,
+
+    // Information about send tx
+    pub deliver_data: DeliverData,
+
+    // Stores information about the transaction child to speed up the main txs.
+    pub speed_up_txs: Vec<InProgressSpeedUpTx>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct FundingTx {
-    pub tx_id: Txid,
+    pub child_tx_id: Txid,
     pub utxo_index: u32,
     pub utxo_output: TxOut,
 }

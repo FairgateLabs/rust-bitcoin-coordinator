@@ -88,7 +88,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     //Add the instance again :
     bitvmx_store.add_in_progress_instance_tx(1, &tx, Amount::default(), 2)?;
 
-    let _ = bitvmx_store.update_in_progress_instance_tx(
+    let _ = bitvmx_store.update_in_progress_instance_tx_speed_up(
         1,
         &tx.compute_txid(),
         Amount::from_sat(1000),
@@ -96,7 +96,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     )?;
 
     let check_instance = InProgressTx {
-        tx: tx.clone(),
+        tx_id: tx.clone(),
         fee_rate: Amount::from_sat(1000),
         block_height: 10,
         was_speed_up: true,

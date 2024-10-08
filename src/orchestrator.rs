@@ -87,7 +87,7 @@ impl Orchestrator {
 
         //TODO: Is this correct? We are using the child id tx with the same outputs for the new funding tx
         let new_funding_tx = FundingTx {
-            tx_id,
+            child_tx_id: tx_id,
             utxo_index: funding_utxo.0,
             utxo_output: funding_utxo.1,
         };
@@ -116,6 +116,8 @@ impl Orchestrator {
 
     fn resolve_in_progress_instances_txs(&mut self) -> Result<()> {
         // Get any news in each instance that are being monitored
+        // TODO: Monitor need to implement reorganizacions in news. at this moment Monitor
+        // is not updating every instance update after a reorg.
         let news = self.monitor.get_instance_news()?;
 
         for (instance_id, tx_ids) in news {
@@ -188,35 +190,86 @@ impl Orchestrator {
         instance_id: InstanceId,
         in_progress_tx: &InProgressTx,
     ) -> Result<()> {
+        let has_a_pending_speed_up = !in_progress_tx.speed_up_txs.is_empty();
+
+        let old_fee_rate = if has_a_pending_speed_up {
+            in_progress_tx
+                .speed_up_txs
+                .last()
+                .unwrap()
+                .deliver_data
+                .fee_rate
+        } else {
+            in_progress_tx.deliver_data.fee_rate
+        };
+
         // Check if the transaction should be speed up
-        let should_speed_up = self.dispatcher.should_speed_up(in_progress_tx.fee_rate)?;
+        let should_speed_up = self.dispatcher.should_speed_up(old_fee_rate)?;
 
-        if should_speed_up {
-            //We are gonna have a funding transaction for each Bitvmx instance.
-            let funding_tx = self.store.get_funding_tx(instance_id)?;
+        if !should_speed_up {
+            return Ok(());
+        }
 
-            let funding_tx = match funding_tx {
-                Some(funding_tx) => funding_tx,
-                None => panic!("No funding transaction available for speed up"),
-            };
+        //TODO: Detect every change in speed up transaction to identify which is the funding transaction.
 
-            let (fee_rate, new_funding) = self.speed_up(
+        //We are gonna have a funding transaction for each Bitvmx instance.
+        let funding_tx = self
+            .store
+            .get_funding_tx(instance_id)?
+            .ok_or(anyhow::anyhow!(
+                "No funding transaction available for speed up"
+            ))?;
+
+        let (fee_rate, new_funding) = self.speed_up(
+            instance_id,
+            &in_progress_tx.tx_id,
+            funding_tx.child_tx_id,
+            (funding_tx.utxo_index, funding_tx.utxo_output),
+        )?;
+
+        //CONSIDERATION: The speed up transaction was not added to the queue of in-progress transactions.
+        //It will be added to the monitor for future reference.
+
+        if has_a_pending_speed_up {
+            // Update the current speed-up transaction:
+            // This involves:
+            // 1) Removing the speed-up transaction from the monitor.
+            // 2) Adding the new speed-up transaction to the monitor.
+            // 3) Updating the funding transaction.
+            // 4) Updating the in-progress transaction with the new speed-up.
+
+            self.monitor
+                .save_transaction_for_tracking(instance_id, new_funding.child_tx_id)?;
+
+            self.store.replace_funding_tx(instance_id, &new_funding)?;
+
+            self.store.update_in_progress_instance_tx_speed_up(
                 instance_id,
-                &in_progress_tx.tx,
-                funding_tx.tx_id,
-                (funding_tx.utxo_index, funding_tx.utxo_output),
-            )?;
-
-            // Update the store with new transaction details
-            self.store.update_in_progress_instance_tx(
-                instance_id,
-                &in_progress_tx.tx.compute_txid(),
+                &new_funding.child_tx_id,
                 fee_rate,
                 self.current_height,
             )?;
 
-            // Add the new funding transaction to the store
-            self.store.add_funding_tx(instance_id, &new_funding)?;
+            //TODO: We have a border case here. We are speeding up a transaction again, there is already a speed up child tx
+            // in the mempool which could be included in the ledger and compete with this new one, that means that the new child is not gonna be
+            // included and for that reason we will fail in the future funding tx. (child tx_id is the new funding tx_id)
+        } else {
+            // Adding a new speed-up transaction involves:
+            // 1) Registering the speed-up transaction for monitoring.
+            // 2) Replacing the existing funding transaction.
+            // 3) Updating the in-progress transaction with the new speed-up details.
+
+            self.monitor
+                .save_transaction_for_tracking(instance_id, new_funding.child_tx_id)?;
+
+            self.store.replace_funding_tx(instance_id, &new_funding)?;
+
+            self.store.update_in_progress_instance_tx_speed_up(
+                instance_id,
+                &new_funding.child_tx_id,
+                fee_rate,
+                self.current_height,
+            )?;
         }
 
         Ok(())
@@ -301,7 +354,7 @@ impl OrchestratorApi for Orchestrator {
 
     fn is_ready(&mut self) -> Result<bool> {
         //TODO: The orchestrator is currently considered ready when the monitor is ready.
-        // However, we may decide to take into consideration the pending and in progress transactions in the future.
+        // However, we may decide to take into consideration pending and in progress transactions in the future.
         self.monitor.is_ready()
     }
 }

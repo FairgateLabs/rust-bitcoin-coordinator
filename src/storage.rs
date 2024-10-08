@@ -1,4 +1,6 @@
-use crate::types::{BitvmxInstance, FundingTx, InProgressTx, InstanceId};
+use crate::types::{
+    BitvmxInstance, DeliverData, FundingTx, InProgressSpeedUpTx, InProgressTx, InstanceId,
+};
 use anyhow::{bail, Context, Ok, Result};
 use bitcoin::{Amount, Transaction, Txid};
 use bitvmx_transaction_monitor::types::BlockHeight;
@@ -49,7 +51,7 @@ pub trait InProgressApi {
         fee_rate: Amount,
         block_height: BlockHeight,
     ) -> Result<()>;
-    fn update_in_progress_instance_tx(
+    fn update_in_progress_instance_tx_speed_up(
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
@@ -65,7 +67,7 @@ pub trait CompletedApi {
 }
 pub trait FundingApi {
     fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>>;
-    fn add_funding_tx(&self, instance_id: InstanceId, tx: &FundingTx) -> Result<()>;
+    fn replace_funding_tx(&self, instance_id: InstanceId, tx: &FundingTx) -> Result<()>;
 }
 
 impl BitvmxStore {
@@ -193,11 +195,12 @@ impl InProgressApi for BitvmxStore {
         block_height: BlockHeight,
     ) -> Result<()> {
         let in_progress_tx = InProgressTx {
-            tx: tx.clone(),
-            fee_rate,
-            block_height,
-            // First time is add the transaction should not be speed up
-            was_speed_up: false,
+            tx_id: tx.clone(),
+            deliver_data: DeliverData {
+                fee_rate,
+                block_height,
+            },
+            speed_up_txs: vec![],
         };
         let tx_id = tx.compute_txid();
         let pending_tx_key = self.get_key(StoreKey::InProgressInstanceTx(instance_id, &tx_id));
@@ -214,21 +217,31 @@ impl InProgressApi for BitvmxStore {
         Ok(())
     }
 
-    fn update_in_progress_instance_tx(
+    fn update_in_progress_instance_tx_speed_up(
         &self,
         instance_id: InstanceId,
-        tx_id: &Txid,
+        child_tx_id: &Txid,
         fee_rate: Amount,
         block_height: BlockHeight,
     ) -> Result<()> {
-        let pending_tx_key = self.get_key(StoreKey::InProgressInstanceTx(instance_id, tx_id));
+        let pending_tx_key = self.get_key(StoreKey::InProgressInstanceTx(instance_id, child_tx_id));
 
         if let Some(mut pending_tx) = self.store.get::<_, InProgressTx>(&pending_tx_key)? {
-            pending_tx.fee_rate = fee_rate;
-            pending_tx.block_height = block_height;
-
             // Every time we want to update an instance in progress means the transaction was speed up.
-            pending_tx.was_speed_up = true;
+
+            // Check if speed_up_txs is empty and initialize it if so
+            if pending_tx.speed_up_txs.is_empty() {
+                pending_tx.speed_up_txs = Vec::new();
+            }
+
+            // Push the new InProgressSpeedUpTx to the speed_up_txs vector
+            pending_tx.speed_up_txs.push(InProgressSpeedUpTx {
+                deliver_data: DeliverData {
+                    fee_rate,
+                    block_height,
+                },
+                child_tx_id: *child_tx_id,
+            });
 
             self.store
                 .set(&pending_tx_key, &pending_tx)
@@ -342,7 +355,7 @@ impl FundingApi for BitvmxStore {
             .context("Failed to retrieve funding transaction")
     }
 
-    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<()> {
+    fn replace_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<()> {
         let funding_tx_key = self.get_key(StoreKey::FundingInstance(instance_id));
 
         self.store
