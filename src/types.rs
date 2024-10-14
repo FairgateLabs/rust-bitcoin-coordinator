@@ -11,37 +11,29 @@ pub struct DeliverData {
     pub block_height: BlockHeight,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct InProgressSpeedUpTx {
-    // Information about dispatch tx
-    pub deliver_data: DeliverData,
-
-    pub child_tx_id: Txid,
-}
-
 pub type InstanceId = u32;
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct InProgressTx {
-    // main transaction
-    pub tx_id: Transaction,
-
-    // Information about send tx
-    pub deliver_data: DeliverData,
-
-    // Stores information about the transaction child to speed up the main txs.
-    pub speed_up_txs: Vec<InProgressSpeedUpTx>,
-}
-
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct FundingTx {
+    pub tx_id: Txid,
+    pub utxo_index: u32,
+    pub utxo_output: TxOut,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct SpeedUpData {
+    pub is_speed_up_tx: bool,
     pub child_tx_id: Txid,
     pub utxo_index: u32,
     pub utxo_output: TxOut,
 }
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TxInstance {
+    // Transaction object could be or not. As an example. Speed ups transaction are not necessary to save.
+    pub tx: Option<Transaction>,
     pub tx_id: Txid,
-    pub owner: bool,
+    pub owner_operator_id: u32,
+    pub deliver_data: Option<DeliverData>,
+    pub speed_up_data: Option<SpeedUpData>,
 }
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct BitvmxInstance {
