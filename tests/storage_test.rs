@@ -1,11 +1,9 @@
 use std::str::FromStr;
 
-use bitcoin::{
-    absolute::LockTime, blockdata::fee_rate, Amount, ScriptBuf, Transaction, TxOut, Txid,
-};
+use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
 use bitvmx_unstable::{
     storage::{BitvmxStore, InProgressApi, InstanceApi},
-    types::{BitvmxInstance, DeliverData, FundingTx, TxInstance},
+    types::{BitvmxInstance, DeliverData, FundingTx, TransactionInstance},
 };
 
 #[test]
@@ -19,7 +17,7 @@ fn instances_store() -> Result<(), anyhow::Error> {
 
     let bitvmx_store = BitvmxStore::new_with_path("test_output/test1")?;
 
-    let tx1 = TxInstance {
+    let tx1 = TransactionInstance {
         tx: None,
         tx_id: tx_id,
         owner_operator_id: 1,
@@ -27,7 +25,7 @@ fn instances_store() -> Result<(), anyhow::Error> {
         speed_up_data: None,
     };
 
-    let tx2 = TxInstance {
+    let tx2 = TransactionInstance {
         tx: None,
         tx_id: tx_id_2,
         owner_operator_id: 2,
@@ -35,7 +33,7 @@ fn instances_store() -> Result<(), anyhow::Error> {
         speed_up_data: None,
     };
 
-    let instance = BitvmxInstance {
+    let instance = BitvmxInstance::<TransactionInstance> {
         instance_id: 1,
         txs: vec![tx1, tx2],
         funding_tx: FundingTx {
@@ -94,7 +92,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
 
     let tx_id_2 = tx_2.compute_txid();
 
-    let tx_instance_1 = TxInstance {
+    let tx_instance_1 = TransactionInstance {
         tx: Some(tx_1.clone()),
         tx_id: tx_id_1,
         owner_operator_id: 0,
@@ -102,7 +100,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
         speed_up_data: None,
     };
 
-    let tx_instance_2 = TxInstance {
+    let tx_instance_2 = TransactionInstance {
         tx: Some(tx_2),
         tx_id: tx_id_2,
         owner_operator_id: 0,
@@ -113,7 +111,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     let block_height = 2;
     let fee_rate = Amount::from_sat(1000);
 
-    let instance = BitvmxInstance {
+    let instance = BitvmxInstance::<TransactionInstance> {
         instance_id: 1,
         txs: vec![tx_instance_1, tx_instance_2],
         funding_tx: FundingTx {
@@ -155,7 +153,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
 
     bitvmx_store.add_in_progress_instance_tx(1, &tx_id_1, fee_rate, block_height)?;
 
-    let check_instance = TxInstance {
+    let check_instance = TransactionInstance {
         tx: Some(tx_1.clone()),
         tx_id: tx_id_1,
         owner_operator_id: 0,

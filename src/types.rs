@@ -27,17 +27,24 @@ pub struct SpeedUpData {
     pub utxo_output: TxOut,
 }
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct TxInstance {
-    // Transaction object could be or not. As an example. Speed ups transaction are not necessary to save.
+pub struct TransactionInstance {
+    // Transaction will be added when is send.
     pub tx: Option<Transaction>,
     pub tx_id: Txid,
     pub owner_operator_id: u32,
     pub deliver_data: Option<DeliverData>,
     pub speed_up_data: Option<SpeedUpData>,
 }
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct BitvmxInstance {
+pub struct TransactionInstanceSummary {
+    pub tx_id: Txid,
+    pub owner_operator_id: u32,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct BitvmxInstance<T> {
     pub instance_id: InstanceId,
-    pub txs: Vec<TxInstance>,
+    pub txs: Vec<T>,
     pub funding_tx: FundingTx,
 }

@@ -2,7 +2,10 @@ use crate::{
     storage::{
         BitvmxStore, CompletedApi, FundingApi, InProgressApi, InstanceApi, PendingApi, SpeedUpApi,
     },
-    types::{BitvmxInstance, DeliverData, FundingTx, InstanceId, SpeedUpData, TxInstance},
+    types::{
+        BitvmxInstance, DeliverData, FundingTx, InstanceId, SpeedUpData, TransactionInstance,
+        TransactionInstanceSummary,
+    },
 };
 use anyhow::{Context, Ok, Result};
 use bitcoin::{Amount, Network, Transaction, TxOut, Txid};
@@ -37,12 +40,16 @@ pub trait OrchestratorApi {
     where
         Self: Sized;
 
-    fn monitor_new_instance(&self, instance: &BitvmxInstance) -> Result<()>;
+    fn monitor_new_instance(
+        &self,
+        instance: &BitvmxInstance<TransactionInstanceSummary>,
+    ) -> Result<()>;
 
     // Add a non-existent transaction for an existing instance.
-    fn add_tx_to_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
+    fn add_tx_to_instance(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
 
-    // The way that the protocol ask to deliver a existing tx for a instance id.
+    // The way that the protocol ask to deliver a existing tx id for a instance id.
+    // Is passing the full transaction
     fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
 
     fn is_ready(&mut self) -> Result<bool>;
@@ -94,10 +101,10 @@ impl Orchestrator {
             self.dispatcher
                 .speed_up(tx, funding_txid, funding_utxo.clone())?;
 
-        let speed_up_tx = TxInstance {
+        let speed_up_tx = TransactionInstance {
             tx: None, // We don't have speed up transaction yet.
             tx_id: speed_up_tx_id,
-            owner_operator_id: instance_id,
+            owner_operator_id: Self::OPERATOR_ID,
             deliver_data: Some(DeliverData {
                 fee_rate: amount,
                 block_height: self.current_height,
@@ -110,10 +117,7 @@ impl Orchestrator {
             }),
         };
 
-        self.store.add_instance_tx(instance_id, &speed_up_tx)?;
-
-        self.store
-            .add_speed_up_tx(instance_id, &speed_up_tx_id, speed_up_tx_id)?;
+        self.store.add_speed_up_tx(instance_id, &speed_up_tx)?;
 
         //TODO: should we save owner true otherwise it can be confuse with txs from the protocol are not owers  ?
         self.monitor
@@ -266,7 +270,7 @@ impl Orchestrator {
     fn handle_unseen_transaction(
         &mut self,
         instance_id: InstanceId,
-        tx_data: &TxInstance,
+        tx_data: &TransactionInstance,
     ) -> Result<()> {
         if tx_data.speed_up_data.is_some() {
             // If it is a speed up transaction then we don't need to do anything, it is not mined.
@@ -383,8 +387,29 @@ impl OrchestratorApi for Orchestrator {
         Ok(())
     }
 
-    fn monitor_new_instance(&self, instance: &BitvmxInstance) -> Result<()> {
-        self.store.add_instance(instance)?;
+    fn monitor_new_instance(
+        &self,
+        instance: &BitvmxInstance<TransactionInstanceSummary>,
+    ) -> Result<()> {
+        // Construct a new BitvmxInstance with detailed transaction information.
+        let full_instance = BitvmxInstance::<TransactionInstance> {
+            instance_id: instance.instance_id,
+            txs: instance
+                .txs
+                .iter()
+                .map(|tx| TransactionInstance {
+                    tx_id: tx.tx_id,
+                    owner_operator_id: tx.owner_operator_id,
+                    deliver_data: None,
+                    speed_up_data: None,
+                    tx: None,
+                })
+                .collect(),
+            // Clone the funding transaction from the instance to associate it with the full instance.
+            funding_tx: instance.funding_tx.clone(),
+        };
+
+        self.store.add_instance(&full_instance)?;
 
         let instance_new = InstanceData {
             id: instance.instance_id,
@@ -407,30 +432,26 @@ impl OrchestratorApi for Orchestrator {
         self.monitor.is_ready()
     }
 
-    //TODO: Send a transaction for an instance. Protocol should
     fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()> {
-        let exists = self.store.tx_exists(instance_id, &tx.compute_txid())?;
+        // This section of code is responsible for adding a transaction to an instance and marking it as pending.
+        // First, it adds the transaction to the instance using `add_tx_to_instance`. This method updates the instance
+        // to include the new transaction, ensuring it is associated with the correct instance.
 
-        if exists {
-            self.store
-                .add_pending_instance_tx(instance_id, &tx.clone())?;
-        } else {
-            return Err(anyhow::anyhow!(
-                "Transaction with ID {} for instance {} does not exist",
-                tx.compute_txid(),
-                instance_id
-            ));
-        }
+        self.store.add_tx_to_instance(instance_id, &tx)?;
+
+        // Next, it marks the transaction as pending using `add_pending_instance_tx`. This method updates the storage
+        // to indicate that the transaction is currently pending and needs to be processed.
+
+        self.store
+            .add_pending_instance_tx(instance_id, &tx.clone())?;
 
         Ok(())
     }
 
-    fn add_tx_to_instance(&self, _instance_id: InstanceId, _tx: &Transaction) -> Result<()> {
+    fn add_tx_to_instance(&self, _instance_id: InstanceId, _tx: &Txid) -> Result<()> {
         // Add a non-existent transaction to an existing instance.
-
         // The instance should exist in the storage.
         // The transaction id should not exist in the storage.
-
         // Usage: This method will likely be used for the final transaction to withdraw the funds.
         Ok(())
     }
