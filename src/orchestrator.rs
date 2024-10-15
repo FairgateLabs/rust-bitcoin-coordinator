@@ -110,7 +110,6 @@ impl Orchestrator {
                 block_height: self.current_height,
             }),
             speed_up_data: Some(SpeedUpData {
-                is_speed_up_tx: true,
                 child_tx_id: tx.compute_txid(),
                 utxo_index: funding_utxo.0,
                 utxo_output: funding_utxo.1,
@@ -391,25 +390,7 @@ impl OrchestratorApi for Orchestrator {
         &self,
         instance: &BitvmxInstance<TransactionInstanceSummary>,
     ) -> Result<()> {
-        // Construct a new BitvmxInstance with detailed transaction information.
-        let full_instance = BitvmxInstance::<TransactionInstance> {
-            instance_id: instance.instance_id,
-            txs: instance
-                .txs
-                .iter()
-                .map(|tx| TransactionInstance {
-                    tx_id: tx.tx_id,
-                    owner_operator_id: tx.owner_operator_id,
-                    deliver_data: None,
-                    speed_up_data: None,
-                    tx: None,
-                })
-                .collect(),
-            // Clone the funding transaction from the instance to associate it with the full instance.
-            funding_tx: instance.funding_tx.clone(),
-        };
-
-        self.store.add_instance(&full_instance)?;
+        self.store.add_instance(&instance)?;
 
         let instance_new = InstanceData {
             id: instance.instance_id,

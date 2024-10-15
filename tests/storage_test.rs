@@ -2,8 +2,11 @@ use std::str::FromStr;
 
 use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
 use bitvmx_unstable::{
-    storage::{BitvmxStore, InProgressApi, InstanceApi},
-    types::{BitvmxInstance, DeliverData, FundingTx, TransactionInstance},
+    storage::{BitvmxStore, InProgressApi, InstanceApi, SpeedUpApi},
+    types::{
+        BitvmxInstance, DeliverData, FundingTx, SpeedUpData, TransactionInstance,
+        TransactionInstanceSummary,
+    },
 };
 
 #[test]
@@ -17,25 +20,19 @@ fn instances_store() -> Result<(), anyhow::Error> {
 
     let bitvmx_store = BitvmxStore::new_with_path("test_output/test1")?;
 
-    let tx1 = TransactionInstance {
-        tx: None,
+    let tx1_summary = TransactionInstanceSummary {
         tx_id: tx_id,
         owner_operator_id: 1,
-        deliver_data: None,
-        speed_up_data: None,
     };
 
-    let tx2 = TransactionInstance {
-        tx: None,
+    let tx2_summary = TransactionInstanceSummary {
         tx_id: tx_id_2,
         owner_operator_id: 2,
-        deliver_data: None,
-        speed_up_data: None,
     };
 
-    let instance = BitvmxInstance::<TransactionInstance> {
+    let instance = BitvmxInstance::<TransactionInstanceSummary> {
         instance_id: 1,
-        txs: vec![tx1, tx2],
+        txs: vec![tx1_summary, tx2_summary],
         funding_tx: FundingTx {
             tx_id,
             utxo_index: 1,
@@ -92,28 +89,22 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
 
     let tx_id_2 = tx_2.compute_txid();
 
-    let tx_instance_1 = TransactionInstance {
-        tx: Some(tx_1.clone()),
+    let tx_instance_summary_1 = TransactionInstanceSummary {
         tx_id: tx_id_1,
         owner_operator_id: 0,
-        deliver_data: None,
-        speed_up_data: None,
     };
 
-    let tx_instance_2 = TransactionInstance {
-        tx: Some(tx_2),
+    let tx_instance_summary_2 = TransactionInstanceSummary {
         tx_id: tx_id_2,
         owner_operator_id: 0,
-        deliver_data: None,
-        speed_up_data: None,
     };
 
     let block_height = 2;
     let fee_rate = Amount::from_sat(1000);
 
-    let instance = BitvmxInstance::<TransactionInstance> {
+    let instance = BitvmxInstance::<TransactionInstanceSummary> {
         instance_id: 1,
-        txs: vec![tx_instance_1, tx_instance_2],
+        txs: vec![tx_instance_summary_1, tx_instance_summary_2],
         funding_tx: FundingTx {
             tx_id: tx_id_1,
             utxo_index: 1,
@@ -166,6 +157,81 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
 
     let instance = bitvmx_store.get_in_progress_txs(1, &tx_id_1)?;
     assert_eq!(instance.unwrap(), check_instance);
+
+    Ok(())
+}
+
+#[test]
+fn speed_up_txs_test() -> Result<(), anyhow::Error> {
+    let bitvmx_store = BitvmxStore::new_with_path("test_output/speed_up_txs_test")?;
+
+    let tx_1 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id_1 = tx_1.compute_txid();
+
+    let speed_up_tx = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195601).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let speed_up_tx_id = speed_up_tx.compute_txid();
+
+    let block_height = 2;
+    let fee_rate = Amount::from_sat(1000);
+    let operator_id = 1;
+    let instance_id = 1;
+
+    let speed_up_instance_data = TransactionInstance {
+        tx: None, // Given this is a speed up, we are not gonna save speed up tx, just the id
+        tx_id: speed_up_tx_id, // Speed up tx
+        owner_operator_id: operator_id,
+        deliver_data: Some(DeliverData {
+            fee_rate,
+            block_height,
+        }),
+        speed_up_data: Some(SpeedUpData {
+            child_tx_id: tx_id_1,
+            utxo_index: 1,
+            utxo_output: TxOut {
+                value: Amount::default(),
+                script_pubkey: ScriptBuf::default(),
+            },
+        }),
+    };
+
+    let tx_instance_summary_1 = TransactionInstanceSummary {
+        tx_id: tx_id_1,
+        owner_operator_id: operator_id,
+    };
+
+    let instance = BitvmxInstance::<TransactionInstanceSummary> {
+        instance_id,
+        txs: vec![tx_instance_summary_1],
+        funding_tx: FundingTx {
+            tx_id: tx_id_1,
+            utxo_index: 1,
+            utxo_output: TxOut {
+                value: Amount::default(),
+                script_pubkey: ScriptBuf::default(),
+            },
+        },
+    };
+
+    // Move instances to in progress.
+
+    bitvmx_store.add_instance(&instance)?;
+    bitvmx_store.add_speed_up_tx(instance_id, &speed_up_instance_data)?;
+    let txs_instance_1 = bitvmx_store.get_speed_up_txs(instance_id, tx_id_1)?;
+
+    assert!(!txs_instance_1.is_empty());
+    assert_eq!(txs_instance_1, vec![speed_up_instance_data]);
 
     Ok(())
 }

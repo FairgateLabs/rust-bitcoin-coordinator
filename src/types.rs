@@ -21,7 +21,6 @@ pub struct FundingTx {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct SpeedUpData {
-    pub is_speed_up_tx: bool,
     pub child_tx_id: Txid,
     pub utxo_index: u32,
     pub utxo_output: TxOut,
