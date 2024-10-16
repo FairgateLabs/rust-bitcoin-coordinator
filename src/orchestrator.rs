@@ -3,8 +3,8 @@ use crate::{
         BitvmxStore, CompletedApi, FundingApi, InProgressApi, InstanceApi, PendingApi, SpeedUpApi,
     },
     types::{
-        BitvmxInstance, DeliverData, FundingTx, InstanceId, SpeedUpData, TransactionInstance,
-        TransactionInstanceSummary,
+        BitvmxInstance, DeliverData, FundingTx, InstanceId, SpeedUpTx, TransactionInfo,
+        TransactionInfoSummary,
     },
 };
 use anyhow::{Context, Ok, Result};
@@ -40,10 +40,8 @@ pub trait OrchestratorApi {
     where
         Self: Sized;
 
-    fn monitor_new_instance(
-        &self,
-        instance: &BitvmxInstance<TransactionInstanceSummary>,
-    ) -> Result<()>;
+    fn monitor_new_instance(&self, instance: &BitvmxInstance<TransactionInfoSummary>)
+        -> Result<()>;
 
     // Add a non-existent transaction for an existing instance.
     fn add_tx_to_instance(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
@@ -101,19 +99,15 @@ impl Orchestrator {
             self.dispatcher
                 .speed_up(tx, funding_txid, funding_utxo.clone())?;
 
-        let speed_up_tx = TransactionInstance {
-            tx: None, // We don't have speed up transaction yet.
+        let speed_up_tx = SpeedUpTx {
             tx_id: speed_up_tx_id,
-            owner_operator_id: Self::OPERATOR_ID,
-            deliver_data: Some(DeliverData {
+            deliver_data: DeliverData {
                 fee_rate: amount,
                 block_height: self.current_height,
-            }),
-            speed_up_data: Some(SpeedUpData {
-                child_tx_id: tx.compute_txid(),
-                utxo_index: funding_utxo.0,
-                utxo_output: funding_utxo.1,
-            }),
+            },
+            child_tx_id: tx.compute_txid(),
+            utxo_index: funding_utxo.0,
+            utxo_output: funding_utxo.1,
         };
 
         self.store.add_speed_up_tx(instance_id, &speed_up_tx)?;
@@ -148,10 +142,45 @@ impl Orchestrator {
 
         for (instance_id, tx_ids) in news {
             for tx_id in tx_ids {
-                // Process each transaction, handling errors early to avoid nesting
-                self.process_instance_tx_change(instance_id, tx_id)?;
+                let is_speed_up = self.store.is_tx_a_speed_up_tx(instance_id, tx_id)?;
+
+                if is_speed_up {
+                    self.process_speed_up_change(instance_id, tx_id)?;
+                } else {
+                    self.process_instance_tx_change(instance_id, tx_id)?;
+                }
             }
         }
+
+        Ok(())
+    }
+
+    fn process_speed_up_change(&mut self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+        let speed_up_tx = self.store.get_speed_up_tx(instance_id, &tx_id)?.unwrap();
+
+        // This indicates that this is a speed-up transaction that has been mined with 1 confirmation,
+        // which means it should be treated as the new funding transaction. // Get the transaction's status from the monitor
+        let tx_status = self
+            .monitor
+            .get_instance_tx_status(instance_id, tx_id)?
+            .ok_or(anyhow::anyhow!(
+                "No transaction status found for transaction ID: {} and instance ID: {}",
+                tx_id,
+                instance_id
+            ))?;
+
+        if tx_status.tx_was_seen && tx_status.confirmations == 1 {
+            self.handle_confirmation_speed_up_transaction(instance_id, &speed_up_tx)?;
+        }
+
+        if !tx_status.tx_was_seen {
+            // If a speed-up transaction has not been seen (it has not been mined), no action is required.
+            // The responsibility for creating a new speed-up transaction lies with the instance transaction that is delivered.
+        }
+
+        // TODO: In the event of a reorganization, we would need to do the opposite.
+        // This involves removing the speed-up transaction and potentially replacing it with another transaction
+        // that could take its place as the last speed-up transaction or become the new last funding transaction.
 
         Ok(())
     }
@@ -170,7 +199,6 @@ impl Orchestrator {
         if tx_status.tx_was_seen {
             if tx_status.confirmations == 1 {
                 //Confirmation in 1 means is it already included in the block.
-                //Transaction new could be transaction speed up. We need to check if confirmation
                 self.handle_confirmation_transaction(instance_id, &tx_status)?;
 
                 return Ok(());
@@ -203,35 +231,36 @@ impl Orchestrator {
 
     fn handle_confirmation_transaction(
         &mut self,
-        instance_id: InstanceId,
-        tx_status: &TxStatus,
+        _instance_id: InstanceId,
+        _tx_status: &TxStatus,
     ) -> Result<()> {
-        let tx_info = self
-            .store
-            .get_instance_tx(instance_id, &tx_status.tx_id)?
-            .ok_or(anyhow::anyhow!(
-                "No transaction info found for transaction ID: {} and instance ID: {}",
-                tx_status.tx_id,
-                instance_id
-            ))?;
+        // Do something here...
 
-        if tx_info.owner_operator_id == Self::OPERATOR_ID {
-            // This transaction belongs to this instance and could be either a speed-up transaction or an instance transaction related to the protocol.
+        Ok(())
+    }
 
-            if tx_info.speed_up_data.is_some() {
-                let speed_ud_data = tx_info.speed_up_data.unwrap();
-                // This indicates that this is a speed-up transaction that has been mined with 1 confirmation, which means it should be treated as the new funding transaction.
-                // TODO: In the event of a reorganization, we would need to do the opposite. This involves removing the speed-up transaction and potentially replacing it with another transaction that could take its place as the last speed-up transaction or become the new last funding transaction.
+    fn handle_confirmation_speed_up_transaction(
+        &mut self,
+        instance_id: InstanceId,
+        speed_up_tx: &SpeedUpTx,
+    ) -> Result<()> {
+        //Confirmation in 1 means the transaction is already included in the block.
+        //The new transaction funding is gonna be this a speed-up transaction.
+        let funding_info = FundingTx {
+            tx_id: speed_up_tx.tx_id,
+            utxo_index: speed_up_tx.utxo_index,
+            utxo_output: speed_up_tx.utxo_output.clone(),
+        };
 
-                let funding_info = FundingTx {
-                    tx_id: tx_info.tx_id,
-                    utxo_index: speed_ud_data.utxo_index,
-                    utxo_output: speed_ud_data.utxo_output,
-                };
+        //TODO: There is something missing here. We are moving a speed-up transaction to a funding transaction.
+        // The inverse should also be supported.
+        self.store.add_funding_tx(instance_id, &funding_info)?;
 
-                self.store.add_funding_tx(instance_id, &funding_info)?;
-            }
-        }
+        // Acknowledge the transaction news to the monitor to update its state.
+        // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
+        self.monitor
+            .acknowledge_instance_tx_news(instance_id, &speed_up_tx.tx_id)?;
+
         Ok(())
     }
 
@@ -240,6 +269,8 @@ impl Orchestrator {
         instance_id: InstanceId,
         tx_status: &TxStatus,
     ) -> Result<()> {
+        // Transaction was mined and has sufficient confirmations to mark it as complete.
+
         // Notify the protocol about the transaction changes, specifically for confirmed transactions.
         // This step is crucial for the protocol to be aware of the transaction's status and proceed accordingly.
         self.notify_protocol_tx_changes(
@@ -269,28 +300,18 @@ impl Orchestrator {
     fn handle_unseen_transaction(
         &mut self,
         instance_id: InstanceId,
-        tx_data: &TransactionInstance,
+        tx_data: &TransactionInfo,
     ) -> Result<()> {
-        if tx_data.speed_up_data.is_some() {
-            // If it is a speed up transaction then we don't need to do anything, it is not mined.
-            // Then when we check if the transaction was speed up should be decide speed up again or wait.
-            return Ok(());
-        }
+        // We get all the existing speed up transaction for tx_id. Then we figure out if we should speed it up again.
+        let speed_up_txs = self
+            .store
+            .get_speed_up_txs_for_child(instance_id, &tx_data.tx_id)?;
 
-        // We should not have speed up transactions for 2 different transaction.
-        // We need to get the information about the speed ups transaction for this transactition
-        let speed_up_transactions = self.store.get_speed_up_txs(instance_id, tx_data.tx_id)?;
-
-        let old_fee_rate = if speed_up_transactions.is_empty() {
+        let old_fee_rate = if speed_up_txs.is_empty() {
             tx_data.deliver_data.as_ref().unwrap().fee_rate
         } else {
-            speed_up_transactions
-                .last()
-                .unwrap()
-                .deliver_data
-                .as_ref()
-                .unwrap()
-                .fee_rate
+            //Last speed up transaction should be the last created.
+            speed_up_txs.last().unwrap().deliver_data.fee_rate
         };
 
         // Check if the transaction should be speed up
@@ -377,8 +398,6 @@ impl OrchestratorApi for Orchestrator {
             return Ok(());
         }
 
-        // - Transactions that are stalled and should be dispatched again. And are not news
-
         // Handle any updates related to instances, including new information about transactions that have not been reviewed yet.
         self.process_instance_changes()
             .context("Failed to process instance updates")?;
@@ -388,9 +407,9 @@ impl OrchestratorApi for Orchestrator {
 
     fn monitor_new_instance(
         &self,
-        instance: &BitvmxInstance<TransactionInstanceSummary>,
+        instance: &BitvmxInstance<TransactionInfoSummary>,
     ) -> Result<()> {
-        self.store.add_instance(&instance)?;
+        self.store.add_instance(instance)?;
 
         let instance_new = InstanceData {
             id: instance.instance_id,
@@ -418,7 +437,7 @@ impl OrchestratorApi for Orchestrator {
         // First, it adds the transaction to the instance using `add_tx_to_instance`. This method updates the instance
         // to include the new transaction, ensuring it is associated with the correct instance.
 
-        self.store.add_tx_to_instance(instance_id, &tx)?;
+        self.store.add_tx_to_instance(instance_id, tx)?;
 
         // Next, it marks the transaction as pending using `add_pending_instance_tx`. This method updates the storage
         // to indicate that the transaction is currently pending and needs to be processed.

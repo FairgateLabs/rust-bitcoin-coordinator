@@ -20,27 +20,29 @@ pub struct FundingTx {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct SpeedUpData {
-    pub child_tx_id: Txid,
-    pub utxo_index: u32,
-    pub utxo_output: TxOut,
-}
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct TransactionInstance {
-    // Transaction will be added when is send.
+pub struct TransactionInfo {
     pub tx: Option<Transaction>,
     pub tx_id: Txid,
     pub owner_operator_id: u32,
     pub deliver_data: Option<DeliverData>,
-    pub speed_up_data: Option<SpeedUpData>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct SpeedUpTx {
+    pub tx_id: Txid,
+    pub deliver_data: DeliverData,
+    pub child_tx_id: Txid,
+    pub utxo_index: u32,
+    pub utxo_output: TxOut,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct TransactionInstanceSummary {
+pub struct TransactionInfoSummary {
     pub tx_id: Txid,
     pub owner_operator_id: u32,
 }
 
+//TODO Change the way we store data in the storage. BitvmxInstance should be different.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct BitvmxInstance<T> {
     pub instance_id: InstanceId,
