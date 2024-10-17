@@ -20,11 +20,24 @@ pub struct FundingTx {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub enum TransactionStatus {
+    // Indicates a transaction that is in a queue, awaiting dispatch by the protocol.
+    Waiting,
+    // Indicates a transaction that has been selected by the protocol for sending.
+    Pending,
+    // Indicates a transaction that has been sent and is currently awaiting confirmations.
+    InProgress,
+    // Indicates a transaction that has successfully completed and has received sufficient confirmations.
+    Completed,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TransactionInfo {
     pub tx: Option<Transaction>,
     pub tx_id: Txid,
     pub owner_operator_id: u32,
     pub deliver_data: Option<DeliverData>,
+    pub status: TransactionStatus,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -34,6 +47,7 @@ pub struct SpeedUpTx {
     pub child_tx_id: Txid,
     pub utxo_index: u32,
     pub utxo_output: TxOut,
+    //TODO we need to add status.
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

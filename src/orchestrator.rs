@@ -1,10 +1,8 @@
 use crate::{
-    storage::{
-        BitvmxStore, CompletedApi, FundingApi, InProgressApi, InstanceApi, PendingApi, SpeedUpApi,
-    },
+    storage::{BitvmxStore, FundingApi, InstanceApi, SpeedUpApi},
     types::{
         BitvmxInstance, DeliverData, FundingTx, InstanceId, SpeedUpTx, TransactionInfo,
-        TransactionInfoSummary,
+        TransactionInfoSummary, TransactionStatus,
     },
 };
 use anyhow::{Context, Ok, Result};
@@ -56,33 +54,31 @@ pub trait OrchestratorApi {
 }
 
 impl Orchestrator {
-    fn send_pending_txs(&mut self) -> Result<()> {
+    fn process_pending_txs(&mut self) -> Result<()> {
         // Get pending instance transactions to be send to the blockchain
         let pending_txs = self.store.get_pending_instance_txs()?;
 
         // For each pending pair
-        for (instance_id, tx) in pending_txs {
-            //TODO:  Send should retrieve the fee rate used to be saved.
-            let _ = self
-                .dispatcher
-                .send(tx.clone())
-                .context("Error dispatching transaction")?;
+        for (instance_id, txs) in pending_txs {
+            for tx_info in txs {
+                //TODO:  Send should retrieve the fee rate used to be saved.
+                let _ = self
+                    .dispatcher
+                    .send(tx_info.tx.unwrap())
+                    .context("Error dispatching transaction")?;
 
-            //TODO: This should be get from the send.
-            let fee_rate = Amount::default();
+                //TODO: This should be get from the send.
+                let fee_rate = Amount::default();
 
-            // TODO: check atomics transactions. to perform add and remove.
+                // TODO: check atomics transactions. to perform add and remove.
 
-            self.store.add_in_progress_instance_tx(
-                instance_id,
-                &tx.compute_txid(),
-                fee_rate,
-                self.current_height,
-            )?;
-
-            // Instance tx is not more pending, it belongs into progress queue
-            self.store
-                .remove_pending_instance_tx(instance_id, &tx.compute_txid())?;
+                self.store.add_in_progress_instance_tx(
+                    instance_id,
+                    &tx_info.tx_id,
+                    fee_rate,
+                    self.current_height,
+                )?;
+            }
         }
 
         Ok(())
@@ -133,7 +129,19 @@ impl Orchestrator {
         Ok(())
     }
 
-    fn process_instance_changes(&mut self) -> Result<()> {
+    fn process_in_progress_txs(&mut self) -> Result<()> {
+        let instance_txs = self.store.get_instance_txs(TransactionStatus::InProgress)?;
+
+        for (instance_id, txs) in instance_txs {
+            for tx in txs {
+                self.process_instance_tx_change(instance_id, tx.tx_id)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn process_instance_news(&mut self) -> Result<()> {
         // Get any news in each instance that are being monitored.
         // TODO: Monitor need to implement reorganisations in news. at this moment Monitor
         // is not updating every instance update after a reorg.
@@ -217,7 +225,7 @@ impl Orchestrator {
         //TODO: I Think this never gonna happend. Because instance txs news are just the once that have some change.
         if !tx_status.tx_was_seen {
             // Get information for the last time the transaction was sent
-            let in_progress_tx = self.store.get_in_progress_txs(instance_id, &tx_id)?;
+            let in_progress_tx = self.store.get_instance_tx(instance_id, &tx_id)?;
 
             if let Some(in_progress_tx) = in_progress_tx {
                 // The transaction is in progress for us, and was not seen yet in the chain.
@@ -279,15 +287,12 @@ impl Orchestrator {
             &tx_status.tx_hex.clone().unwrap(),
         )?;
 
-        // Move the transaction to completed given that transaction has more than the threshold confirmations
-        // This step include the transaction as completed in the store, indicating that it has been successfully processed.
-        self.store
-            .add_completed_instance_tx(instance_id, &tx_status.tx_id)?;
-
-        // Remove the transaction from the in-progress list to ensure it's not processed again.
-        // This step is important for maintaining the integrity of the transaction processing pipeline.
-        self.store
-            .remove_in_progress_instance_tx(instance_id, &tx_status.tx_id)?;
+        // Update the transaction to completed given that transaction has more than the threshold confirmations
+        self.store.update_instance_tx_status(
+            instance_id,
+            &tx_status.tx_id,
+            TransactionStatus::Completed,
+        )?;
 
         // Acknowledge the transaction news to the monitor to update its state.
         // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
@@ -387,7 +392,7 @@ impl OrchestratorApi for Orchestrator {
         //  has a pending tx be dispatch. Otherwise we could add some warning..
 
         // Send pending transactions that were queued.
-        self.send_pending_txs()
+        self.process_pending_txs()
             .context("Error sending pending transactions")?;
 
         let last_block_height: u32 = self.current_height;
@@ -399,7 +404,11 @@ impl OrchestratorApi for Orchestrator {
         }
 
         // Handle any updates related to instances, including new information about transactions that have not been reviewed yet.
-        self.process_instance_changes()
+        self.process_in_progress_txs()
+            .context("Failed to process instance updates")?;
+
+        // Handle any updates related to instances, including new information about transactions that have not been reviewed yet.
+        self.process_instance_news()
             .context("Failed to process instance updates")?;
 
         Ok(())
@@ -441,9 +450,11 @@ impl OrchestratorApi for Orchestrator {
 
         // Next, it marks the transaction as pending using `add_pending_instance_tx`. This method updates the storage
         // to indicate that the transaction is currently pending and needs to be processed.
-
-        self.store
-            .add_pending_instance_tx(instance_id, &tx.clone())?;
+        self.store.update_instance_tx_status(
+            instance_id,
+            &tx.compute_txid(),
+            TransactionStatus::Pending,
+        )?;
 
         Ok(())
     }

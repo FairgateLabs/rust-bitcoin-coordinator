@@ -2,9 +2,10 @@ use std::str::FromStr;
 
 use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
 use bitvmx_unstable::{
-    storage::{BitvmxStore, InProgressApi, InstanceApi, SpeedUpApi},
+    storage::{BitvmxStore, InstanceApi, SpeedUpApi},
     types::{
-        BitvmxInstance, DeliverData, FundingTx, SpeedUpTx, TransactionInfo, TransactionInfoSummary,
+        BitvmxInstance, DeliverData, FundingTx, SpeedUpTx, TransactionInfoSummary,
+        TransactionStatus,
     },
 };
 
@@ -100,7 +101,6 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     };
 
     let block_height = 2;
-    let fee_rate = Amount::from_sat(1000);
 
     let instance = BitvmxInstance::<TransactionInfoSummary> {
         instance_id,
@@ -123,44 +123,11 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     store.add_in_progress_instance_tx(instance_id, &tx_id_2, Amount::default(), block_height)?;
 
     //get in progress tx by id
-    let instance = store.get_in_progress_txs(1, &tx_id_1)?;
-    assert!(instance.is_some());
-
-    //get in progress tx by id
-    let instance = store.get_in_progress_txs(1, &tx_id_2)?;
-    assert!(instance.is_some());
-
-    // Remove in progress tx
-    store.remove_in_progress_instance_tx(instance_id, &tx_id_1)?;
-    let instance = store.get_in_progress_txs(1, &tx_id_1)?;
-    assert!(instance.is_none());
-
-    // Remove in progress tx2
-    store.remove_in_progress_instance_tx(2, &tx_id_2)?;
-    let instance = store.get_in_progress_txs(2, &tx_id_2)?;
-    assert!(instance.is_none());
-
-    //Add the instance again:
-    store.add_in_progress_instance_tx(instance_id, &tx_id_1, fee_rate, block_height)?;
-
-    let check_instance = TransactionInfo {
-        tx: None,
-        tx_id: tx_id_1,
-        owner_operator_id: 0,
-        deliver_data: Some(DeliverData {
-            fee_rate,
-            block_height,
-        }),
-    };
-
-    let instance = store.get_in_progress_txs(1, &tx_id_1)?;
-    assert_eq!(instance.unwrap(), check_instance);
-
-    //Add transaction to tx instance and check if transaction is there.
-    // store.add_tx_to_instance(instance_id, &tx_1)?;
-    // let instance = store.get_in_progress_txs(1, &tx_id_1)?;
-    // check_instance.tx = Some(tx_1);
-    // assert_eq!(instance.unwrap(), check_instance);
+    let instance_txs = store.get_instance_txs(TransactionStatus::InProgress)?;
+    assert_eq!(instance_txs.len(), 1);
+    let (instance_id, txs) = &instance_txs[0];
+    assert_eq!(instance_id, &1);
+    assert_eq!(txs.len(), 2);
 
     Ok(())
 }
