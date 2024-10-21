@@ -220,7 +220,7 @@ dependencies = [
 [[package]]
 name = "bitcoin-indexer"
 version = "0.1.5"
-source = "git+https://github.com/FairgateLabs/rust-bitcoin-indexer?branch=main#fbbe6391200e8d09e3260199af2585925923635f"
+source = "git+https://github.com/FairgateLabs/rust-bitcoin-indexer?branch=main#bfe38ec5bf43de90b045f2848d8aba62138da175"
 dependencies = [
  "anyhow",
  "bitcoin",

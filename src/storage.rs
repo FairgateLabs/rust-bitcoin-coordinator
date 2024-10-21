@@ -95,7 +95,9 @@ impl BitvmxStore {
                 }
             }
 
-            instance_txs.push((instance.instance_id, txs));
+            if !txs.is_empty() {
+                instance_txs.push((instance.instance_id, txs));
+            }
         }
 
         Ok(instance_txs)
@@ -193,7 +195,7 @@ impl InstanceApi for BitvmxStore {
                     owner_operator_id: tx.owner_operator_id,
                     deliver_data: None,
                     tx: None,
-                    status: TransactionStatus::Waiting, //Transaction is
+                    status: TransactionStatus::Waiting,
                 })
                 .collect(),
             // Clone the funding transaction from the instance to associate it with the full instance.
@@ -337,7 +339,6 @@ impl InstanceApi for BitvmxStore {
             if tx_instance.tx_id == tx_id {
                 tx_instance.tx = Some(tx.clone());
                 let key = self.get_key(StoreKey::Instance(instance_id));
-                println!("XXX {:?}", instance);
                 self.store.set(key, instance)?;
                 break;
             }

@@ -4,7 +4,7 @@ use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
 use bitvmx_unstable::{
     storage::{BitvmxStore, InstanceApi, SpeedUpApi},
     types::{
-        BitvmxInstance, DeliverData, FundingTx, SpeedUpTx, TransactionInfoSummary,
+        BitvmxInstance, DeliverData, FundingTx, SpeedUpTx, TransactionInfo, TransactionInfoSummary,
         TransactionStatus,
     },
 };
@@ -213,6 +213,108 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
 
     // Assert that the retrieved transactions match the expected speed_up_instance
     assert_eq!(speed_up_tx_to_validate, Some(speed_up_tx));
+
+    Ok(())
+}
+
+#[test]
+fn update_status() -> Result<(), anyhow::Error> {
+    let bitvmx_store = BitvmxStore::new_with_path("test_output/update_status")?;
+
+    // Remove the instance 1, as a mather of cleaning the database.
+    let _ = bitvmx_store.remove_instance(1);
+
+    let operator_id = 1;
+    let instance_id = 1;
+
+    let tx_1 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id_1 = tx_1.compute_txid();
+
+    let tx_instance_summary_1 = TransactionInfoSummary {
+        tx_id: tx_id_1,
+        owner_operator_id: operator_id,
+    };
+
+    let instance = BitvmxInstance::<TransactionInfoSummary> {
+        instance_id,
+        txs: vec![tx_instance_summary_1],
+        funding_tx: FundingTx {
+            tx_id: tx_id_1,
+            utxo_index: 1,
+            utxo_output: TxOut {
+                value: Amount::default(),
+                script_pubkey: ScriptBuf::default(),
+            },
+        },
+    };
+
+    println!("asdasdsad");
+    let instance_txs = bitvmx_store.get_instance_txs(TransactionStatus::Waiting)?;
+    assert_eq!(instance_txs.len(), 0);
+
+    bitvmx_store.add_instance(&instance)?;
+
+    let transaction_info = TransactionInfo {
+        tx_id: tx_id_1,
+        owner_operator_id: operator_id,
+        deliver_data: None,
+        tx: None,
+        status: TransactionStatus::Waiting,
+    };
+
+    let instance_txs = bitvmx_store.get_instance_txs(TransactionStatus::Waiting)?;
+    assert_eq!(instance_txs.len(), 1);
+    assert_eq!(instance_txs[0].1, vec![transaction_info.clone()]);
+
+    //Get instances by other status should be 0
+    let instance_in_progress = bitvmx_store.get_instance_txs(TransactionStatus::InProgress)?;
+    let instance_pending = bitvmx_store.get_instance_txs(TransactionStatus::Pending)?;
+    let instance_completed = bitvmx_store.get_instance_txs(TransactionStatus::Completed)?;
+    assert_eq!(instance_in_progress.len(), 0);
+    assert_eq!(instance_pending.len(), 0);
+    assert_eq!(instance_completed.len(), 0);
+
+    // Move transaction to in inprogress.
+    bitvmx_store.update_instance_tx_status(
+        instance.instance_id,
+        &tx_id_1,
+        TransactionStatus::InProgress,
+    )?;
+
+    let instance_txs = bitvmx_store.get_instance_txs(TransactionStatus::Waiting)?;
+    assert_eq!(instance_txs.len(), 0);
+    let instance_txs = bitvmx_store.get_instance_txs(TransactionStatus::InProgress)?;
+    assert_eq!(instance_txs.len(), 1);
+
+    bitvmx_store.update_instance_tx_status(
+        instance.instance_id,
+        &tx_id_1,
+        TransactionStatus::Pending,
+    )?;
+
+    let instance_txs = bitvmx_store.get_instance_txs(TransactionStatus::InProgress)?;
+    assert_eq!(instance_txs.len(), 0);
+
+    let instance_txs = bitvmx_store.get_instance_txs(TransactionStatus::Pending)?;
+    assert_eq!(instance_txs.len(), 1);
+
+    bitvmx_store.update_instance_tx_status(
+        instance.instance_id,
+        &tx_id_1,
+        TransactionStatus::Completed,
+    )?;
+
+    let instance_txs = bitvmx_store.get_instance_txs(TransactionStatus::Pending)?;
+    assert_eq!(instance_txs.len(), 0);
+
+    let instance_txs = bitvmx_store.get_instance_txs(TransactionStatus::Completed)?;
+    assert_eq!(instance_txs.len(), 1);
 
     Ok(())
 }
