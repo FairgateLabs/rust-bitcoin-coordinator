@@ -130,7 +130,7 @@ impl Orchestrator {
     }
 
     fn process_in_progress_txs(&mut self) -> Result<()> {
-        let instance_txs = self.store.get_instance_txs(TransactionStatus::InProgress)?;
+        let instance_txs = self.store.get_txs_info(TransactionStatus::InProgress)?;
 
         for (instance_id, txs) in instance_txs {
             for tx in txs {

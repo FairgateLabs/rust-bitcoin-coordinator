@@ -29,21 +29,14 @@ pub trait BitvmxApi: InstanceApi + FundingApi + SpeedUpApi {
 
 pub trait InstanceApi {
     fn tx_exists(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<bool>;
-    fn get_instances(&self) -> Result<Vec<BitvmxInstance<TransactionInfo>>>;
-    fn get_instance(
-        &self,
-        instance_id: InstanceId,
-    ) -> Result<Option<BitvmxInstance<TransactionInfo>>>;
+    fn get_instance(&self, instance_id: InstanceId) -> Result<Vec<TransactionInfo>>;
+    fn get_instances(&self) -> Result<Vec<InstanceId>>;
     fn get_instance_tx(
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
     ) -> Result<Option<TransactionInfo>>;
-    fn get_instance_txs(
-        &self,
-        instance_id: InstanceId,
-        tx_id: Vec<Txid>,
-    ) -> Result<Vec<TransactionInfo>>;
+
     fn add_instance(&self, instance: &BitvmxInstance<TransactionInfoSummary>) -> Result<()>;
     fn add_instance_tx(&self, instance_id: InstanceId, tx_info: &TransactionInfo) -> Result<()>;
     fn add_tx_to_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
@@ -79,28 +72,29 @@ pub trait SpeedUpApi {
 }
 
 impl BitvmxStore {
-    pub fn get_instance_txs(
+    pub fn get_txs_info(
         &self,
         status: TransactionStatus,
     ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
-        let instances = self.get_instances()?;
-        let mut instance_txs: Vec<(InstanceId, Vec<TransactionInfo>)> = Vec::new();
+        let instances_ids = self.get_instances()?;
+        let mut ret_instance_txs: Vec<(InstanceId, Vec<TransactionInfo>)> = Vec::new();
 
-        for instance in instances {
+        for instance_id in instances_ids {
             let mut txs: Vec<TransactionInfo> = Vec::new();
+            let instance_txs = self.get_instance(instance_id)?;
 
-            for tx in instance.txs {
+            for tx in instance_txs {
                 if tx.status == status {
                     txs.push(tx);
                 }
             }
 
             if !txs.is_empty() {
-                instance_txs.push((instance.instance_id, txs));
+                ret_instance_txs.push((instance_id, txs));
             }
         }
 
-        Ok(instance_txs)
+        Ok(ret_instance_txs)
     }
 
     pub fn update_instance_tx_status(
@@ -111,17 +105,17 @@ impl BitvmxStore {
     ) -> Result<()> {
         //TODO: Implement transaction status transition validation to ensure the correct sequence:
         // Pending -> InProgress -> Completed, and in reorganization scenarios, do the reverse order.
-        let mut instance = self.get_instance(instance_id)?.unwrap();
-        let tx_index = instance
-            .txs
+        let mut txs = self.get_instance(instance_id)?;
+
+        let tx_index = txs
             .iter()
             .position(|tx| tx.tx_id == *tx_id)
             .expect("Transaction not found in instance");
 
-        instance.txs[tx_index].status = status;
+        txs[tx_index].status = status;
 
         let instance_key = self.get_key(StoreKey::Instance(instance_id));
-        self.store.set(instance_key, instance)?;
+        self.store.set(instance_key, txs)?;
 
         Ok(())
     }
@@ -147,23 +141,7 @@ impl BitvmxStore {
 }
 
 impl InstanceApi for BitvmxStore {
-    fn get_instance(
-        &self,
-        instance_id: InstanceId,
-    ) -> Result<Option<BitvmxInstance<TransactionInfo>>> {
-        let instance_key = self.get_key(StoreKey::Instance(instance_id));
-        let instance = self
-            .store
-            .get::<&str, BitvmxInstance<TransactionInfo>>(&instance_key)
-            .context(format!(
-                "Failed to retrieve instance with ID {}",
-                instance_id
-            ))?;
-
-        Ok(instance)
-    }
-
-    fn get_instances(&self) -> Result<Vec<BitvmxInstance<TransactionInfo>>> {
+    fn get_instances(&self) -> Result<Vec<InstanceId>> {
         let instances_list_key = self.get_key(StoreKey::InstanceList);
 
         let all_instance_ids = self
@@ -172,42 +150,43 @@ impl InstanceApi for BitvmxStore {
             .context("Failed to retrieve instances")?
             .unwrap_or_default();
 
-        let mut instances = Vec::<BitvmxInstance<TransactionInfo>>::new();
+        Ok(all_instance_ids)
+    }
 
-        for id in all_instance_ids {
-            if let Some(instance) = self.get_instance(id)? {
-                instances.push(instance);
-            }
-        }
+    fn get_instance(&self, instance_id: InstanceId) -> Result<Vec<TransactionInfo>> {
+        let key = self.get_key(StoreKey::Instance(instance_id));
+        let txs = self
+            .store
+            .get::<&str, Vec<TransactionInfo>>(&key)
+            .context(format!(
+                "Failed to retrieve instance with ID {}",
+                instance_id
+            ))?
+            .unwrap_or_default();
 
-        Ok(instances)
+        Ok(txs)
     }
 
     fn add_instance(&self, instance: &BitvmxInstance<TransactionInfoSummary>) -> Result<()> {
-        // Construct a new BitvmxInstance with detailed transaction information.
-        let full_instance = BitvmxInstance::<TransactionInfo> {
-            instance_id: instance.instance_id,
-            txs: instance
-                .txs
-                .iter()
-                .map(|tx| TransactionInfo {
-                    tx_id: tx.tx_id,
-                    owner_operator_id: tx.owner_operator_id,
-                    deliver_data: None,
-                    tx: None,
-                    status: TransactionStatus::Waiting,
-                })
-                .collect(),
-            // Clone the funding transaction from the instance to associate it with the full instance.
-            funding_tx: instance.funding_tx.clone(),
-        };
+        let mut txs_to_insert: Vec<TransactionInfo> = vec![];
 
+        for tx in instance.txs.iter() {
+            let tx_info = TransactionInfo {
+                tx_id: tx.tx_id,
+                owner_operator_id: tx.owner_operator_id,
+                deliver_data: None,
+                tx: None,
+                status: TransactionStatus::Waiting,
+            };
+            txs_to_insert.push(tx_info);
+        }
+        
         let instance_key = self.get_key(StoreKey::Instance(instance.instance_id));
 
         // Map BitvmxInstance
         // 1. Store the instance under its ID
         self.store
-            .set(&instance_key, full_instance.clone())
+            .set(&instance_key, txs_to_insert)
             .context(format!(
                 "Failed to store instance under key {}",
                 instance_key
@@ -228,6 +207,8 @@ impl InstanceApi for BitvmxStore {
                 .set(&instances_key, &all_instances)
                 .context("Failed to update instances list")?;
         }
+
+        self.add_funding_tx(instance.instance_id, &instance.funding_tx)?;
 
         Ok(())
     }
@@ -269,13 +250,11 @@ impl InstanceApi for BitvmxStore {
         instance_id: InstanceId,
         tx_id: &Txid,
     ) -> Result<Option<TransactionInfo>> {
-        let instance = self.get_instance(instance_id)?;
+        let txs = self.get_instance(instance_id)?;
 
-        if let Some(instance) = instance {
-            for tx in &instance.txs {
-                if tx.tx_id == *tx_id {
-                    return Ok(Some(tx.clone()));
-                }
+        for tx in &txs {
+            if tx.tx_id == *tx_id {
+                return Ok(Some(tx.clone()));
             }
         }
 
@@ -283,44 +262,20 @@ impl InstanceApi for BitvmxStore {
     }
 
     fn add_instance_tx(&self, instance_id: InstanceId, tx_info: &TransactionInfo) -> Result<()> {
-        let instance_data = self.get_instance(instance_id)?;
+        let mut instance = self.get_instance(instance_id)?;
 
-        match instance_data {
-            Some(mut instance) => {
-                // Check if the transaction already exists in the instance
-                if instance.txs.iter().any(|tx| tx.tx_id == tx_info.tx_id) {
-                    return Ok(()); // Transaction already exists, do not add again
-                } else {
-                    instance.txs.push(tx_info.clone());
+        // Check if the transaction already exists in the instance
+        if instance.iter().any(|tx| tx.tx_id == tx_info.tx_id) {
+            return Ok(()); // Transaction already exists, do not add again
+        } else {
+            instance.push(tx_info.clone());
 
-                    // Update the instance data in storage with the new transaction
-                    let key = self.get_key(StoreKey::Instance(instance_id));
-                    self.store.set(key, instance)?;
+            // Update the instance data in storage with the new transaction
+            let key = self.get_key(StoreKey::Instance(instance_id));
+            self.store.set(key, instance)?;
 
-                    return Ok(());
-                }
-            }
-            None => {
-                return Err(anyhow::anyhow!("Instance does not exist"));
-            }
+            return Ok(());
         }
-    }
-
-    fn get_instance_txs(
-        &self,
-        instance_id: InstanceId,
-        tx_ids: Vec<Txid>,
-    ) -> Result<Vec<TransactionInfo>> {
-        let mut instance_txs = vec![];
-
-        for tx_id in tx_ids {
-            let tx_instance = self.get_instance_tx(instance_id, &tx_id)?;
-            if let Some(tx_inst) = tx_instance {
-                instance_txs.push(tx_inst)
-            }
-        }
-
-        Ok(instance_txs)
     }
 
     fn tx_exists(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<bool> {
@@ -329,17 +284,15 @@ impl InstanceApi for BitvmxStore {
     }
 
     fn add_tx_to_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()> {
-        let mut instance = self
-            .get_instance(instance_id)?
-            .ok_or(anyhow::anyhow!("Instance does not exist"))?;
+        let mut txs = self.get_instance(instance_id)?;
 
         let tx_id = tx.compute_txid();
 
-        for tx_instance in instance.txs.iter_mut() {
+        for tx_instance in txs.iter_mut() {
             if tx_instance.tx_id == tx_id {
                 tx_instance.tx = Some(tx.clone());
                 let key = self.get_key(StoreKey::Instance(instance_id));
-                self.store.set(key, instance)?;
+                self.store.set(key, txs)?;
                 break;
             }
         }
@@ -368,19 +321,19 @@ impl InstanceApi for BitvmxStore {
     }
 
     fn get_pending_instance_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
-        let instances = self.get_instances()?;
+        let instance_ids = self.get_instances()?;
         let mut pending_txs: Vec<(InstanceId, Vec<TransactionInfo>)> = Vec::new();
 
-        for instance in instances {
+        for instance_id in instance_ids {
             let mut instance_pending_txs: Vec<TransactionInfo> = Vec::new();
-
-            for tx in instance.txs {
+            let txs = self.get_instance(instance_id)?;
+            for tx in txs {
                 if tx.status == TransactionStatus::Pending {
                     instance_pending_txs.push(tx);
                 }
             }
 
-            pending_txs.push((instance.instance_id, instance_pending_txs));
+            pending_txs.push((instance_id, instance_pending_txs));
         }
 
         Ok(pending_txs)

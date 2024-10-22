@@ -12,7 +12,7 @@ pub struct DeliverData {
 }
 
 pub type InstanceId = u32;
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct FundingTx {
     pub tx_id: Txid,
     pub utxo_index: u32,
