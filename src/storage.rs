@@ -42,8 +42,6 @@ pub trait InstanceApi {
     fn add_tx_to_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
     fn remove_instance(&self, instance_id: InstanceId) -> Result<()>;
 
-    fn get_pending_instance_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>>;
-
     fn add_in_progress_instance_tx(
         &self,
         instance_id: InstanceId,
@@ -180,7 +178,7 @@ impl InstanceApi for BitvmxStore {
             };
             txs_to_insert.push(tx_info);
         }
-        
+
         let instance_key = self.get_key(StoreKey::Instance(instance.instance_id));
 
         // Map BitvmxInstance
@@ -318,25 +316,6 @@ impl InstanceApi for BitvmxStore {
         self.update_instance_tx_status(instance_id, tx_id, TransactionStatus::InProgress)?;
 
         Ok(())
-    }
-
-    fn get_pending_instance_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
-        let instance_ids = self.get_instances()?;
-        let mut pending_txs: Vec<(InstanceId, Vec<TransactionInfo>)> = Vec::new();
-
-        for instance_id in instance_ids {
-            let mut instance_pending_txs: Vec<TransactionInfo> = Vec::new();
-            let txs = self.get_instance(instance_id)?;
-            for tx in txs {
-                if tx.status == TransactionStatus::Pending {
-                    instance_pending_txs.push(tx);
-                }
-            }
-
-            pending_txs.push((instance_id, instance_pending_txs));
-        }
-
-        Ok(pending_txs)
     }
 }
 

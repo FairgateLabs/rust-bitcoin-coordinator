@@ -56,7 +56,7 @@ pub trait OrchestratorApi {
 impl Orchestrator {
     fn process_pending_txs(&mut self) -> Result<()> {
         // Get pending instance transactions to be send to the blockchain
-        let pending_txs = self.store.get_pending_instance_txs()?;
+        let pending_txs = self.store.get_txs_info(TransactionStatus::Pending)?;
 
         // For each pending pair
         for (instance_id, txs) in pending_txs {
