@@ -300,7 +300,7 @@ impl Test {
         let mut dispatcher = self.create_dispatcher()?;
         let funding_utxo = get_utxo(&funding_tx, self.user.address_checked(self.network)?)?;
         let funding_utxo = (funding_utxo.0, funding_utxo.1, public_key_fundingtx);
-        let (txid, _) = dispatcher.speed_up(&drp_tx, public_key_drptx,funding_tx.compute_txid(), funding_utxo)?;
+        let txid = dispatcher.speed_up(&drp_tx, public_key_drptx,funding_tx.compute_txid(), funding_utxo)?;
 
         // update task child tx
         let task_updates = HashMap::from([
