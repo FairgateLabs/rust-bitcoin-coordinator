@@ -1,13 +1,13 @@
 use anyhow::{Context, Ok, Result};
 use bitcoin::Network;
 use bitvmx_unstable::{
-    config::{Config, KeyManagerConfig},
+    config::{Config, DispatcherConfig, KeyManagerConfig},
     orchestrator::{Orchestrator, OrchestratorApi},
 };
 use std::str::FromStr;
 use std::sync::mpsc::channel;
 use std::{collections::HashMap, path::PathBuf};
-use tracing::{info, Level};
+use tracing::info;
 
 use bitcoin::{
     absolute, consensus, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction,
@@ -26,40 +26,43 @@ use bitvmx_unstable::{
 use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
-static DEFAULT_FEE: Amount = Amount::from_sat(1_000_000); // 0.01 BTC
-
-fn _main2() -> Result<()> {
-    let (tx, rx) = channel();
-
-    ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
-        .expect("Error setting Ctrl-C handler");
-
-    tracing_subscriber::fmt()
-        .without_time()
-        // .with_target(false)
-        .with_max_level(Level::ERROR)
-        .init();
+fn main() -> Result<()> {
+    println!(
+        "\n{} I'm here to showcase the interaction between the different BitVMX modules.\n",
+        style("Hi!").cyan()
+    );
 
     let config = Config::load()?;
     let network = Network::from_str(config.rpc.network.as_str())?;
+    let client = Client::new(
+        config.rpc.url.as_str(),
+        Auth::UserPass(
+            config.rpc.username.as_str().to_string(),
+            config.rpc.password.as_str().to_string(),
+        ),
+    )?;
+
+    let account = Account::new(network);
+
     let node_rpc_url = config.rpc.url.clone();
     let db_file_path = config.database.path;
     let checkpoint_height = config.monitor.checkpoint_height;
-    let username = config.rpc.username.clone();
-    let password = config.rpc.password.clone();
-    let account = Account::new(network);
+
     let key_manager = create_key_manager(&config.key_manager, network)?;
+    let dispatcher = TransactionDispatcher::new(client, key_manager);
+
     let mut orchestrator = Orchestrator::new(
         &node_rpc_url,
         &db_file_path,
         checkpoint_height,
-        &username,
-        &password,
-        key_manager,
-        account,
+        dispatcher,
+        account.clone(),
     )
     .context("Failed to create Orchestrator instance")?;
 
+    let (tx, rx) = channel();
+    ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
+        .expect("Error setting Ctrl-C handler");
     loop {
         if rx.try_recv().is_ok() {
             info!("Stop Bitvmx");
@@ -79,378 +82,437 @@ fn _main2() -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
+fn old_main() -> Result<()> {
     println!(
         "\n{} I'm here to showcase the interaction between the different BitVMX modules.\n",
         style("Hi!").cyan()
     );
 
-    tracing_subscriber::fmt()
-        .without_time()
-        // .with_target(false)
-        .with_max_level(Level::ERROR)
-        .init();
+    let config = Config::load()?;
+    let network = Network::from_str(config.rpc.network.as_str())?;
+    let client = Client::new(
+        config.rpc.url.as_str(),
+        Auth::UserPass(
+            config.rpc.username.as_str().to_string(),
+            config.rpc.password.as_str().to_string(),
+        ),
+    )?;
 
-    let test = Test::new().expect("Failed to create a new Test instance");
+    // Create a storage or open one if present
+    let storage = Storage::new_with_path(&PathBuf::from(&config.database.path2))?;
 
-    test.run()?;
+    // Create a node wallet
+    let _ = client.create_wallet("test_wallet", None, None, None, None);
+
+    // Generate an address for our miner in the rpc wallet
+    let miner = client
+        .get_new_address(None, None)?
+        .require_network(network)?;
+
+    let mut key_manager = create_key_manager(&config.key_manager, network)?;
+
+    // create a user account whose keys we control and persist it to db
+    let account = Account::new(network);
+
+    storage.write(
+        &account.address_checked(network)?.to_string(),
+        &serde_json::to_string(&account)?,
+    )?;
+    let private_key = PrivateKey::new(account.sk, network);
+    let _ = key_manager
+        .import_private_key(&private_key.to_wif())
+        .unwrap();
+
+    println!(
+        "{} User address: {:#?}",
+        style("→").cyan(),
+        account.address_checked(network)?.to_string()
+    );
+
+    let node_rpc_url = config.rpc.url.clone();
+    let db_file_path = config.database.path;
+    let checkpoint_height = config.monitor.checkpoint_height;
+    let rpc = Client::new(
+        config.rpc.url.as_str(),
+        Auth::UserPass(
+            config.rpc.username.as_str().to_string(),
+            config.rpc.password.as_str().to_string(),
+        ),
+    )
+    .unwrap();
+
+    let key_manager = create_key_manager(&config.key_manager, network)?;
+    let dispatcher = TransactionDispatcher::new(rpc, key_manager);
+
+    let mut orchestrator = Orchestrator::new(
+        &node_rpc_url,
+        &db_file_path,
+        checkpoint_height,
+        dispatcher,
+        account.clone(),
+    )
+    .context("Failed to create Orchestrator instance")?;
+
+    // Mine blocks to collect block rewards
+    client.generate_to_address(105, &miner)?;
+
+    // build transactions mocks and save them to db
+    let drp_transaction = get_drp_transaction_mock(
+        &config.dispatcher,
+        &account.clone(),
+        network,
+        &client,
+        &miner,
+    )?;
+    storage.set(drp_transaction.compute_txid().to_string(), &drp_transaction)?;
+
+    println!(
+        "{} DRP transaction: {:#?}",
+        style("→").cyan(),
+        drp_transaction.compute_txid()
+    );
+
+    let funding_transaction = get_funding_transaction_mock(&client, &miner, network, &account)?;
+    send_funding_tx(&funding_transaction, &client, &miner)?;
+    storage.set(
+        funding_transaction.compute_txid().to_string(),
+        &funding_transaction,
+    )?;
+    println!(
+        "{} Funding transaction: {:#?}",
+        style("→").cyan(),
+        funding_transaction.compute_txid()
+    );
+
+    let task_id = test_send_drp_transaction(
+        &drp_transaction.compute_txid(),
+        &storage,
+        &Config::load()?,
+        network,
+    )?;
+    test_retrieve_task(task_id, &storage)?;
+
+    let (task_id, txid) = test_speedup_drp_transaction(
+        drp_transaction.compute_txid(),
+        funding_transaction.compute_txid(),
+        account,
+        &storage,
+        network,
+        &Config::load()?,
+    )?;
+    test_retrieve_task(task_id, &storage)?;
+    test_speedup_confirmation(txid, &client, &miner)?;
+
+    let (tx, rx) = channel();
+    ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
+        .expect("Error setting Ctrl-C handler");
+    loop {
+        if rx.try_recv().is_ok() {
+            info!("Stop Bitvmx");
+            break;
+        }
+
+        if orchestrator.is_ready()? {
+            // Since the orchestrator is ready, indicating it's caught up with the blockchain, we can afford to wait for a minute
+            //TODO: this may change for sure.
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+
+        // If the orchestrator is not ready, it may require multiple ticks to become ready. No need to wait.
+        orchestrator.tick().context("Failed tick orchestrator")?;
+    }
 
     Ok(())
 }
 
-struct Test {
-    config: Config,
+/// Returns a Transaction mocking one of BitVMX DRP transactions.
+fn get_drp_transaction_mock(
+    dispatcher: &DispatcherConfig,
+    user: &Account,
     network: Network,
-    rpc: Client,
-    db: Storage,
-    miner: Address,
-    user: Account,
+    rpc: &Client,
+    miner: &Address,
+) -> Result<Transaction> {
+    // build and send a mock transaction that we can spend in our drp transaction
+    let tx_info = make_mock_output(rpc, user, network, miner)?;
+
+    let spent_amount = tx_info.amount.unsigned_abs();
+    let fee = Amount::from_sat(dispatcher.cpfp_fee);
+    let cpfp_amount = Amount::from_sat(dispatcher.cpfp_amount);
+    let drp_amount = spent_amount - fee - cpfp_amount;
+
+    // The input for the transaction we are constructing.
+    let input = TxIn {
+        previous_output: OutPoint {
+            txid: tx_info.info.txid,
+            vout: tx_info
+                .details
+                .first()
+                .expect("No details found for transaction")
+                .vout,
+        },
+        script_sig: ScriptBuf::default(), // For a p2wpkh script_sig is empty.
+        sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
+        witness: Witness::default(), // Filled in after signing.
+    };
+
+    // The drp output. For this example, we just pay back to the user.
+    let drp = TxOut {
+        value: drp_amount,
+        script_pubkey: user.address_checked(network)?.script_pubkey(),
+    };
+
+    // The cpfp output is locked to a key controlled by the user.
+    let cpfp = TxOut {
+        value: cpfp_amount,
+        script_pubkey: ScriptBuf::new_p2wpkh(&user.wpkh),
+    };
+
+    build_transaction(vec![input], vec![drp, cpfp], user.clone(), spent_amount)
 }
 
-impl Test {
-    fn new() -> Result<Self> {
-        let config = Config::load()?;
-        let network = Network::from_str(config.rpc.network.as_str())?;
-        let rpc = Client::new(
-            config.rpc.url.as_str(),
-            Auth::UserPass(
-                config.rpc.username.as_str().to_string(),
-                config.rpc.password.as_str().to_string(),
-            ),
-        )?;
+/// Returns a Transaction to be used as funding for speeding up a DRP transaction.
+fn get_funding_transaction_mock(
+    rpc: &Client,
+    miner: &Address,
+    network: Network,
+    user: &Account,
+) -> Result<Transaction> {
+    // build and send a mock transaction that we can spend in our funding transaction
+    let tx_info = make_mock_output(rpc, user, network, miner)?;
 
-        // Create a storage or open one if present
-        let db = Storage::new_with_path(&PathBuf::from(&config.database.path))?;
+    // The input for the transaction we are constructing.
+    let input = TxIn {
+        previous_output: OutPoint {
+            txid: tx_info.info.txid,
+            vout: tx_info
+                .details
+                .first()
+                .expect("No details found for transaction")
+                .vout,
+        },
+        script_sig: ScriptBuf::default(), // For a p2wpkh script_sig is empty.
+        sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
+        witness: Witness::default(), // Filled in after signing.
+    };
 
-        // Create a node wallet
-        let _ = rpc.create_wallet("test_wallet", None, None, None, None);
+    // The spend output is locked to a key controlled by the user.
+    let spent_amount = tx_info.amount.unsigned_abs();
 
-        // Generate an address for our miner in the rpc wallet
-        let miner = rpc.get_new_address(None, None)?.require_network(network)?;
+    static DEFAULT_FEE: Amount = Amount::from_sat(1_000_000); // 0.01 BTC
 
-        let mut key_manager = create_key_manager(&config.key_manager, network)?;
-        // create a user account whose keys we control and persist it to db
-        let user = Account::new(network);
+    let output = TxOut {
+        value: spent_amount - DEFAULT_FEE,
+        script_pubkey: user.address_checked(network)?.script_pubkey(),
+    };
 
-        db.write(
-            &user.address_checked(network)?.to_string(),
-            &serde_json::to_string(&user)?,
-        )?;
-        let private_key = PrivateKey::new(user.sk, network);
-        let _ = key_manager
-            .import_private_key(&private_key.to_wif())
-            .unwrap();
+    build_transaction(
+        vec![input],
+        vec![output],
+        user.clone(),
+        tx_info.amount.unsigned_abs(),
+    )
+}
 
-        println!(
-            "{} User address: {:#?}",
-            style("→").cyan(),
-            user.address_checked(network)?.to_string()
-        );
+fn make_mock_output(
+    rpc: &Client,
+    user: &Account,
+    network: Network,
+    miner: &Address,
+) -> Result<GetTransactionResult> {
+    // fund the user address
+    let txid = rpc.send_to_address(
+        &user.address_checked(network)?,
+        Amount::from_sat(100_000_000), // 1 BTC
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )?;
 
-        Ok(Self {
-            config,
-            network,
-            rpc,
-            db,
-            miner,
-            user,
-        })
-    }
+    // mine a block to confirm transaction
+    rpc.generate_to_address(1, &miner)?;
 
-    pub fn run(&self) -> Result<()> {
-        // Mine blocks to collect block rewards
-        self.rpc.generate_to_address(105, &self.miner)?;
+    // get transaction details
+    Ok(rpc.get_transaction(&txid, Some(true))?)
+}
 
-        // build transactions mocks and save them to db
-        let drp_transaction = self.get_drp_transaction_mock()?;
-        self.db
-            .set(drp_transaction.compute_txid().to_string(), &drp_transaction)?;
-        println!(
-            "{} DRP transaction: {:#?}",
-            style("→").cyan(),
-            drp_transaction.compute_txid()
-        );
+fn test_send_drp_transaction(
+    transaction_id: &Txid,
+    store: &Storage,
+    config: &Config,
+    network: Network,
+) -> Result<String> {
+    println!("\nSending DRP transaction...");
 
-        let funding_transaction = self.get_funding_transaction_mock()?;
-        self.send_funding_tx(&funding_transaction)?;
-        self.db.set(
-            funding_transaction.compute_txid().to_string(),
-            &funding_transaction,
-        )?;
-        println!(
-            "{} Funding transaction: {:#?}",
-            style("→").cyan(),
-            funding_transaction.compute_txid()
-        );
+    // retrieve the transaction from the database
+    let saved_tx: Option<Transaction> = store.get(transaction_id.to_string())?;
 
-        let task_id = self.test_send_drp_transaction(&drp_transaction.compute_txid())?;
-        self.test_retrieve_task(task_id)?;
+    let tx = saved_tx.ok_or_else(|| {
+        BitVMXError::Unexpected(format!(
+            "Transaction {} not found in database",
+            transaction_id
+        ))
+    })?;
 
-        let (task_id, txid) = self.test_speedup_drp_transaction(
-            drp_transaction.compute_txid(),
-            funding_transaction.compute_txid(),
-        )?;
-        self.test_retrieve_task(task_id)?;
-        self.test_speedup_confirmation(txid)?;
-        Ok(())
-    }
+    let rpc = Client::new(
+        config.rpc.url.as_str(),
+        Auth::UserPass(
+            config.rpc.username.as_str().to_string(),
+            config.rpc.password.as_str().to_string(),
+        ),
+    )
+    .unwrap();
 
-    /// Returns a Transaction mocking one of BitVMX DRP transactions.
-    fn get_drp_transaction_mock(&self) -> Result<Transaction> {
-        // build and send a mock transaction that we can spend in our drp transaction
-        let tx_info = self.make_mock_output()?;
+    let key_manager = create_key_manager(&config.key_manager, network)?;
+    let dispatcher = TransactionDispatcher::new(rpc, key_manager);
 
-        let spent_amount = tx_info.amount.unsigned_abs();
-        let fee = Amount::from_sat(self.config.dispatcher.cpfp_fee);
-        let cpfp_amount = Amount::from_sat(self.config.dispatcher.cpfp_amount);
-        let drp_amount = spent_amount - fee - cpfp_amount;
+    // create a new `Send` task for the dispatcher
+    let task = DispatcherTask {
+        transaction_id: tx.compute_txid(),
+        child_tx: None,
+        kind: DispatcherTaskKind::Send,
+        status: DispatcherTaskStatus::None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    let task_id = store.save(task)?;
 
-        // The input for the transaction we are constructing.
-        let input = TxIn {
-            previous_output: OutPoint {
-                txid: tx_info.info.txid,
-                vout: tx_info
-                    .details
-                    .first()
-                    .expect("No details found for transaction")
-                    .vout,
-            },
-            script_sig: ScriptBuf::default(), // For a p2wpkh script_sig is empty.
-            sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
-            witness: Witness::default(), // Filled in after signing.
-        };
+    // dispatch tx!
+    dispatcher.send(tx)?;
 
-        // The drp output. For this example, we just pay back to the user.
-        let drp = TxOut {
-            value: drp_amount,
-            script_pubkey: self.user.address_checked(self.network)?.script_pubkey(),
-        };
+    // update task status
+    let task_updates = HashMap::from([
+        ("status", json!(DispatcherTaskStatus::Sent)),
+        ("updated_at", json!(chrono::Utc::now())),
+    ]);
 
-        // The cpfp output is locked to a key controlled by the user.
-        let cpfp = TxOut {
-            value: cpfp_amount,
-            script_pubkey: ScriptBuf::new_p2wpkh(&self.user.wpkh),
-        };
+    store
+        .update::<DispatcherTask>(&task_id, task_updates)
+        .context("While updating dispatcher task")?;
 
-        build_transaction(
-            vec![input],
-            vec![drp, cpfp],
-            self.user.clone(),
-            spent_amount,
-        )
-    }
+    Ok(task_id)
+}
 
-    /// Returns a Transaction to be used as funding for speeding up a DRP transaction.
-    fn get_funding_transaction_mock(&self) -> Result<Transaction> {
-        // build and send a mock transaction that we can spend in our funding transaction
-        let tx_info = self.make_mock_output()?;
+fn test_retrieve_task(task_id: String, store: &Storage) -> Result<()> {
+    let task: Option<DispatcherTask> = store.get(task_id)?;
+    assert!(task.is_some(), "Task not found in database");
 
-        // The input for the transaction we are constructing.
-        let input = TxIn {
-            previous_output: OutPoint {
-                txid: tx_info.info.txid,
-                vout: tx_info
-                    .details
-                    .first()
-                    .expect("No details found for transaction")
-                    .vout,
-            },
-            script_sig: ScriptBuf::default(), // For a p2wpkh script_sig is empty.
-            sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
-            witness: Witness::default(), // Filled in after signing.
-        };
+    let task = task.unwrap();
+    println!("{} Task: {:#?}", style("→").magenta(), task);
+    assert_eq!(task.status, DispatcherTaskStatus::Sent);
+    Ok(())
+}
 
-        // The spend output is locked to a key controlled by the user.
-        let spent_amount = tx_info.amount.unsigned_abs();
-        let output = TxOut {
-            value: spent_amount - DEFAULT_FEE,
-            script_pubkey: self.user.address_checked(self.network)?.script_pubkey(),
-        };
+fn test_speedup_drp_transaction(
+    drp_txid: Txid,
+    funding_txid: Txid,
+    user: Account,
+    store: &Storage,
+    network: Network,
+    config: &Config,
+) -> Result<(String, Txid)> {
+    println!("Speeding up DRP transaction...");
 
-        build_transaction(
-            vec![input],
-            vec![output],
-            self.user.clone(),
-            tx_info.amount.unsigned_abs(),
-        )
-    }
+    let public_key_drptx = user.pk;
+    let public_key_fundingtx = user.pk;
 
-    fn make_mock_output(&self) -> Result<GetTransactionResult> {
-        // fund the user address
-        let txid = self.rpc.send_to_address(
-            &self.user.address_checked(self.network)?,
-            Amount::from_sat(100_000_000), // 1 BTC
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )?;
+    // get transactions from the database
+    let drp_tx: Transaction = store.get(drp_txid.to_string())?.ok_or_else(|| {
+        BitVMXError::Unexpected(format!("Transaction {} not found in database", drp_txid))
+    })?;
 
-        // mine a block to confirm transaction
-        self.rpc.generate_to_address(1, &self.miner)?;
+    let funding_tx: Transaction = store.get(funding_txid.to_string())?.ok_or_else(|| {
+        BitVMXError::Unexpected(format!(
+            "Transaction {} not found in database",
+            funding_txid
+        ))
+    })?;
 
-        // get transaction details
-        Ok(self.rpc.get_transaction(&txid, Some(true))?)
-    }
+    // create a new `Speedup` task for the dispatcher
+    let task = DispatcherTask {
+        transaction_id: drp_tx.compute_txid(),
+        child_tx: None,
+        kind: DispatcherTaskKind::Speedup,
+        status: DispatcherTaskStatus::None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    let task_id = store.save(task)?;
 
-    fn create_dispatcher(&self) -> Result<TransactionDispatcher<FileKeyStore>> {
-        // create rpc for the dispatcher
-        let rpc = Client::new(
-            self.config.rpc.url.as_str(),
-            Auth::UserPass(
-                self.config.rpc.username.as_str().to_string(),
-                self.config.rpc.password.as_str().to_string(),
-            ),
-        )
-        .unwrap();
+    // create a new dispatcher and send transaction
+    let rpc = Client::new(
+        config.rpc.url.as_str(),
+        Auth::UserPass(
+            config.rpc.username.as_str().to_string(),
+            config.rpc.password.as_str().to_string(),
+        ),
+    )
+    .unwrap();
 
-        let key_manager = create_key_manager(&self.config.key_manager, self.network)?;
+    let key_manager = create_key_manager(&config.key_manager, network)?;
+    let mut dispatcher = TransactionDispatcher::new(rpc, key_manager);
 
-        // create a signer for the dispatcher
+    let funding_utxo = get_utxo(&funding_tx, user.address_checked(network)?)?;
+    let funding_utxo = (funding_utxo.0, funding_utxo.1, public_key_fundingtx);
+    let (txid, _) = dispatcher.speed_up(
+        &drp_tx,
+        public_key_drptx,
+        funding_tx.compute_txid(),
+        funding_utxo,
+    )?;
 
-        Ok(TransactionDispatcher::new(rpc, key_manager))
-    }
+    // update task child tx
+    let task_updates = HashMap::from([
+        ("child_tx", json!(txid)),
+        ("status", json!(DispatcherTaskStatus::Sent)),
+        ("updated_at", json!(chrono::Utc::now())),
+    ]);
 
-    fn test_send_drp_transaction(&self, transaction_id: &Txid) -> Result<String> {
-        println!("\nSending DRP transaction...");
+    store
+        .update::<DispatcherTask>(&task_id, task_updates)
+        .context("While updating dispatcher task")?;
 
-        // retrieve the transaction from the database
-        let saved_tx: Option<Transaction> = self.db.get(transaction_id.to_string())?;
+    // save child tx to database
+    let rpc = Client::new(
+        config.rpc.url.as_str(),
+        Auth::UserPass(
+            config.rpc.username.as_str().to_string(),
+            config.rpc.password.as_str().to_string(),
+        ),
+    )
+    .unwrap();
 
-        let tx = saved_tx.ok_or_else(|| {
-            BitVMXError::Unexpected(format!(
-                "Transaction {} not found in database",
-                transaction_id
-            ))
-        })?;
+    let child_tx = rpc.get_raw_transaction(&txid, None)?;
+    store.set(txid.to_string(), child_tx)?;
 
-        // create a new dispatcher
-        let dispatcher = self.create_dispatcher()?;
+    Ok((task_id, txid))
+}
 
-        // create a new `Send` task for the dispatcher
-        let task = DispatcherTask {
-            transaction_id: tx.compute_txid(),
-            child_tx: None,
-            kind: DispatcherTaskKind::Send,
-            status: DispatcherTaskStatus::None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        };
-        let task_id = self.db.save(task)?;
+fn test_speedup_confirmation(txid: Txid, rpc: &Client, miner: &Address) -> Result<()> {
+    print!("Checking speedup confirmation...");
 
-        // dispatch tx!
-        dispatcher.send(tx)?;
+    rpc.generate_to_address(1, &miner)?;
+    let tx_result = rpc.get_raw_transaction_info(&txid, None)?;
 
-        // update task status
-        let task_updates = HashMap::from([
-            ("status", json!(DispatcherTaskStatus::Sent)),
-            ("updated_at", json!(chrono::Utc::now())),
-        ]);
+    assert_eq!(tx_result.confirmations, Some(1));
 
-        self.db
-            .update::<DispatcherTask>(&task_id, task_updates)
-            .context("While updating dispatcher task")?;
+    println!(" {}", style("✔").cyan());
+    Ok(())
+}
 
-        Ok(task_id)
-    }
+fn send_funding_tx(funding_tx: &Transaction, rpc: &Client, miner: &Address) -> Result<()> {
+    let serialized_tx = consensus::encode::serialize_hex(&funding_tx);
+    let txid = rpc.send_raw_transaction(serialized_tx)?;
 
-    fn test_retrieve_task(&self, task_id: String) -> Result<()> {
-        let task: Option<DispatcherTask> = self.db.get(task_id)?;
-        assert!(task.is_some(), "Task not found in database");
+    rpc.generate_to_address(1, &miner)?;
 
-        let task = task.unwrap();
-        println!("{} Task: {:#?}", style("→").magenta(), task);
-        assert_eq!(task.status, DispatcherTaskStatus::Sent);
-        Ok(())
-    }
+    let tx_result = rpc.get_raw_transaction_info(&txid, None)?;
+    assert_eq!(tx_result.confirmations, Some(1));
 
-    fn test_speedup_drp_transaction(
-        &self,
-        drp_txid: Txid,
-        funding_txid: Txid,
-    ) -> Result<(String, Txid)> {
-        println!("Speeding up DRP transaction...");
-
-        let public_key_drptx = self.user.pk;
-        let public_key_fundingtx = self.user.pk;
-
-        // get transactions from the database
-        let drp_tx: Transaction = self.db.get(drp_txid.to_string())?.ok_or_else(|| {
-            BitVMXError::Unexpected(format!("Transaction {} not found in database", drp_txid))
-        })?;
-
-        let funding_tx: Transaction = self.db.get(funding_txid.to_string())?.ok_or_else(|| {
-            BitVMXError::Unexpected(format!(
-                "Transaction {} not found in database",
-                funding_txid
-            ))
-        })?;
-
-        // create a new `Speedup` task for the dispatcher
-        let task = DispatcherTask {
-            transaction_id: drp_tx.compute_txid(),
-            child_tx: None,
-            kind: DispatcherTaskKind::Speedup,
-            status: DispatcherTaskStatus::None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        };
-        let task_id = self.db.save(task)?;
-
-        // create a new dispatcher and send transaction
-        let mut dispatcher = self.create_dispatcher()?;
-        let funding_utxo = get_utxo(&funding_tx, self.user.address_checked(self.network)?)?;
-        let funding_utxo = (funding_utxo.0, funding_utxo.1, public_key_fundingtx);
-        let (txid, _) = dispatcher.speed_up(
-            &drp_tx,
-            public_key_drptx,
-            funding_tx.compute_txid(),
-            funding_utxo,
-        )?;
-
-        // update task child tx
-        let task_updates = HashMap::from([
-            ("child_tx", json!(txid)),
-            ("status", json!(DispatcherTaskStatus::Sent)),
-            ("updated_at", json!(chrono::Utc::now())),
-        ]);
-
-        self.db
-            .update::<DispatcherTask>(&task_id, task_updates)
-            .context("While updating dispatcher task")?;
-
-        // save child tx to database
-        let child_tx = self.rpc.get_raw_transaction(&txid, None)?;
-        self.db.set(txid.to_string(), child_tx)?;
-
-        Ok((task_id, txid))
-    }
-
-    fn test_speedup_confirmation(&self, txid: Txid) -> Result<()> {
-        print!("Checking speedup confirmation...");
-
-        self.rpc.generate_to_address(1, &self.miner)?;
-        let tx_result = self.rpc.get_raw_transaction_info(&txid, None)?;
-
-        assert_eq!(tx_result.confirmations, Some(1));
-
-        println!(" {}", style("✔").cyan());
-        Ok(())
-    }
-
-    fn send_funding_tx(&self, funding_tx: &Transaction) -> Result<()> {
-        let serialized_tx = consensus::encode::serialize_hex(&funding_tx);
-        let txid = self.rpc.send_raw_transaction(serialized_tx)?;
-
-        self.rpc.generate_to_address(1, &self.miner)?;
-
-        let tx_result = self.rpc.get_raw_transaction_info(&txid, None)?;
-        assert_eq!(tx_result.confirmations, Some(1));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 fn create_key_manager(

@@ -13,7 +13,7 @@ use bitvmx_transaction_monitor::{
     types::{BlockHeight, InstanceData, TxStatus},
 };
 use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
-use tracing::trace;
+use tracing::{dispatcher, trace};
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
 pub struct Orchestrator {
@@ -33,9 +33,7 @@ pub trait OrchestratorApi {
         node_rpc_url: &str,
         db_file_path: &str,
         checkpoint_height: Option<BlockHeight>,
-        username: &str,
-        password: &str,
-        key_manager: KeyManager<FileKeyStore>,
+        dispatcher: TransactionDispatcher<FileKeyStore>,
         account: Account,
     ) -> Result<Self>
     where
@@ -362,17 +360,13 @@ impl OrchestratorApi for Orchestrator {
         node_rpc_url: &str,
         db_file_path: &str,
         checkpoint_height: Option<BlockHeight>,
-        username: &str,
-        password: &str,
-        key_manager: KeyManager<FileKeyStore>,
+        dispatcher: TransactionDispatcher<FileKeyStore>,
         account: Account,
     ) -> Result<Self> {
         trace!("Creating a new instance of Orchestrator");
+
         let store = BitvmxStore::new_with_path(db_file_path)?;
         let monitor = Monitor::new_with_paths(node_rpc_url, db_file_path, checkpoint_height)?;
-        let auth = Auth::UserPass(username.to_string(), password.to_string());
-        let client = Client::new(node_rpc_url, auth)?;
-        let dispatcher = TransactionDispatcher::new(client, key_manager);
         trace!("TransactionDispatcher instance created successfully");
 
         Ok(Self {
@@ -380,7 +374,7 @@ impl OrchestratorApi for Orchestrator {
             dispatcher,
             store,
             current_height: 0,
-            account,
+            account: account.clone(),
         })
     }
 
