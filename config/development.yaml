@@ -11,3 +11,10 @@ rpc:
     wallet: test_wallet
 monitor:
     checkpoint_height: 10
+key_manager:
+    key_derivation_seed: deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+    key_derivation_path: m/101/1/0/0/
+    winternitz_seed: deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+    storage:
+        password: secret_password
+        path: data/development/key_manager

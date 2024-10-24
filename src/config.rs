@@ -17,6 +17,7 @@ pub struct Config {
     pub rpc: RpcConfig,
     pub monitor: MonitorConfig,
     pub dispatcher: DispatcherConfig,
+    pub key_manager: KeyManagerConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +45,20 @@ pub struct DispatcherConfig {
     pub cpfp_amount: u64,
     // fee in sats for the DRP transaction
     pub cpfp_fee: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct KeyManagerConfig {
+    pub key_derivation_seed: String,
+    pub key_derivation_path: String,
+    pub winternitz_seed: String,
+    pub storage: StorageConfig,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StorageConfig {
+    pub password: String,
+    pub path: String,
 }
 
 impl Config {

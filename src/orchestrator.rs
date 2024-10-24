@@ -6,20 +6,22 @@ use crate::{
     },
 };
 use anyhow::{Context, Ok, Result};
-use bitcoin::{Amount, Network, Transaction, TxOut, Txid};
+use bitcoin::{Amount, PublicKey, Transaction, TxOut, Txid};
 use bitcoincore_rpc::{Auth, Client};
 use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
     types::{BlockHeight, InstanceData, TxStatus},
 };
+use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
 use tracing::trace;
-use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Signer};
+use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
 pub struct Orchestrator {
     monitor: Box<dyn MonitorApi>,
-    dispatcher: TransactionDispatcher,
+    dispatcher: TransactionDispatcher<FileKeyStore>,
     store: BitvmxStore,
     current_height: BlockHeight,
+    account: Account,
 }
 
 pub trait OrchestratorApi {
@@ -33,7 +35,8 @@ pub trait OrchestratorApi {
         checkpoint_height: Option<BlockHeight>,
         username: &str,
         password: &str,
-        network: Network,
+        key_manager: KeyManager<FileKeyStore>,
+        account: Account,
     ) -> Result<Self>
     where
         Self: Sized;
@@ -89,11 +92,12 @@ impl Orchestrator {
         instance_id: InstanceId,
         tx: &Transaction,
         funding_txid: Txid,
-        funding_utxo: (u32, TxOut),
+        tx_public_key: PublicKey,
+        funding_utxo: (u32, TxOut, PublicKey),
     ) -> Result<()> {
         let (speed_up_tx_id, amount) =
             self.dispatcher
-                .speed_up(tx, funding_txid, funding_utxo.clone())?;
+                .speed_up(tx, tx_public_key, funding_txid, funding_utxo.clone())?;
 
         let speed_up_tx = SpeedUpTx {
             tx_id: speed_up_tx_id,
@@ -341,7 +345,12 @@ impl Orchestrator {
             instance_id,
             tx_data.tx.as_ref().unwrap(),
             funding_tx.tx_id,
-            (funding_tx.utxo_index, funding_tx.utxo_output),
+            self.account.pk,
+            (
+                funding_tx.utxo_index,
+                funding_tx.utxo_output,
+                self.account.pk,
+            ),
         )?;
 
         Ok(())
@@ -355,15 +364,15 @@ impl OrchestratorApi for Orchestrator {
         checkpoint_height: Option<BlockHeight>,
         username: &str,
         password: &str,
-        network: Network,
+        key_manager: KeyManager<FileKeyStore>,
+        account: Account,
     ) -> Result<Self> {
         trace!("Creating a new instance of Orchestrator");
         let store = BitvmxStore::new_with_path(db_file_path)?;
         let monitor = Monitor::new_with_paths(node_rpc_url, db_file_path, checkpoint_height)?;
         let auth = Auth::UserPass(username.to_string(), password.to_string());
         let client = Client::new(node_rpc_url, auth)?;
-        let signer = Signer::new(None);
-        let dispatcher = TransactionDispatcher::new(client, signer, network);
+        let dispatcher = TransactionDispatcher::new(client, key_manager);
         trace!("TransactionDispatcher instance created successfully");
 
         Ok(Self {
@@ -371,6 +380,7 @@ impl OrchestratorApi for Orchestrator {
             dispatcher,
             store,
             current_height: 0,
+            account,
         })
     }
 
