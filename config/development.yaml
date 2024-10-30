@@ -1,17 +1,16 @@
 database:
     path: data/development
-    path2: data/development2
 dispatcher:
     cpfp_amount: 546
     cpfp_fee: 141
 rpc:
     network: regtest
-    url:  http://user:password@localhost:18443
+    url:  http://user:password@localhost:18443/wallet/test_wallet
     username: user
     password: password
     wallet: test_wallet
 monitor:
-    checkpoint_height: 10
+    checkpoint_height: 633
 key_manager:
     key_derivation_seed: deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
     key_derivation_path: m/101/1/0/0/

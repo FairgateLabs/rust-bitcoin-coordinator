@@ -3,8 +3,8 @@ use std::{collections::HashMap, path::PathBuf, str::FromStr};
 use anyhow::{Context, Result};
 use bitcoin::{
     absolute, consensus, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction,
-    Address, Amount, EcdsaSighashType, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn,
-    TxOut, Txid, Witness,
+    Address, Amount, EcdsaSighashType, Network, OutPoint, PrivateKey, ScriptBuf, Sequence,
+    Transaction, TxIn, TxOut, Txid, Witness,
 };
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 use console::style;
@@ -17,16 +17,14 @@ use bitvmx_unstable::{
     errors::BitVMXError,
     model::{DispatcherTask, DispatcherTaskKind, DispatcherTaskStatus},
 };
-use transaction_dispatcher::{
-    dispatcher::TransactionDispatcher,
-    signer::{Account, Signer},
-};
+use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
+use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
 static DEFAULT_FEE: Amount = Amount::from_sat(1_000_000); // 0.01 BTC
 
 fn main() -> Result<()> {
     println!(
-        "\n{} I'm here to showcase the interaction between the different BitVMX modules.\n",
+        "\n{} 222 I'm here to showcase the interaction between the different BitVMX modules.\n",
         style("Hi!").cyan()
     );
 
@@ -76,17 +74,24 @@ impl Test {
         let db = Storage::new_with_path(&PathBuf::from(&config.database.path))?;
 
         // Create a node wallet
-        let _ = rpc.create_wallet("test_wallet", None, None, None, None);
+        let a = rpc.create_wallet("test_wallet1", None, None, None, None);
 
         // Generate an address for our miner in the rpc wallet
         let miner = rpc.get_new_address(None, None)?.require_network(network)?;
 
+        let mut key_manager = create_key_manager(&config, network)?;
         // create a user account whose keys we control and persist it to db
         let user = Account::new(network);
+
         db.write(
             &user.address_checked(network)?.to_string(),
             &serde_json::to_string(&user)?,
         )?;
+        let private_key = PrivateKey::new(user.sk, network);
+        let _ = key_manager
+            .import_private_key(&private_key.to_wif())
+            .unwrap();
+
         println!(
             "{} User address: {:#?}",
             style("→").cyan(),
@@ -106,7 +111,6 @@ impl Test {
     pub fn run(&self) -> Result<()> {
         // Mine blocks to collect block rewards
         self.rpc.generate_to_address(105, &self.miner)?;
-
         // build transactions mocks and save them to db
         let drp_transaction = self.get_drp_transaction_mock()?;
         self.db
@@ -241,7 +245,7 @@ impl Test {
         Ok(self.rpc.get_transaction(&txid, Some(true))?)
     }
 
-    fn create_dispatcher(&self) -> Result<TransactionDispatcher> {
+    fn create_dispatcher(&self) -> Result<TransactionDispatcher<FileKeyStore>> {
         // create rpc for the dispatcher
         let rpc = Client::new(
             self.config.rpc.url.as_str(),
@@ -252,11 +256,11 @@ impl Test {
         )
         .unwrap();
 
-        // create a signer for the dispatcher
-        let mut signer = Signer::new(None);
-        signer.add_account("user".to_string(), self.user.clone());
+        let key_manager = create_key_manager(&self.config, self.network)?;
 
-        Ok(TransactionDispatcher::new(rpc, signer, self.network))
+        // create a signer for the dispatcher
+
+        Ok(TransactionDispatcher::new(rpc, key_manager))
     }
 
     fn test_send_drp_transaction(&self, transaction_id: &Txid) -> Result<String> {
@@ -319,6 +323,9 @@ impl Test {
     ) -> Result<(String, Txid)> {
         println!("Speeding up DRP transaction...");
 
+        let public_key_drptx = self.user.pk;
+        let public_key_fundingtx = self.user.pk;
+
         // get transactions from the database
         let drp_tx: Transaction = self.db.get(drp_txid.to_string())?.ok_or_else(|| {
             BitVMXError::Unexpected(format!("Transaction {} not found in database", drp_txid))
@@ -345,7 +352,13 @@ impl Test {
         // create a new dispatcher and send transaction
         let mut dispatcher = self.create_dispatcher()?;
         let funding_utxo = get_utxo(&funding_tx, self.user.address_checked(self.network)?)?;
-        let txid = dispatcher.speed_up(&drp_tx, funding_tx.compute_txid(), funding_utxo)?;
+        let funding_utxo = (funding_utxo.0, funding_utxo.1, public_key_fundingtx);
+        let (txid, _) = dispatcher.speed_up(
+            &drp_tx,
+            public_key_drptx,
+            funding_tx.compute_txid(),
+            funding_utxo,
+        )?;
 
         // update task child tx
         let task_updates = HashMap::from([
@@ -359,10 +372,10 @@ impl Test {
             .context("While updating dispatcher task")?;
 
         // save child tx to database
-        let child_tx = self.rpc.get_raw_transaction(&txid.0, None)?;
-        self.db.set(txid.0.to_string(), child_tx)?;
+        let child_tx = self.rpc.get_raw_transaction(&txid, None)?;
+        self.db.set(txid.to_string(), child_tx)?;
 
-        Ok((task_id, txid.0))
+        Ok((task_id, txid))
     }
 
     fn test_speedup_confirmation(&self, txid: Txid) -> Result<()> {
@@ -388,6 +401,50 @@ impl Test {
 
         Ok(())
     }
+}
+
+fn create_key_manager(config: &Config, network: Network) -> Result<KeyManager<FileKeyStore>> {
+    let key_derivation_seed =
+        get_key_derivation_seed(config.key_manager.key_derivation_seed.clone())?;
+    let key_derivation_path = &config.key_manager.key_derivation_path;
+    let winternitz_seed = get_winternitz_seed(config.key_manager.winternitz_seed.clone())?;
+    let path = config.key_manager.storage.path.as_str();
+    let password = config.key_manager.storage.password.as_bytes().to_vec();
+    let key_store = FileKeyStore::new(path, password, network)?;
+    let key_manager = KeyManager::new(
+        network,
+        key_derivation_path,
+        key_derivation_seed,
+        winternitz_seed,
+        key_store,
+    )?;
+    Ok(key_manager)
+}
+
+fn get_winternitz_seed(wintenitz_seed: String) -> Result<[u8; 32]> {
+    let winternitz_seed = hex::decode(wintenitz_seed.clone())?;
+
+    if winternitz_seed.len() > 32 {
+        return Err(BitVMXError::Unexpected(
+            "Winternitz secret length must be 32 bytes".to_string(),
+        )
+        .into());
+    }
+
+    Ok(winternitz_seed.as_slice().try_into()?)
+}
+
+fn get_key_derivation_seed(key_derivation_seed: String) -> Result<[u8; 32]> {
+    let key_derivation_seed = hex::decode(key_derivation_seed.clone())?;
+
+    if key_derivation_seed.len() > 32 {
+        return Err(BitVMXError::Unexpected(
+            "Key derivation seed length must be 32 bytes".to_string(),
+        )
+        .into());
+    }
+
+    Ok(key_derivation_seed.as_slice().try_into()?)
 }
 
 /// Builds a transaction with a single input and multiple outputs.

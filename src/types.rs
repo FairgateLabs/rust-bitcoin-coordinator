@@ -21,19 +21,24 @@ pub struct FundingTx {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum TransactionStatus {
-    // Indicates a transaction that is in a queue, awaiting dispatch by the protocol.
-    Waiting,
-    // Indicates a transaction that has been selected by the protocol for sending.
-    Pending,
-    // Indicates a transaction that has been sent and is currently awaiting confirmations.
-    InProgress,
-    // Indicates a transaction that has successfully completed and has received sufficient confirmations.
-    Completed,
+    // Represents a transaction that is being monitored.
+    New,
+    // Represents a transaction that has been chosen by the protocol to be sent.
+    ReadyToSend,
+    // Represents a transaction that has been broadcast to the network and is waiting for confirmations.
+    Sent,
+    // Represents a transaction that has been successfully confirmed by the network (confirmed: #blocks pass).
+    Confirmed,
+    // Represents a transaction that has been acknowledged or recognized by the system.
+    Acknowledged,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TransactionInfo {
+    // Represents the transaction itself, which is added when the transaction is ready to be sent.
     pub tx: Option<Transaction>,
+    // Represents the hexadecimal representation of the transaction, which is added when the transaction is seen on the blockchain and confirmed.
+    pub tx_hex: Option<String>,
     pub tx_id: Txid,
     pub owner_operator_id: u32,
     pub deliver_data: Option<DeliverData>,
@@ -51,8 +56,14 @@ pub struct SpeedUpTx {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct TransactionInfoSummary {
+pub struct TransactionPartialInfo {
     pub tx_id: Txid,
+    pub owner_operator_id: u32,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct TransactionFullInfo {
+    pub tx: Transaction,
     pub owner_operator_id: u32,
 }
 
@@ -62,4 +73,23 @@ pub struct BitvmxInstance<T> {
     pub instance_id: InstanceId,
     pub txs: Vec<T>,
     pub funding_tx: FundingTx,
+}
+
+impl BitvmxInstance<TransactionFullInfo> {
+    pub fn map_partial_info(&self) -> BitvmxInstance<TransactionPartialInfo> {
+        let partial_info_txs = self
+            .txs
+            .iter()
+            .map(|tx_info| TransactionPartialInfo {
+                tx_id: tx_info.tx.compute_txid(),
+                owner_operator_id: tx_info.owner_operator_id,
+            })
+            .collect();
+
+        BitvmxInstance::<TransactionPartialInfo> {
+            instance_id: self.instance_id,
+            txs: partial_info_txs,
+            funding_tx: self.funding_tx.clone(),
+        }
+    }
 }

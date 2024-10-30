@@ -23,7 +23,6 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 pub struct DatabaseConfig {
     pub path: String,
-    pub path2: String,
 }
 
 #[derive(Debug, Deserialize)]

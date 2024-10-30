@@ -16,6 +16,12 @@ tracing-subscriber = "0.3.18"
 uuid = "1.10.0"
 ctrlc = "3.4"
 hex = "0.4.3"
+env_logger = { version = "*", default-features = false, features = [
+  "termcolor",
+  "atty",
+  "humantime",
+] }
+log = "0.4"
 
 # BitVMX dependencies
 rust-bitvmx-storage-backend = { path = "storage" }

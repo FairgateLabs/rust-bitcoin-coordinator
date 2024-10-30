@@ -2,18 +2,18 @@ use crate::{
     storage::{BitvmxStore, FundingApi, InstanceApi, SpeedUpApi},
     types::{
         BitvmxInstance, DeliverData, FundingTx, InstanceId, SpeedUpTx, TransactionInfo,
-        TransactionInfoSummary, TransactionStatus,
+        TransactionPartialInfo, TransactionStatus,
     },
 };
 use anyhow::{Context, Ok, Result};
 use bitcoin::{Amount, PublicKey, Transaction, TxOut, Txid};
-use bitcoincore_rpc::{Auth, Client};
 use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
     types::{BlockHeight, InstanceData, TxStatus},
 };
-use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
-use tracing::{dispatcher, trace};
+use console::style;
+use key_manager::keystorage::file::FileKeyStore;
+use log::{info, trace};
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
 pub struct Orchestrator {
@@ -39,8 +39,7 @@ pub trait OrchestratorApi {
     where
         Self: Sized;
 
-    fn monitor_new_instance(&self, instance: &BitvmxInstance<TransactionInfoSummary>)
-        -> Result<()>;
+    fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()>;
 
     // Add a non-existent transaction for an existing instance.
     fn add_tx_to_instance(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
@@ -48,6 +47,8 @@ pub trait OrchestratorApi {
     // The way that the protocol ask to deliver a existing tx id for a instance id.
     // Is passing the full transaction
     fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
+
+    fn get_confirmed_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>>;
 
     fn is_ready(&mut self) -> Result<bool>;
 
@@ -57,11 +58,21 @@ pub trait OrchestratorApi {
 impl Orchestrator {
     fn process_pending_txs(&mut self) -> Result<()> {
         // Get pending instance transactions to be send to the blockchain
-        let pending_txs = self.store.get_txs_info(TransactionStatus::Pending)?;
+        let pending_txs = self.store.get_txs_info(TransactionStatus::ReadyToSend)?;
+
+        info!(
+            "transactions pending to be sent #{}",
+            style(pending_txs.len()).yellow()
+        );
 
         // For each pending pair
         for (instance_id, txs) in pending_txs {
             for tx_info in txs {
+                info!(
+                    "{} Dispatching transaction ID: {}",
+                    style("Orchastrator").green(),
+                    style(tx_info.tx_id).blue()
+                );
                 //TODO:  Send should retrieve the fee rate used to be saved.
                 let _ = self
                     .dispatcher
@@ -119,23 +130,30 @@ impl Orchestrator {
 
     fn notify_protocol_tx_changes(
         &self,
-        instance: InstanceId,
-        tx: &Txid,
+        instance_id: InstanceId,
+        tx_id: &Txid,
         tx_hex: &str,
     ) -> Result<()> {
         // Implement the notification logic here
-        println!(
-            "Notification sent to protocol for instance_id: {:?}  tx_id: {} tx_hex {}",
-            instance, tx, tx_hex
+        info!(
+            "Found tx sent to protocol for instance_id: {:?}  tx_id: {} tx_hex {}",
+            instance_id,
+            style(tx_id).blue(),
+            tx_hex
         );
         Ok(())
     }
 
     fn process_in_progress_txs(&mut self) -> Result<()> {
-        let instance_txs = self.store.get_txs_info(TransactionStatus::InProgress)?;
-
+        let instance_txs = self.store.get_txs_info(TransactionStatus::Sent)?;
         for (instance_id, txs) in instance_txs {
             for tx in txs {
+                info!(
+                    "{} Processing transaction: {} for instance: {}",
+                    style("→").cyan(),
+                    style(tx.tx_id).blue(),
+                    style(instance_id).red()
+                );
                 self.process_instance_tx_change(instance_id, tx.tx_id)?;
             }
         }
@@ -149,6 +167,15 @@ impl Orchestrator {
         // is not updating every instance update after a reorg.
         // Get instances news also returns the speed ups txs added for each instance.
         let news = self.monitor.get_instance_news()?;
+
+        for (instance_id, tx_ids) in &news {
+            info!(
+                "{} Instance ID: {} has new transactions: {}",
+                style("News").green(),
+                style(instance_id).green(),
+                style(tx_ids.len()).red()
+            );
+        }
 
         for (instance_id, tx_ids) in news {
             for tx_id in tx_ids {
@@ -167,7 +194,6 @@ impl Orchestrator {
 
     fn process_speed_up_change(&mut self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
         let speed_up_tx = self.store.get_speed_up_tx(instance_id, &tx_id)?.unwrap();
-
         // This indicates that this is a speed-up transaction that has been mined with 1 confirmation,
         // which means it should be treated as the new funding transaction. // Get the transaction's status from the monitor
         let tx_status = self
@@ -214,7 +240,7 @@ impl Orchestrator {
                 return Ok(());
             }
 
-            if tx_status.confirmations > Self::CONFIRMATIONS_THRESHOLD {
+            if tx_status.confirmations >= Self::CONFIRMATIONS_THRESHOLD {
                 // Transaction was mined and has sufficient confirmations for
                 // move the transaction to complete.
                 self.handle_complete_transaction(instance_id, &tx_status)?;
@@ -293,7 +319,7 @@ impl Orchestrator {
         self.store.update_instance_tx_status(
             instance_id,
             &tx_status.tx_id,
-            TransactionStatus::Completed,
+            TransactionStatus::Confirmed,
         )?;
 
         // Acknowledge the transaction news to the monitor to update its state.
@@ -384,7 +410,10 @@ impl OrchestratorApi for Orchestrator {
 
         // The monitor is considered ready when it has fully indexed the blockchain and is up to date with the latest block.
         // Note that if there is a significant gap in the indexing process, it may take multiple ticks for the monitor to become ready.
+
         if !self.monitor.is_ready()? {
+            info!("Monitor is not ready yet, continuing to index blockchain.");
+
             self.monitor
                 .detect_instance_changes()
                 .context("Error detecting instances")?;
@@ -418,10 +447,7 @@ impl OrchestratorApi for Orchestrator {
         Ok(())
     }
 
-    fn monitor_new_instance(
-        &self,
-        instance: &BitvmxInstance<TransactionInfoSummary>,
-    ) -> Result<()> {
+    fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()> {
         self.store.add_instance(instance)?;
 
         let instance_new = InstanceData {
@@ -457,9 +483,15 @@ impl OrchestratorApi for Orchestrator {
         self.store.update_instance_tx_status(
             instance_id,
             &tx.compute_txid(),
-            TransactionStatus::Pending,
+            TransactionStatus::ReadyToSend,
         )?;
 
+        info!(
+            "{} Transaction ID {} for Instance ID {} move to Pending status to be send.",
+            style("Orchestrator").green(),
+            style(tx.compute_txid()).yellow(),
+            style(instance_id).green()
+        );
         Ok(())
     }
 
@@ -469,5 +501,9 @@ impl OrchestratorApi for Orchestrator {
         // The transaction id should not exist in the storage.
         // Usage: This method will likely be used for the final transaction to withdraw the funds.
         Ok(())
+    }
+
+    fn get_confirmed_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
+        self.store.get_txs_info(TransactionStatus::Confirmed)
     }
 }

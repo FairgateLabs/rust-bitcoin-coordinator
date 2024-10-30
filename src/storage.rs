@@ -1,6 +1,6 @@
 use crate::types::{
     BitvmxInstance, DeliverData, FundingTx, InstanceId, SpeedUpTx, TransactionInfo,
-    TransactionInfoSummary, TransactionStatus,
+    TransactionPartialInfo, TransactionStatus,
 };
 use anyhow::{Context, Ok, Result};
 use bitcoin::{Amount, Transaction, Txid};
@@ -37,8 +37,13 @@ pub trait InstanceApi {
         tx_id: &Txid,
     ) -> Result<Option<TransactionInfo>>;
 
-    fn add_instance(&self, instance: &BitvmxInstance<TransactionInfoSummary>) -> Result<()>;
-    fn add_instance_tx(&self, instance_id: InstanceId, tx_info: &TransactionInfo) -> Result<()>;
+    fn add_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()>;
+    fn add_instance_tx_hex(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+        tx_hex: String,
+    ) -> Result<()>;
     fn add_tx_to_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
     fn remove_instance(&self, instance_id: InstanceId) -> Result<()>;
 
@@ -165,7 +170,7 @@ impl InstanceApi for BitvmxStore {
         Ok(txs)
     }
 
-    fn add_instance(&self, instance: &BitvmxInstance<TransactionInfoSummary>) -> Result<()> {
+    fn add_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()> {
         let mut txs_to_insert: Vec<TransactionInfo> = vec![];
 
         for tx in instance.txs.iter() {
@@ -174,7 +179,8 @@ impl InstanceApi for BitvmxStore {
                 owner_operator_id: tx.owner_operator_id,
                 deliver_data: None,
                 tx: None,
-                status: TransactionStatus::Waiting,
+                status: TransactionStatus::New,
+                tx_hex: None,
             };
             txs_to_insert.push(tx_info);
         }
@@ -259,23 +265,6 @@ impl InstanceApi for BitvmxStore {
         Ok(None)
     }
 
-    fn add_instance_tx(&self, instance_id: InstanceId, tx_info: &TransactionInfo) -> Result<()> {
-        let mut instance = self.get_instance(instance_id)?;
-
-        // Check if the transaction already exists in the instance
-        if instance.iter().any(|tx| tx.tx_id == tx_info.tx_id) {
-            return Ok(()); // Transaction already exists, do not add again
-        } else {
-            instance.push(tx_info.clone());
-
-            // Update the instance data in storage with the new transaction
-            let key = self.get_key(StoreKey::Instance(instance_id));
-            self.store.set(key, instance)?;
-
-            return Ok(());
-        }
-    }
-
     fn tx_exists(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<bool> {
         let tx_instance = self.get_instance_tx(instance_id, tx_id)?;
         Ok(tx_instance.is_some())
@@ -313,8 +302,25 @@ impl InstanceApi for BitvmxStore {
             block_height,
         });
 
-        self.update_instance_tx_status(instance_id, tx_id, TransactionStatus::InProgress)?;
+        self.update_instance_tx_status(instance_id, tx_id, TransactionStatus::Sent)?;
 
+        Ok(())
+    }
+
+    fn add_instance_tx_hex(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+        tx_hex: String,
+    ) -> Result<()> {
+        let mut txs = self.get_instance(instance_id)?;
+        let tx_index = txs
+            .iter_mut()
+            .position(|tx| tx.tx_id == tx_id)
+            .expect("Transaction not found in instance");
+        txs[tx_index].tx_hex = Some(tx_hex);
+        let instance_key = self.get_key(StoreKey::Instance(instance_id));
+        self.store.set(instance_key, txs)?;
         Ok(())
     }
 }
