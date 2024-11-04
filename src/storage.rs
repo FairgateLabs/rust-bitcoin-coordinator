@@ -18,7 +18,7 @@ enum StoreKey {
     InstanceSpeedUpList(InstanceId),
 }
 
-pub trait BitvmxApi: InstanceApi + FundingApi + SpeedUpApi {
+pub trait BitvmxApi: InstanceApi + FundingApi + SpeedUpApi + StepHandlerApi {
     fn update_tx_status(
         &self,
         instance_id: InstanceId,
@@ -55,6 +55,7 @@ pub trait InstanceApi {
         block_height: BlockHeight,
     ) -> Result<()>;
 }
+
 pub trait FundingApi {
     fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>>;
     fn add_funding_tx(&self, instance_id: InstanceId, tx: &FundingTx) -> Result<()>;
@@ -72,6 +73,14 @@ pub trait SpeedUpApi {
     fn get_speed_up_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<Option<SpeedUpTx>>;
 
     fn is_tx_a_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool>;
+}
+
+pub trait StepHandlerApi {
+    fn get_tx_to_answer(&self, instance_id: InstanceId, tx_id: Txid)
+        -> Result<Option<Transaction>>;
+
+    fn set_tx_to_answer(&self, instance_id: InstanceId, tx_id: Txid, tx: Transaction)
+        -> Result<()>;
 }
 
 impl BitvmxStore {
@@ -109,7 +118,6 @@ impl BitvmxStore {
         //TODO: Implement transaction status transition validation to ensure the correct sequence:
         // Pending -> InProgress -> Completed, and in reorganization scenarios, do the reverse order.
         let mut txs = self.get_instance(instance_id)?;
-
         let tx_index = txs
             .iter()
             .position(|tx| tx.tx_id == *tx_id)
@@ -422,5 +430,37 @@ impl SpeedUpApi for BitvmxStore {
     fn is_tx_a_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool> {
         let speed_up_tx = self.get_speed_up_tx(instance_id, &tx_id)?;
         Ok(speed_up_tx.is_some())
+    }
+}
+
+impl StepHandlerApi for BitvmxStore {
+    fn get_tx_to_answer(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+    ) -> Result<Option<Transaction>> {
+        let key = format!("instance/{}/tx/{}", instance_id, tx_id);
+
+        let tx = self
+            .store
+            .get::<&str, Transaction>(&key)
+            .context("Failed to retrieve instance txs to send")?;
+
+        Ok(tx)
+    }
+
+    fn set_tx_to_answer(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+        tx: Transaction,
+    ) -> Result<()> {
+        let key = format!("instance/{}/tx/{}", instance_id, tx_id);
+
+        self.store
+            .set::<&str, Transaction>(&key, tx)
+            .context("Failed to save instance tx to answer")?;
+
+        Ok(())
     }
 }

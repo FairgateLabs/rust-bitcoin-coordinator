@@ -22,6 +22,7 @@ use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account}
 
 static DEFAULT_FEE: Amount = Amount::from_sat(1_000_000); // 0.01 BTC
 
+// This file is slated for removal in the near future
 fn main() -> Result<()> {
     println!(
         "\n{} 222 I'm here to showcase the interaction between the different BitVMX modules.\n",

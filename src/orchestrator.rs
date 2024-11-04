@@ -53,6 +53,8 @@ pub trait OrchestratorApi {
     fn is_ready(&mut self) -> Result<bool>;
 
     fn tick(&mut self) -> Result<()>;
+
+    fn acknowledged_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
 }
 
 impl Orchestrator {
@@ -505,5 +507,14 @@ impl OrchestratorApi for Orchestrator {
 
     fn get_confirmed_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
         self.store.get_txs_info(TransactionStatus::Confirmed)
+    }
+
+    fn acknowledged_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
+        self.store.update_instance_tx_status(
+            instance_id,
+            tx_id,
+            TransactionStatus::Acknowledged,
+        )?;
+        Ok(())
     }
 }
