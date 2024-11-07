@@ -18,8 +18,10 @@ pub enum TransactionStatus {
     ReadyToSend,
     // Represents a transaction that has been broadcast to the network and is waiting for confirmations.
     Sent,
-    // Represents a transaction that has been successfully confirmed by the network (confirmed: #blocks pass).
+    // Represents a transaction that has been successfully confirmed by the network
     Confirmed,
+    // Represents when the transaction was confirmed an amount of blocks
+    Finalized,
     // Represents a transaction that has been acknowledged or recognized by the system.
     Acknowledged,
 }

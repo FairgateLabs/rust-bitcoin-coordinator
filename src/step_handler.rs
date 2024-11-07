@@ -70,7 +70,7 @@ where
             .tick()
             .context("Failed tick orchestrator")?;
 
-        let confirmed_txs = self.orchestrator.get_confirmed_txs()?;
+        let confirmed_txs = self.orchestrator.get_finalized_txs()?;
 
         for (instance_id, txs) in confirmed_txs {
             for tx in txs {

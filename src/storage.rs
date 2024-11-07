@@ -302,10 +302,24 @@ impl BitvmxStoreApi for BitvmxStore {
         tx_id: &Txid,
         block_height: BlockHeight,
     ) -> Result<()> {
-        // Transaction should exist in storage.
-        let mut tx_instance = self.get_instance_tx(instance_id, tx_id)?.unwrap();
-        tx_instance.deliver_block_height = Some(block_height);
-        self.update_instance_tx_status(instance_id, tx_id, TransactionStatus::Sent)?;
+        let key = self.get_key(StoreKey::Instance(instance_id));
+
+        let mut txs = self
+            .store
+            .get::<&str, Vec<TransactionInfo>>(&key)
+            .context(format!(
+                "Failed to retrieve instance with ID {}",
+                instance_id
+            ))?
+            .unwrap_or_default();
+
+        if let Some(tx) = txs.iter_mut().find(|x| x.tx_id == *tx_id) {
+            tx.deliver_block_height = Some(block_height);
+            tx.status = TransactionStatus::Sent;
+        }
+
+        self.store.set(key, txs)?;
+
         Ok(())
     }
 

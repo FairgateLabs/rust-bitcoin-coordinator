@@ -42,7 +42,7 @@ pub trait OrchestratorApi {
     // Is passing the full transaction
     fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
 
-    fn get_confirmed_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>>;
+    fn get_finalized_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>>;
 
     fn is_ready(&mut self) -> Result<bool>;
 
@@ -259,7 +259,6 @@ where
             return Ok(());
         }
 
-        //TODO: I Think this never gonna happend. Because instance txs news are just the once that have some change.
         if !tx_status.tx_was_seen {
             // Get information for the last time the transaction was sent
             let in_progress_tx = self.store.get_instance_tx(instance_id, &tx_id)?;
@@ -276,10 +275,22 @@ where
 
     fn handle_confirmation_transaction(
         &mut self,
-        _instance_id: InstanceId,
-        _tx_status: &TxStatus,
+        instance_id: InstanceId,
+        tx_status: &TxStatus,
     ) -> Result<()> {
-        // Do something here...
+        // TODO: Heads up the protocol there is a change here.
+
+        // Update the transaction to completed given that transaction has more than the threshold confirmations
+        self.store.update_instance_tx_status(
+            instance_id,
+            &tx_status.tx_id,
+            TransactionStatus::Confirmed,
+        )?;
+
+        // Acknowledge the transaction news to the monitor to update its state.
+        // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
+        self.monitor
+            .acknowledge_instance_tx_news(instance_id, &tx_status.tx_id)?;
 
         Ok(())
     }
@@ -328,7 +339,7 @@ where
         self.store.update_instance_tx_status(
             instance_id,
             &tx_status.tx_id,
-            TransactionStatus::Confirmed,
+            TransactionStatus::Finalized,
         )?;
 
         // Acknowledge the transaction news to the monitor to update its state.
@@ -425,11 +436,11 @@ where
         }
 
         // Handle any updates related to instances, including new information about transactions that have not been reviewed yet.
-        self.process_in_progress_txs()
+        self.process_instance_news()
             .context("Failed to process instance updates")?;
 
         // Handle any updates related to instances, including new information about transactions that have not been reviewed yet.
-        self.process_instance_news()
+        self.process_in_progress_txs()
             .context("Failed to process instance updates")?;
 
         Ok(())
@@ -498,8 +509,8 @@ where
         Ok(())
     }
 
-    fn get_confirmed_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
-        self.store.get_txs_info(TransactionStatus::Confirmed)
+    fn get_finalized_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
+        self.store.get_txs_info(TransactionStatus::Finalized)
     }
 
     fn acknowledged_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
