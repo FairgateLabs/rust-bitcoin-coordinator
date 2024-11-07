@@ -8,6 +8,8 @@ use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 
 use console::style;
 use std::str::FromStr;
+use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
+use transaction_dispatcher::signer::AccountApi;
 
 use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};

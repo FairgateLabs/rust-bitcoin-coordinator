@@ -2,9 +2,9 @@ use std::str::FromStr;
 
 use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
 use bitvmx_unstable::{
-    storage::{BitvmxStore, FundingApi, InstanceApi, SpeedUpApi},
+    storage::{BitvmxStore, BitvmxStoreApi},
     types::{
-        BitvmxInstance, DeliverData, FundingTx, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
+        BitvmxInstance, FundingTx, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
         TransactionStatus,
     },
 };
@@ -120,8 +120,8 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     store.add_instance(&instance)?;
 
     // Move instances to in progress.
-    store.add_in_progress_instance_tx(instance_id, &tx_id_1, Amount::default(), block_height)?;
-    store.add_in_progress_instance_tx(instance_id, &tx_id_2, Amount::default(), block_height)?;
+    store.add_in_progress_instance_tx(instance_id, &tx_id_1, block_height)?;
+    store.add_in_progress_instance_tx(instance_id, &tx_id_2, block_height)?;
 
     //get in progress tx by id
     let instance_txs = store.get_txs_info(TransactionStatus::Sent)?;
@@ -165,10 +165,8 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
 
     let speed_up_tx = SpeedUpTx {
         tx_id: speed_up_tx_id,
-        deliver_data: DeliverData {
-            fee_rate,
-            block_height,
-        },
+        deliver_block_height: block_height,
+        deliver_fee_rate: fee_rate,
         child_tx_id: tx_id_1,
         utxo_index: 1,
         utxo_output: TxOut {
@@ -261,7 +259,7 @@ fn update_status() -> Result<(), anyhow::Error> {
     let transaction_info = TransactionInfo {
         tx_id: tx_id_1,
         owner_operator_id: operator_id,
-        deliver_data: None,
+        deliver_block_height: None,
         tx: None,
         status: TransactionStatus::New,
         tx_hex: None,

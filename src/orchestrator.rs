@@ -1,43 +1,37 @@
 use crate::{
-    storage::{BitvmxStore, FundingApi, InstanceApi, SpeedUpApi},
+    storage::BitvmxStoreApi,
     types::{
-        BitvmxInstance, DeliverData, FundingTx, InstanceId, SpeedUpTx, TransactionInfo,
-        TransactionPartialInfo, TransactionStatus,
+        BitvmxInstance, FundingTx, InstanceId, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
+        TransactionStatus,
     },
 };
 use anyhow::{Context, Ok, Result};
-use bitcoin::{Amount, PublicKey, Transaction, TxOut, Txid};
+use bitcoin::{PublicKey, Transaction, TxOut, Txid};
 use bitvmx_transaction_monitor::{
-    monitor::{Monitor, MonitorApi},
+    monitor::MonitorApi,
     types::{BlockHeight, InstanceData, TxStatus},
 };
 use console::style;
-use key_manager::keystorage::file::FileKeyStore;
-use log::{info, trace};
-use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
+use log::info;
+use transaction_dispatcher::{dispatcher::TransactionDispatcherApi, signer::Account};
 
-pub struct Orchestrator {
-    monitor: Box<dyn MonitorApi>,
-    dispatcher: TransactionDispatcher<FileKeyStore>,
-    store: BitvmxStore,
+pub struct Orchestrator<M, D, B>
+where
+    M: MonitorApi,
+    D: TransactionDispatcherApi,
+    B: BitvmxStoreApi,
+{
+    monitor: M,
+    dispatcher: D,
+    store: B,
     current_height: BlockHeight,
     account: Account,
 }
 
 pub trait OrchestratorApi {
     //TODO: this should be move to another place.
-    const CONFIRMATIONS_THRESHOLD: u32 = 6;
-    const OPERATOR_ID: u32 = 1;
-
-    fn new(
-        node_rpc_url: &str,
-        db_file_path: &str,
-        checkpoint_height: Option<BlockHeight>,
-        dispatcher: TransactionDispatcher<FileKeyStore>,
-        account: Account,
-    ) -> Result<Self>
-    where
-        Self: Sized;
+    // const CONFIRMATIONS_THRESHOLD: u32 = 6;
+    // const OPERATOR_ID: u32 = 1;
 
     fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()>;
 
@@ -57,7 +51,22 @@ pub trait OrchestratorApi {
     fn acknowledged_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
 }
 
-impl Orchestrator {
+impl<M, D, B> Orchestrator<M, D, B>
+where
+    M: MonitorApi,
+    D: TransactionDispatcherApi,
+    B: BitvmxStoreApi,
+{
+    pub fn new(monitor: M, store: B, dispatcher: D, account: Account) -> Result<Self> {
+        Ok(Self {
+            monitor,
+            dispatcher,
+            store,
+            current_height: 0,
+            account: account.clone(),
+        })
+    }
+
     fn process_pending_txs(&mut self) -> Result<()> {
         // Get pending instance transactions to be send to the blockchain
         let pending_txs = self.store.get_txs_info(TransactionStatus::ReadyToSend)?;
@@ -75,21 +84,16 @@ impl Orchestrator {
                     style("Orchastrator").green(),
                     style(tx_info.tx_id).blue()
                 );
-                //TODO:  Send should retrieve the fee rate used to be saved.
-                let _ = self
-                    .dispatcher
+
+                self.dispatcher
                     .send(tx_info.tx.unwrap())
                     .context("Error dispatching transaction")?;
-
-                //TODO: This should be get from the send.
-                let fee_rate = Amount::default();
 
                 // TODO: check atomics transactions. to perform add and remove.
 
                 self.store.add_in_progress_instance_tx(
                     instance_id,
                     &tx_info.tx_id,
-                    fee_rate,
                     self.current_height,
                 )?;
             }
@@ -112,10 +116,8 @@ impl Orchestrator {
 
         let speed_up_tx = SpeedUpTx {
             tx_id: speed_up_tx_id,
-            deliver_data: DeliverData {
-                fee_rate: amount,
-                block_height: self.current_height,
-            },
+            deliver_fee_rate: amount,
+            deliver_block_height: self.current_height,
             child_tx_id: tx.compute_txid(),
             utxo_index: funding_utxo.0,
             utxo_output: funding_utxo.1,
@@ -181,7 +183,7 @@ impl Orchestrator {
 
         for (instance_id, tx_ids) in news {
             for tx_id in tx_ids {
-                let is_speed_up = self.store.is_tx_a_speed_up_tx(instance_id, tx_id)?;
+                let is_speed_up = self.store.is_speed_up_tx(instance_id, tx_id)?;
 
                 if is_speed_up {
                     self.process_speed_up_change(instance_id, tx_id)?;
@@ -242,7 +244,12 @@ impl Orchestrator {
                 return Ok(());
             }
 
-            if tx_status.confirmations >= Self::CONFIRMATIONS_THRESHOLD {
+            // This constant defines the minimum number of confirmations required for a transaction to be considered complete.
+            // It is currently set to 6, but it should be moved to a configuration file for better flexibility.
+            //TODO: Move this to a configuration file
+            const CONFIRMATIONS_THRESHOLD: u32 = 6;
+
+            if tx_status.confirmations >= CONFIRMATIONS_THRESHOLD {
                 // Transaction was mined and has sufficient confirmations for
                 // move the transaction to complete.
                 self.handle_complete_transaction(instance_id, &tx_status)?;
@@ -342,19 +349,17 @@ impl Orchestrator {
             .store
             .get_speed_up_txs_for_child(instance_id, &tx_data.tx_id)?;
 
-        let old_fee_rate = if speed_up_txs.is_empty() {
-            tx_data.deliver_data.as_ref().unwrap().fee_rate
-        } else {
+        // In case there are an existing speed up we have to check if a new speed up is needed.
+        // Otherwise we always speed up the transaction
+        if !speed_up_txs.is_empty() {
             //Last speed up transaction should be the last created.
-            speed_up_txs.last().unwrap().deliver_data.fee_rate
+            let prev_fee_rate = speed_up_txs.last().unwrap().deliver_fee_rate;
+
+            // Check if the transaction should be speed up
+            if !self.dispatcher.should_speed_up(prev_fee_rate)? {
+                return Ok(());
+            }
         };
-
-        // Check if the transaction should be speed up
-        let should_speed_up = self.dispatcher.should_speed_up(old_fee_rate)?;
-
-        if !should_speed_up {
-            return Ok(());
-        }
 
         //TODO: Detect every change in speed up transaction to identify which is the funding transaction.
         //TODO: It is possible to speed up just one transaction at a time. Same tx could be speed up.
@@ -383,29 +388,12 @@ impl Orchestrator {
     }
 }
 
-impl OrchestratorApi for Orchestrator {
-    fn new(
-        node_rpc_url: &str,
-        db_file_path: &str,
-        checkpoint_height: Option<BlockHeight>,
-        dispatcher: TransactionDispatcher<FileKeyStore>,
-        account: Account,
-    ) -> Result<Self> {
-        trace!("Creating a new instance of Orchestrator");
-
-        let store = BitvmxStore::new_with_path(db_file_path)?;
-        let monitor = Monitor::new_with_paths(node_rpc_url, db_file_path, checkpoint_height)?;
-        trace!("TransactionDispatcher instance created successfully");
-
-        Ok(Self {
-            monitor: Box::new(monitor),
-            dispatcher,
-            store,
-            current_height: 0,
-            account: account.clone(),
-        })
-    }
-
+impl<M, D, B> OrchestratorApi for Orchestrator<M, D, B>
+where
+    M: MonitorApi,
+    D: TransactionDispatcherApi,
+    B: BitvmxStoreApi,
+{
     fn tick(&mut self) -> Result<()> {
         //TODO Question: Should we handle the scenario where there are more than one instance per operator running?
         // This scenario raises concerns that the protocol should be aware of a transaction that belongs to it but was not sent by itself (was seen in the blockchain)
@@ -416,9 +404,7 @@ impl OrchestratorApi for Orchestrator {
         if !self.monitor.is_ready()? {
             info!("Monitor is not ready yet, continuing to index blockchain.");
 
-            self.monitor
-                .detect_instance_changes()
-                .context("Error detecting instances")?;
+            self.monitor.tick().context("Error detecting instances")?;
 
             return Ok(());
         }
@@ -450,10 +436,16 @@ impl OrchestratorApi for Orchestrator {
     }
 
     fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()> {
+        if instance.txs.is_empty() {
+            return Err(anyhow::anyhow!("Instance txs array is empty"));
+        }
+
+        //TODO: we could add some validation to check instance and txs existence in the storage
+
         self.store.add_instance(instance)?;
 
         let instance_new = InstanceData {
-            id: instance.instance_id,
+            instance_id: instance.instance_id,
             txs: instance.txs.iter().map(|tx| tx.tx_id).collect(),
         };
 
@@ -461,6 +453,7 @@ impl OrchestratorApi for Orchestrator {
         // the current height of the indexer is used as the starting point for tracking.
         // This is not currently configurable.
         // It may change if we found a case where it should be configurable.
+
         self.monitor
             .save_instances_for_tracking(vec![instance_new])?;
 

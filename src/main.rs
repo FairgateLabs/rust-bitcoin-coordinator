@@ -1,11 +1,13 @@
 use anyhow::{Context, Ok, Result};
 use bitcoin::Network;
 use bitcoincore_rpc::{Auth, Client};
-use bitvmx_unstable::storage::{BitvmxStore, StepHandlerApi};
+use bitvmx_transaction_monitor::monitor::Monitor;
+use bitvmx_unstable::orchestrator::OrchestratorApi;
+use bitvmx_unstable::storage::{BitvmxStoreApi, BitvmxStore};
 use bitvmx_unstable::tx_builder_helper::{create_instance, create_key_manager, send_transaction};
 use bitvmx_unstable::{
     config::Config,
-    orchestrator::{Orchestrator, OrchestratorApi},
+    orchestrator::Orchestrator,
     step_handler::{StepHandler, StepHandlerTrait},
 };
 use console::style;
@@ -38,14 +40,15 @@ fn main() -> Result<()> {
     let account = Account::new(network);
     let key_manager = create_key_manager(&config.key_manager, network)?;
     let dispatcher = TransactionDispatcher::new(client, key_manager);
-    let orchestrator = Orchestrator::new(
+    let store = BitvmxStore::new_with_path(&config.database.path)?;
+    let monitor = Monitor::new_with_paths(
         &config.rpc.url,
         &config.database.path,
         config.monitor.checkpoint_height,
-        dispatcher,
-        account.clone(),
-    )
-    .context("Failed to create Orchestrator instance")?;
+    )?;
+
+    let orchestrator = Orchestrator::new(monitor, store, dispatcher, account.clone())
+        .context("Failed to create Orchestrator instance")?;
 
     // Step 1: Create an instance with 2 transactions for different operators
     println!(

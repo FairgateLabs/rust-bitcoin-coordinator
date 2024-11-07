@@ -1,10 +1,11 @@
 use crate::types::{
-    BitvmxInstance, DeliverData, FundingTx, InstanceId, SpeedUpTx, TransactionInfo,
-    TransactionPartialInfo, TransactionStatus,
+    BitvmxInstance, FundingTx, InstanceId, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
+    TransactionStatus,
 };
 use anyhow::{Context, Ok, Result};
-use bitcoin::{Amount, Transaction, Txid};
+use bitcoin::{Transaction, Txid};
 use bitvmx_transaction_monitor::types::BlockHeight;
+use mockall::automock;
 use std::path::PathBuf;
 use storage_backend::storage::{KeyValueStore, Storage};
 pub struct BitvmxStore {
@@ -18,16 +19,8 @@ enum StoreKey {
     InstanceSpeedUpList(InstanceId),
 }
 
-pub trait BitvmxApi: InstanceApi + FundingApi + SpeedUpApi + StepHandlerApi {
-    fn update_tx_status(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-        status: TransactionStatus,
-    ) -> Result<()>;
-}
-
-pub trait InstanceApi {
+#[automock]
+pub trait BitvmxStoreApi {
     fn tx_exists(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<bool>;
     fn get_instance(&self, instance_id: InstanceId) -> Result<Vec<TransactionInfo>>;
     fn get_instances(&self) -> Result<Vec<InstanceId>>;
@@ -51,17 +44,19 @@ pub trait InstanceApi {
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
-        fee_rate: Amount,
         block_height: BlockHeight,
     ) -> Result<()>;
-}
 
-pub trait FundingApi {
+    fn get_txs_info(
+        &self,
+        status: TransactionStatus,
+    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>>;
+
+    //FUNDING
     fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>>;
     fn add_funding_tx(&self, instance_id: InstanceId, tx: &FundingTx) -> Result<()>;
-}
 
-pub trait SpeedUpApi {
+    //SPEED UP
     fn get_speed_up_txs_for_child(
         &self,
         instance_id: InstanceId,
@@ -72,19 +67,68 @@ pub trait SpeedUpApi {
 
     fn get_speed_up_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<Option<SpeedUpTx>>;
 
-    fn is_tx_a_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool>;
-}
+    fn is_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool>;
 
-pub trait StepHandlerApi {
+    //STEP HANDLER
     fn get_tx_to_answer(&self, instance_id: InstanceId, tx_id: Txid)
         -> Result<Option<Transaction>>;
 
     fn set_tx_to_answer(&self, instance_id: InstanceId, tx_id: Txid, tx: Transaction)
         -> Result<()>;
+
+    fn update_instance_tx_status(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+        status: TransactionStatus,
+    ) -> Result<()>;
 }
 
 impl BitvmxStore {
-    pub fn get_txs_info(
+    pub fn new_with_path(store_path: &str) -> Result<Self> {
+        let store = Storage::new_with_path(&PathBuf::from(store_path.to_string()))
+            .context("There is an error creating storage in BitvmxStore")?;
+        Ok(Self { store })
+    }
+
+    fn get_key(&self, key: StoreKey) -> String {
+        match key {
+            StoreKey::InstanceList => "instance/list".to_string(),
+            StoreKey::Instance(instance_id) => format!("instance/{}", instance_id),
+            StoreKey::InstanceFundingList(instance_id) => {
+                format!("instance/{}/funding/list", instance_id)
+            }
+            StoreKey::InstanceSpeedUpList(instance_id) => {
+                format!("instance/{}/list", instance_id)
+            }
+        }
+    }
+}
+
+impl BitvmxStoreApi for BitvmxStore {
+    fn update_instance_tx_status(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+        status: TransactionStatus,
+    ) -> Result<()> {
+        //TODO: Implement transaction status transition validation to ensure the correct sequence:
+        // Pending -> InProgress -> Completed, and in reorganization scenarios, do the reverse order.
+        let mut txs = self.get_instance(instance_id)?;
+        let tx_index = txs
+            .iter()
+            .position(|tx| tx.tx_id == *tx_id)
+            .expect("Transaction not found in instance");
+
+        txs[tx_index].status = status;
+
+        let instance_key = self.get_key(StoreKey::Instance(instance_id));
+        self.store.set(instance_key, txs)?;
+
+        Ok(())
+    }
+
+    fn get_txs_info(
         &self,
         status: TransactionStatus,
     ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
@@ -109,49 +153,6 @@ impl BitvmxStore {
         Ok(ret_instance_txs)
     }
 
-    pub fn update_instance_tx_status(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-        status: TransactionStatus,
-    ) -> Result<()> {
-        //TODO: Implement transaction status transition validation to ensure the correct sequence:
-        // Pending -> InProgress -> Completed, and in reorganization scenarios, do the reverse order.
-        let mut txs = self.get_instance(instance_id)?;
-        let tx_index = txs
-            .iter()
-            .position(|tx| tx.tx_id == *tx_id)
-            .expect("Transaction not found in instance");
-
-        txs[tx_index].status = status;
-
-        let instance_key = self.get_key(StoreKey::Instance(instance_id));
-        self.store.set(instance_key, txs)?;
-
-        Ok(())
-    }
-
-    pub fn new_with_path(store_path: &str) -> Result<Self> {
-        let store = Storage::new_with_path(&PathBuf::from(store_path.to_string()))
-            .context("There is an error creating storage in BitvmxStore")?;
-        Ok(Self { store })
-    }
-
-    fn get_key(&self, key: StoreKey) -> String {
-        match key {
-            StoreKey::InstanceList => "instance/list".to_string(),
-            StoreKey::Instance(instance_id) => format!("instance/{}", instance_id),
-            StoreKey::InstanceFundingList(instance_id) => {
-                format!("instance/{}/funding/list", instance_id)
-            }
-            StoreKey::InstanceSpeedUpList(instance_id) => {
-                format!("instance/{}/list", instance_id)
-            }
-        }
-    }
-}
-
-impl InstanceApi for BitvmxStore {
     fn get_instances(&self) -> Result<Vec<InstanceId>> {
         let instances_list_key = self.get_key(StoreKey::InstanceList);
 
@@ -185,7 +186,7 @@ impl InstanceApi for BitvmxStore {
             let tx_info = TransactionInfo {
                 tx_id: tx.tx_id,
                 owner_operator_id: tx.owner_operator_id,
-                deliver_data: None,
+                deliver_block_height: None,
                 tx: None,
                 status: TransactionStatus::New,
                 tx_hex: None,
@@ -299,19 +300,12 @@ impl InstanceApi for BitvmxStore {
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
-        fee_rate: Amount,
         block_height: BlockHeight,
     ) -> Result<()> {
         // Transaction should exist in storage.
         let mut tx_instance = self.get_instance_tx(instance_id, tx_id)?.unwrap();
-
-        tx_instance.deliver_data = Some(DeliverData {
-            fee_rate,
-            block_height,
-        });
-
+        tx_instance.deliver_block_height = Some(block_height);
         self.update_instance_tx_status(instance_id, tx_id, TransactionStatus::Sent)?;
-
         Ok(())
     }
 
@@ -331,9 +325,7 @@ impl InstanceApi for BitvmxStore {
         self.store.set(instance_key, txs)?;
         Ok(())
     }
-}
 
-impl FundingApi for BitvmxStore {
     fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>> {
         let funding_tx_key = self.get_key(StoreKey::InstanceFundingList(instance_id));
         let funding_txs = self
@@ -366,9 +358,7 @@ impl FundingApi for BitvmxStore {
 
         Ok(())
     }
-}
 
-impl SpeedUpApi for BitvmxStore {
     fn get_speed_up_txs_for_child(
         &self,
         instance_id: InstanceId,
@@ -427,13 +417,11 @@ impl SpeedUpApi for BitvmxStore {
         Ok(())
     }
 
-    fn is_tx_a_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool> {
+    fn is_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool> {
         let speed_up_tx = self.get_speed_up_tx(instance_id, &tx_id)?;
         Ok(speed_up_tx.is_some())
     }
-}
 
-impl StepHandlerApi for BitvmxStore {
     fn get_tx_to_answer(
         &self,
         instance_id: InstanceId,

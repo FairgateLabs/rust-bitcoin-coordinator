@@ -1,6 +1,6 @@
 use crate::{
-    orchestrator::{Orchestrator, OrchestratorApi},
-    storage::{BitvmxStore, StepHandlerApi},
+    orchestrator::OrchestratorApi,
+    storage::{BitvmxStore, BitvmxStoreApi},
     types::InstanceId,
 };
 use anyhow::{Context, Ok, Result};
@@ -8,8 +8,11 @@ use bitcoin::{Transaction, Txid};
 use console::style;
 use log::info;
 
-pub struct StepHandler<'a> {
-    orchestrator: Orchestrator,
+pub struct StepHandler<'a, O>
+where
+    O: OrchestratorApi,
+{
+    orchestrator: O,
     store: &'a BitvmxStore,
 }
 
@@ -17,8 +20,11 @@ pub trait StepHandlerTrait {
     fn tick(&mut self) -> Result<()>;
 }
 
-impl<'a> StepHandler<'a> {
-    pub fn new(orchestrator: Orchestrator, store: &'a BitvmxStore) -> Result<Self> {
+impl<'a, O> StepHandler<'a, O>
+where
+    O: OrchestratorApi,
+{
+    pub fn new(orchestrator: O, store: &'a BitvmxStore) -> Result<Self> {
         Ok(Self {
             orchestrator,
             store,
@@ -55,7 +61,10 @@ impl<'a> StepHandler<'a> {
     }
 }
 
-impl<'a> StepHandlerTrait for StepHandler<'a> {
+impl<'a, O> StepHandlerTrait for StepHandler<'a, O>
+where
+    O: OrchestratorApi,
+{
     fn tick(&mut self) -> Result<()> {
         self.orchestrator
             .tick()
