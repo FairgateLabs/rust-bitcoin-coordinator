@@ -13,7 +13,9 @@ use bitvmx_transaction_monitor::{
 };
 use console::style;
 use log::info;
-use transaction_dispatcher::{dispatcher::TransactionDispatcherApi, signer::Account};
+use transaction_dispatcher::{
+    dispatcher::TransactionDispatcherApi, errors::DispatcherError, signer::Account,
+};
 
 pub struct Orchestrator<M, D, B>
 where
@@ -49,6 +51,9 @@ pub trait OrchestratorApi {
     fn tick(&mut self) -> Result<()>;
 
     fn acknowledged_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
+
+    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<()>;
+    fn notify_insufficient_funds(&self, instance_id: InstanceId) -> Result<()>;
 }
 
 impl<M, D, B> Orchestrator<M, D, B>
@@ -110,24 +115,37 @@ where
         tx_public_key: PublicKey,
         funding_utxo: (u32, TxOut, PublicKey),
     ) -> Result<()> {
-        let (speed_up_tx_id, amount) =
+        let dispatch_result =
             self.dispatcher
-                .speed_up(tx, tx_public_key, funding_txid, funding_utxo.clone())?;
+                .speed_up(tx, tx_public_key, funding_txid, funding_utxo.clone());
 
-        let speed_up_tx = SpeedUpTx {
-            tx_id: speed_up_tx_id,
-            deliver_fee_rate: amount,
-            deliver_block_height: self.current_height,
-            child_tx_id: tx.compute_txid(),
-            utxo_index: funding_utxo.0,
-            utxo_output: funding_utxo.1,
-        };
+        if let Err(error) = dispatch_result {
+            match error {
+                DispatcherError::InsufficientFunds => {
+                    self.notify_insufficient_funds(instance_id)?;
+                    return Ok(());
+                }
+                e => return Err(e.into()),
+            }
+        }
 
-        self.store.add_speed_up_tx(instance_id, &speed_up_tx)?;
+        if dispatch_result.is_ok() {
+            let (speed_up_tx_id, deliver_fee_rate) = dispatch_result.unwrap();
 
-        //TODO: should we save owner true otherwise it can be confuse with txs from the protocol are not owers  ?
-        self.monitor
-            .save_transaction_for_tracking(instance_id, speed_up_tx_id)?;
+            let speed_up_tx = SpeedUpTx {
+                tx_id: speed_up_tx_id,
+                deliver_fee_rate,
+                deliver_block_height: self.current_height,
+                child_tx_id: tx.compute_txid(),
+                utxo_index: funding_utxo.0,
+                utxo_output: funding_utxo.1,
+            };
+
+            self.store.add_speed_up_tx(instance_id, &speed_up_tx)?;
+
+            self.monitor
+                .save_transaction_for_tracking(instance_id, speed_up_tx_id)?;
+        }
 
         Ok(())
     }
@@ -520,5 +538,13 @@ where
             TransactionStatus::Acknowledged,
         )?;
         Ok(())
+    }
+
+    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<()> {
+        self.store.add_funding_tx(instance_id, funding_tx)
+    }
+
+    fn notify_insufficient_funds(&self, _instance_id: InstanceId) -> Result<()> {
+        todo!()
     }
 }

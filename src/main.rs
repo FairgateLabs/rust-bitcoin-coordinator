@@ -3,13 +3,10 @@ use bitcoin::Network;
 use bitcoincore_rpc::{Auth, Client};
 use bitvmx_transaction_monitor::monitor::Monitor;
 use bitvmx_unstable::orchestrator::OrchestratorApi;
-use bitvmx_unstable::storage::{BitvmxStoreApi, BitvmxStore};
+use bitvmx_unstable::step_handler::StepHandlerTrait;
+use bitvmx_unstable::storage::{BitvmxStore, StepHandlerApi};
 use bitvmx_unstable::tx_builder_helper::{create_instance, create_key_manager, send_transaction};
-use bitvmx_unstable::{
-    config::Config,
-    orchestrator::Orchestrator,
-    step_handler::{StepHandler, StepHandlerTrait},
-};
+use bitvmx_unstable::{config::Config, orchestrator::Orchestrator, step_handler::StepHandler};
 use console::style;
 use log::info;
 use std::str::FromStr;
@@ -81,13 +78,14 @@ fn main() -> Result<()> {
 
     //Step 4. Given that stepHandler should know what to do in each step we are gonna save that step for intstance is the following
     let storage = BitvmxStore::new_with_path((config.database.path + "/step_handler").as_str())?;
+
     storage.set_tx_to_answer(
         instance.instance_id,
         instance.txs[0].tx.compute_txid(),
         instance.txs[1].tx.clone(),
     )?;
 
-    let mut step_handler = StepHandler::new(orchestrator, &storage)?;
+    let mut step_handler = StepHandler::new(orchestrator, storage)?;
 
     let rx = handle_contro_c();
 

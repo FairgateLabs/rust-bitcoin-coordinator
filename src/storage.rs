@@ -69,13 +69,6 @@ pub trait BitvmxStoreApi {
 
     fn is_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool>;
 
-    //STEP HANDLER
-    fn get_tx_to_answer(&self, instance_id: InstanceId, tx_id: Txid)
-        -> Result<Option<Transaction>>;
-
-    fn set_tx_to_answer(&self, instance_id: InstanceId, tx_id: Txid, tx: Transaction)
-        -> Result<()>;
-
     fn update_instance_tx_status(
         &self,
         instance_id: InstanceId,
@@ -103,10 +96,8 @@ impl BitvmxStore {
             }
         }
     }
-}
 
-impl BitvmxStoreApi for BitvmxStore {
-    fn update_instance_tx_status(
+    pub fn update_instance_tx_status(
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
@@ -127,7 +118,9 @@ impl BitvmxStoreApi for BitvmxStore {
 
         Ok(())
     }
+}
 
+impl BitvmxStoreApi for BitvmxStore {
     fn get_txs_info(
         &self,
         status: TransactionStatus,
@@ -436,6 +429,32 @@ impl BitvmxStoreApi for BitvmxStore {
         Ok(speed_up_tx.is_some())
     }
 
+    fn update_instance_tx_status(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+        status: TransactionStatus,
+    ) -> Result<()> {
+        self.update_instance_tx_status(instance_id, tx_id, status)
+    }
+}
+#[automock]
+pub trait StepHandlerApi {
+    fn get_tx_to_answer(&self, instance_id: InstanceId, tx_id: Txid)
+        -> Result<Option<Transaction>>;
+
+    fn set_tx_to_answer(&self, instance_id: InstanceId, tx_id: Txid, tx: Transaction)
+        -> Result<()>;
+
+    fn update_instance_tx_status(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+        status: TransactionStatus,
+    ) -> Result<()>;
+}
+
+impl StepHandlerApi for BitvmxStore {
     fn get_tx_to_answer(
         &self,
         instance_id: InstanceId,
@@ -464,5 +483,14 @@ impl BitvmxStoreApi for BitvmxStore {
             .context("Failed to save instance tx to answer")?;
 
         Ok(())
+    }
+
+    fn update_instance_tx_status(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+        status: TransactionStatus,
+    ) -> Result<()> {
+        self.update_instance_tx_status(instance_id, tx_id, status)
     }
 }
