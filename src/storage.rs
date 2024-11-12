@@ -185,7 +185,6 @@ impl BitvmxStoreApi for BitvmxStore {
         for tx in instance.txs.iter() {
             let tx_info = TransactionInfo {
                 tx_id: tx.tx_id,
-                owner_operator_id: tx.owner_operator_id,
                 deliver_block_height: None,
                 tx: None,
                 status: TransactionStatus::New,

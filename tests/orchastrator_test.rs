@@ -109,7 +109,6 @@ fn get_mock_data() -> (u32, BitvmxInstance<TransactionPartialInfo>, Transaction)
 
     let tx_info = TransactionPartialInfo {
         tx_id: tx.compute_txid(),
-        owner_operator_id: 1,
     };
 
     let instance_id = 1;

@@ -33,7 +33,6 @@ pub struct TransactionInfo {
     // Represents the hexadecimal representation of the transaction, which is added when the transaction is seen on the blockchain and confirmed.
     pub tx_hex: Option<String>,
     pub tx_id: Txid,
-    pub owner_operator_id: u32,
     pub deliver_block_height: Option<BlockHeight>,
     pub status: TransactionStatus,
 }
@@ -52,13 +51,11 @@ pub struct SpeedUpTx {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TransactionPartialInfo {
     pub tx_id: Txid,
-    pub owner_operator_id: u32,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TransactionFullInfo {
     pub tx: Transaction,
-    pub owner_operator_id: u32,
 }
 
 //TODO Change the way we store data in the storage. BitvmxInstance should be different.
@@ -76,7 +73,6 @@ impl BitvmxInstance<TransactionFullInfo> {
             .iter()
             .map(|tx_info| TransactionPartialInfo {
                 tx_id: tx_info.tx.compute_txid(),
-                owner_operator_id: tx_info.owner_operator_id,
             })
             .collect();
 

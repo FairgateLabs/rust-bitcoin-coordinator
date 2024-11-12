@@ -69,15 +69,11 @@ fn main() -> Result<()> {
 
     // Step 3: Send the first transaction for operator one
     println!(
-        "\n{} Step 3: Sending tx_id: {} for operator {}.\n",
+        "\n{} Step 3: Sending tx_id: {}.\n",
         style("Step 3").cyan(),
         style(instance.txs[0].tx.compute_txid()).red(),
-        style(instance.txs[0].owner_operator_id).green()
     );
     send_transaction(instance.txs[0].tx.clone(), &Config::load()?, network)?;
-
-    //Step 4. Given that stepHandler should know what to do in each step we are gonna save that step for intstance is the following
-    // let storage = BitvmxStore::new_with_path((config.database.path + "/step_handler").as_str())?;
 
     store.set_tx_to_answer(
         instance.instance_id,
@@ -116,6 +112,3 @@ fn handle_contro_c() -> Receiver<()> {
 fn wait() {
     std::thread::sleep(std::time::Duration::from_secs(5));
 }
-
-//Create transaction: 438f8dd5549a765cf47038ea0dede37ef1905c36437d7c2c31a6a3f5f0fbcb3f for operator: 1
-//Create transaction: 0baf114c4066ed836c62c470ec7d387bfdc012e05204068324b2db8ed255fa3c  for operator: 2

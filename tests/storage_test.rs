@@ -20,15 +20,9 @@ fn instances_store() -> Result<(), anyhow::Error> {
 
     let bitvmx_store = BitvmxStore::new_with_path("test_output/test1")?;
 
-    let tx1_summary = TransactionPartialInfo {
-        tx_id: tx_id,
-        owner_operator_id: 1,
-    };
+    let tx1_summary = TransactionPartialInfo { tx_id: tx_id };
 
-    let tx2_summary = TransactionPartialInfo {
-        tx_id: tx_id_2,
-        owner_operator_id: 2,
-    };
+    let tx2_summary = TransactionPartialInfo { tx_id: tx_id_2 };
 
     let instance = BitvmxInstance::<TransactionPartialInfo> {
         instance_id: 1,
@@ -91,15 +85,9 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
 
     let tx_id_2 = tx_2.compute_txid();
 
-    let tx_instance_summary_1 = TransactionPartialInfo {
-        tx_id: tx_id_1,
-        owner_operator_id: 0,
-    };
+    let tx_instance_summary_1 = TransactionPartialInfo { tx_id: tx_id_1 };
 
-    let tx_instance_summary_2 = TransactionPartialInfo {
-        tx_id: tx_id_2,
-        owner_operator_id: 0,
-    };
+    let tx_instance_summary_2 = TransactionPartialInfo { tx_id: tx_id_2 };
 
     let block_height = 2;
 
@@ -142,7 +130,6 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
 
     let block_height = 2;
     let fee_rate = Amount::from_sat(1000);
-    let operator_id = 1;
     let instance_id = 1;
 
     let tx_1 = Transaction {
@@ -175,10 +162,7 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
         },
     };
 
-    let tx_instance_summary_1 = TransactionPartialInfo {
-        tx_id: tx_id_1,
-        owner_operator_id: operator_id,
-    };
+    let tx_instance_summary_1 = TransactionPartialInfo { tx_id: tx_id_1 };
 
     let instance = BitvmxInstance::<TransactionPartialInfo> {
         instance_id,
@@ -221,7 +205,6 @@ fn update_status() -> Result<(), anyhow::Error> {
     // Remove the instance 1, as a mather of cleaning the database.
     let _ = bitvmx_store.remove_instance(1);
 
-    let operator_id = 1;
     let instance_id = 1;
 
     let tx_1 = Transaction {
@@ -233,10 +216,7 @@ fn update_status() -> Result<(), anyhow::Error> {
 
     let tx_id_1 = tx_1.compute_txid();
 
-    let tx_instance_summary_1 = TransactionPartialInfo {
-        tx_id: tx_id_1,
-        owner_operator_id: operator_id,
-    };
+    let tx_instance_summary_1 = TransactionPartialInfo { tx_id: tx_id_1 };
 
     let instance = BitvmxInstance::<TransactionPartialInfo> {
         instance_id,
@@ -258,7 +238,6 @@ fn update_status() -> Result<(), anyhow::Error> {
 
     let transaction_info = TransactionInfo {
         tx_id: tx_id_1,
-        owner_operator_id: operator_id,
         deliver_block_height: None,
         tx: None,
         status: TransactionStatus::New,
@@ -323,7 +302,6 @@ fn funding_tests() -> Result<(), anyhow::Error> {
     // Remove the instance 1, as a mather of cleaning the database.
     let _ = bitvmx_store.remove_instance(1);
 
-    let operator_id = 1;
     let instance_id = 1;
 
     let tx_1 = Transaction {
@@ -344,10 +322,7 @@ fn funding_tests() -> Result<(), anyhow::Error> {
 
     let tx_id_2 = tx_2.compute_txid();
 
-    let tx_instance_summary_1 = TransactionPartialInfo {
-        tx_id: tx_id_1,
-        owner_operator_id: operator_id,
-    };
+    let tx_instance_summary_1 = TransactionPartialInfo { tx_id: tx_id_1 };
 
     let funding_tx = FundingTx {
         tx_id: tx_id_1,

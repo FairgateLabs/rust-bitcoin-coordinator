@@ -40,7 +40,7 @@ pub trait OrchestratorApi {
     // Add a non-existent transaction for an existing instance.
     fn add_tx_to_instance(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
 
-    // The way that the protocol ask to deliver a existing tx id for a instance id.
+    // The way that the protocol ask to deliver an existing tx id for a instance id.
     // Is passing the full transaction
     fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
 

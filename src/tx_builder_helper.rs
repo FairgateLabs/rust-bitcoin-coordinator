@@ -43,14 +43,8 @@ pub fn create_instance(
     let tx_2: Transaction = generate_tx(user, rpc_config, network, dispatcher)?;
 
     let txs = vec![
-        TransactionFullInfo {
-            tx: tx_1.clone(),
-            owner_operator_id: 1,
-        },
-        TransactionFullInfo {
-            tx: tx_2.clone(),
-            owner_operator_id: 2,
-        },
+        TransactionFullInfo { tx: tx_1.clone() },
+        TransactionFullInfo { tx: tx_2.clone() },
     ];
 
     println!("{} Create Instance id: 1", style("→").cyan());
