@@ -17,7 +17,7 @@ use transaction_dispatcher::{
     dispatcher::TransactionDispatcherApi, errors::DispatcherError, signer::Account,
 };
 
-pub struct Orchestrator<M, D, B>
+pub struct Orchestrator<'b, M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,
@@ -25,7 +25,7 @@ where
 {
     monitor: M,
     dispatcher: D,
-    store: B,
+    store: &'b B,
     current_height: BlockHeight,
     account: Account,
 }
@@ -44,25 +44,22 @@ pub trait OrchestratorApi {
     // Is passing the full transaction
     fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
 
-    fn get_finalized_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>>;
-
     fn is_ready(&mut self) -> Result<bool>;
 
     fn tick(&mut self) -> Result<()>;
 
-    fn acknowledged_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
-
     fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<()>;
+
     fn notify_insufficient_funds(&self, instance_id: InstanceId) -> Result<()>;
 }
 
-impl<M, D, B> Orchestrator<M, D, B>
+impl<'b, M, D, B> Orchestrator<'b, M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,
     B: BitvmxStoreApi,
 {
-    pub fn new(monitor: M, store: B, dispatcher: D, account: Account) -> Result<Self> {
+    pub fn new(monitor: M, store: &'b B, dispatcher: D, account: Account) -> Result<Self> {
         Ok(Self {
             monitor,
             dispatcher,
@@ -108,7 +105,7 @@ where
     }
 
     fn speed_up(
-        &mut self,
+        &self,
         instance_id: InstanceId,
         tx: &Transaction,
         funding_txid: Txid,
@@ -417,7 +414,7 @@ where
     }
 }
 
-impl<M, D, B> OrchestratorApi for Orchestrator<M, D, B>
+impl<'b, M, D, B> OrchestratorApi for Orchestrator<'b, M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,
@@ -524,19 +521,6 @@ where
         // The instance should exist in the storage.
         // The transaction id should not exist in the storage.
         // Usage: This method will likely be used for the final transaction to withdraw the funds.
-        Ok(())
-    }
-
-    fn get_finalized_txs(&self) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
-        self.store.get_txs_info(TransactionStatus::Finalized)
-    }
-
-    fn acknowledged_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
-        self.store.update_instance_tx_status(
-            instance_id,
-            tx_id,
-            TransactionStatus::Acknowledged,
-        )?;
         Ok(())
     }
 

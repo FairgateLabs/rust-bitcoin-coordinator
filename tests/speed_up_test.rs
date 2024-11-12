@@ -190,7 +190,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .returning(|_, _| Ok(()));
 
     // Initialize the orchestrator with mocks and begin monitoring the instance.
-    let mut orchestrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account)?;
+    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
     orchestrator.monitor_instance(&instance.clone())?;
 
     // Dispatch the transaction through the orchestrator.

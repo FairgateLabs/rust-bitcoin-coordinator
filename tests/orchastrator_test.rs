@@ -11,7 +11,7 @@ use transaction_dispatcher::signer::Account;
 
 #[test]
 fn orchastrator_is_ready_method_test() -> Result<(), anyhow::Error> {
-    let (mut mock_monitor, mock_store, account, mock_dispatcher) = get_mocks();
+    let (mut mock_monitor, store, account, mock_dispatcher) = get_mocks();
 
     mock_monitor
         .expect_is_ready()
@@ -23,7 +23,7 @@ fn orchastrator_is_ready_method_test() -> Result<(), anyhow::Error> {
         .times(1)
         .returning(|| Ok(true));
 
-    let mut orchastrator = Orchestrator::new(mock_monitor, mock_store, mock_dispatcher, account)?;
+    let mut orchastrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
 
     let is_ready = orchastrator.is_ready()?;
 
@@ -38,7 +38,7 @@ fn orchastrator_is_ready_method_test() -> Result<(), anyhow::Error> {
 
 #[test]
 fn tick_method_is_not_ready() -> Result<(), anyhow::Error> {
-    let (mut mock_monitor, mock_store, account, mock_dispatcher) = get_mocks();
+    let (mut mock_monitor, store, account, mock_dispatcher) = get_mocks();
 
     // Monitor is not ready then should call monitor tick
     mock_monitor
@@ -48,7 +48,7 @@ fn tick_method_is_not_ready() -> Result<(), anyhow::Error> {
 
     mock_monitor.expect_tick().times(1).returning(|| Ok(()));
 
-    let mut orchastrator = Orchestrator::new(mock_monitor, mock_store, mock_dispatcher, account)?;
+    let mut orchastrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
 
     orchastrator.tick()?;
 
@@ -71,7 +71,7 @@ fn monitor_instance_test() -> Result<(), anyhow::Error> {
         .with(eq(vec![instance_data]))
         .returning(|_| Ok(()));
 
-    let orchastrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account)?;
+    let orchastrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
 
     orchastrator.monitor_instance(&instance)?;
 

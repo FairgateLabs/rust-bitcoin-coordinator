@@ -37,14 +37,14 @@ fn main() -> Result<()> {
     let account = Account::new(network);
     let key_manager = create_key_manager(&config.key_manager, network)?;
     let dispatcher = TransactionDispatcher::new(client, key_manager);
-    let store = BitvmxStore::new_with_path(&config.database.path)?;
     let monitor = Monitor::new_with_paths(
         &config.rpc.url,
         &config.database.path,
         config.monitor.checkpoint_height,
     )?;
 
-    let orchestrator = Orchestrator::new(monitor, store, dispatcher, account.clone())
+    let store = BitvmxStore::new_with_path(&config.database.path)?;
+    let orchestrator = Orchestrator::new(monitor, &store, dispatcher, account.clone())
         .context("Failed to create Orchestrator instance")?;
 
     // Step 1: Create an instance with 2 transactions for different operators
@@ -77,15 +77,15 @@ fn main() -> Result<()> {
     send_transaction(instance.txs[0].tx.clone(), &Config::load()?, network)?;
 
     //Step 4. Given that stepHandler should know what to do in each step we are gonna save that step for intstance is the following
-    let storage = BitvmxStore::new_with_path((config.database.path + "/step_handler").as_str())?;
+    // let storage = BitvmxStore::new_with_path((config.database.path + "/step_handler").as_str())?;
 
-    storage.set_tx_to_answer(
+    store.set_tx_to_answer(
         instance.instance_id,
         instance.txs[0].tx.compute_txid(),
         instance.txs[1].tx.clone(),
     )?;
 
-    let mut step_handler = StepHandler::new(orchestrator, storage)?;
+    let mut step_handler = StepHandler::new(orchestrator, &store)?;
 
     let rx = handle_contro_c();
 

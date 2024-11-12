@@ -118,9 +118,7 @@ impl BitvmxStore {
 
         Ok(())
     }
-}
 
-impl BitvmxStoreApi for BitvmxStore {
     fn get_txs_info(
         &self,
         status: TransactionStatus,
@@ -144,6 +142,15 @@ impl BitvmxStoreApi for BitvmxStore {
         }
 
         Ok(ret_instance_txs)
+    }
+}
+
+impl BitvmxStoreApi for BitvmxStore {
+    fn get_txs_info(
+        &self,
+        status: TransactionStatus,
+    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
+        self.get_txs_info(status)
     }
 
     fn get_instances(&self) -> Result<Vec<InstanceId>> {
@@ -452,6 +459,11 @@ pub trait StepHandlerApi {
         tx_id: &Txid,
         status: TransactionStatus,
     ) -> Result<()>;
+
+    fn get_txs_info(
+        &self,
+        status: TransactionStatus,
+    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>>;
 }
 
 impl StepHandlerApi for BitvmxStore {
@@ -492,5 +504,12 @@ impl StepHandlerApi for BitvmxStore {
         status: TransactionStatus,
     ) -> Result<()> {
         self.update_instance_tx_status(instance_id, tx_id, status)
+    }
+
+    fn get_txs_info(
+        &self,
+        status: TransactionStatus,
+    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
+        self.get_txs_info(status)
     }
 }

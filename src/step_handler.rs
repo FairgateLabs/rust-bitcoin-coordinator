@@ -1,28 +1,32 @@
-use crate::{orchestrator::OrchestratorApi, storage::StepHandlerApi, types::InstanceId};
+use crate::{
+    orchestrator::OrchestratorApi,
+    storage::StepHandlerApi,
+    types::{InstanceId, TransactionStatus},
+};
 use anyhow::{Context, Ok, Result};
 use bitcoin::{Transaction, Txid};
 use console::style;
 use log::info;
 
-pub struct StepHandler<O, S>
+pub struct StepHandler<'s, O, S>
 where
     O: OrchestratorApi,
     S: StepHandlerApi,
 {
     orchestrator: O,
-    store: S,
+    store: &'s S,
 }
 
 pub trait StepHandlerTrait {
     fn tick(&mut self) -> Result<()>;
 }
 
-impl<O, S> StepHandler<O, S>
+impl<'s, O, S> StepHandler<'s, O, S>
 where
     O: OrchestratorApi,
     S: StepHandlerApi,
 {
-    pub fn new(orchestrator: O, store: S) -> Result<Self> {
+    pub fn new(orchestrator: O, store: &'s S) -> Result<Self> {
         Ok(Self {
             orchestrator,
             store,
@@ -52,14 +56,17 @@ where
         let tx: Transaction = tx.unwrap();
         self.orchestrator.send_tx_instance(instance_id, &tx)?;
 
-        self.orchestrator
-            .acknowledged_instance_tx(instance_id, &tx_id)?;
+        self.store.update_instance_tx_status(
+            instance_id,
+            &tx_id,
+            TransactionStatus::Acknowledged,
+        )?;
 
         Ok(())
     }
 }
 
-impl<O, S> StepHandlerTrait for StepHandler<O, S>
+impl<'s, O, S> StepHandlerTrait for StepHandler<'s, O, S>
 where
     O: OrchestratorApi,
     S: StepHandlerApi,
@@ -69,7 +76,7 @@ where
             .tick()
             .context("Failed tick orchestrator")?;
 
-        let confirmed_txs = self.orchestrator.get_finalized_txs()?;
+        let confirmed_txs = self.store.get_txs_info(TransactionStatus::Finalized)?;
 
         for (instance_id, txs) in confirmed_txs {
             for tx in txs {
