@@ -1,0 +1,130 @@
+use bitcoin::{absolute, transaction, Amount, Network, ScriptBuf, Transaction, TxOut};
+use bitvmx_transaction_monitor::monitor::MockMonitorApi;
+use bitvmx_transaction_monitor::types::InstanceData;
+use bitvmx_unstable::orchestrator::{Orchestrator, OrchestratorApi};
+use bitvmx_unstable::storage::BitvmxStore;
+use bitvmx_unstable::types::{BitvmxInstance, FundingTx, TransactionPartialInfo};
+use mockall::predicate::eq;
+use std::str::FromStr;
+use transaction_dispatcher::dispatcher::MockTransactionDispatcherApi;
+use transaction_dispatcher::signer::Account;
+
+#[test]
+fn orchastrator_is_ready_method_test() -> Result<(), anyhow::Error> {
+    let (mut mock_monitor, mock_store, account, mock_dispatcher) = get_mocks();
+
+    mock_monitor
+        .expect_is_ready()
+        .times(1)
+        .returning(|| Ok(false));
+
+    mock_monitor
+        .expect_is_ready()
+        .times(1)
+        .returning(|| Ok(true));
+
+    let mut orchastrator = Orchestrator::new(mock_monitor, mock_store, mock_dispatcher, account)?;
+
+    let is_ready = orchastrator.is_ready()?;
+
+    assert!(!is_ready);
+
+    let is_ready = orchastrator.is_ready()?;
+
+    assert!(is_ready);
+
+    Ok(())
+}
+
+#[test]
+fn tick_method_is_not_ready() -> Result<(), anyhow::Error> {
+    let (mut mock_monitor, mock_store, account, mock_dispatcher) = get_mocks();
+
+    // Monitor is not ready then should call monitor tick
+    mock_monitor
+        .expect_is_ready()
+        .times(1)
+        .returning(|| Ok(false));
+
+    mock_monitor.expect_tick().times(1).returning(|| Ok(()));
+
+    let mut orchastrator = Orchestrator::new(mock_monitor, mock_store, mock_dispatcher, account)?;
+
+    orchastrator.tick()?;
+
+    Ok(())
+}
+
+#[test]
+fn monitor_instance_test() -> Result<(), anyhow::Error> {
+    let (mut mock_monitor, store, account, mock_dispatcher) = get_mocks();
+
+    let (instance_id, instance, _tx) = get_mock_data();
+
+    let instance_data = InstanceData {
+        instance_id,
+        txs: vec![instance.txs[0].tx_id],
+    };
+
+    mock_monitor
+        .expect_save_instances_for_tracking()
+        .with(eq(vec![instance_data]))
+        .returning(|_| Ok(()));
+
+    let orchastrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account)?;
+
+    orchastrator.monitor_instance(&instance)?;
+
+    Ok(())
+}
+
+fn get_mocks() -> (
+    MockMonitorApi,
+    BitvmxStore,
+    Account,
+    MockTransactionDispatcherApi,
+) {
+    let mock_monitor = MockMonitorApi::new();
+    let store =
+        BitvmxStore::new_with_path(&format!("data/tests/{}", generate_random_string())).unwrap();
+    let network = Network::from_str("regtest").unwrap();
+    let account = Account::new(network);
+    let mock_dispatcher = MockTransactionDispatcherApi::new();
+    (mock_monitor, store, account, mock_dispatcher)
+}
+
+fn generate_random_string() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    (0..10).map(|_| rng.gen_range('a'..='z')).collect()
+}
+
+fn get_mock_data() -> (u32, BitvmxInstance<TransactionPartialInfo>, Transaction) {
+    let tx = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_info = TransactionPartialInfo {
+        tx_id: tx.compute_txid(),
+        owner_operator_id: 1,
+    };
+
+    let instance_id = 1;
+
+    let instance = BitvmxInstance::<TransactionPartialInfo> {
+        instance_id,
+        txs: vec![tx_info],
+        funding_tx: FundingTx {
+            tx_id: tx.compute_txid(),
+            utxo_index: 1,
+            utxo_output: TxOut {
+                value: Amount::default(),
+                script_pubkey: ScriptBuf::default(),
+            },
+        },
+    };
+    (instance_id, instance, tx)
+}
