@@ -37,6 +37,7 @@ pub struct RpcConfig {
 #[derive(Debug, Deserialize)]
 pub struct MonitorConfig {
     pub checkpoint_height: Option<BlockHeight>,
+    pub confirmation_threshold: u32,
 }
 
 #[derive(Debug, Deserialize)]

@@ -10,7 +10,8 @@ rpc:
     password: password
     wallet: test_wallet
 monitor:
-    checkpoint_height: 633
+    checkpoint_height: 764
+    confirmation_threshold: 6
 key_manager:
     key_derivation_seed: deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
     key_derivation_path: m/101/1/0/0/

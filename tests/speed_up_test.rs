@@ -1,6 +1,8 @@
-use bitcoin::{absolute, transaction, Amount, Network, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::{
+    absolute, transaction, Amount, BlockHash, Network, ScriptBuf, Transaction, TxOut, Txid,
+};
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
-use bitvmx_transaction_monitor::types::{InstanceData, TxStatus};
+use bitvmx_transaction_monitor::types::{BlockInfo, InstanceData, TxStatusResponse};
 use bitvmx_unstable::orchestrator::{Orchestrator, OrchestratorApi};
 use bitvmx_unstable::storage::BitvmxStore;
 use bitvmx_unstable::types::{BitvmxInstance, FundingTx, TransactionPartialInfo};
@@ -52,11 +54,10 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .returning(move || Ok(vec![(instance_id, vec![tx_id])]));
 
     // Transaction status initially shows it as unmined (not seen).
-    let tx_status = TxStatus {
+    let tx_status = TxStatusResponse {
         tx_id: tx.compute_txid(),
         tx_hex: None,
-        tx_was_seen: false,
-        height_tx_seen: None,
+        block_info: None,
         confirmations: 0,
     };
     mock_monitor
@@ -65,12 +66,22 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .with(eq(instance_id), eq(tx_id))
         .returning(move |_, _| Ok(Some(tx_status.clone())));
 
+    mock_monitor
+        .expect_get_confirmation_threshold()
+        .returning(|| 6);
+
     // Simulate the transaction status updating as it is seen but still unconfirmed.
-    let tx_status_confirmed = TxStatus {
+    let tx_status_confirmed = TxStatusResponse {
         tx_id: tx.compute_txid(),
         tx_hex: Some("Ox123".to_string()),
-        tx_was_seen: true,
-        height_tx_seen: Some(4),
+        block_info: Some(BlockInfo {
+            block_height: 4,
+            block_hash: BlockHash::from_str(
+                "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
+            )
+            .unwrap(),
+            is_orphan: false,
+        }),
         confirmations: 1, // Transaction is confirmed (mined).
     };
     mock_monitor
@@ -80,11 +91,17 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .returning(move |_, _| Ok(Some(tx_status_confirmed.clone())));
 
     // Simulate transaction reaching a finalized state after multiple confirmations.
-    let tx_status_finalized = TxStatus {
+    let tx_status_finalized = TxStatusResponse {
         tx_id: tx.compute_txid(),
         tx_hex: Some("Ox123".to_string()),
-        tx_was_seen: true,
-        height_tx_seen: Some(4),
+        block_info: Some(BlockInfo {
+            block_height: 4,
+            block_hash: BlockHash::from_str(
+                "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
+            )
+            .unwrap(),
+            is_orphan: false,
+        }),
         confirmations: 7, // Transaction is finalized.
     };
     mock_monitor

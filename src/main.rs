@@ -41,6 +41,7 @@ fn main() -> Result<()> {
         &config.rpc.url,
         &config.database.path,
         config.monitor.checkpoint_height,
+        config.monitor.confirmation_threshold,
     )?;
 
     let store = BitvmxStore::new_with_path(&config.database.path)?;

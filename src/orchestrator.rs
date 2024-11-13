@@ -9,7 +9,7 @@ use anyhow::{Context, Ok, Result};
 use bitcoin::{PublicKey, Transaction, TxOut, Txid};
 use bitvmx_transaction_monitor::{
     monitor::MonitorApi,
-    types::{BlockHeight, InstanceData, TxStatus},
+    types::{BlockHeight, InstanceData, TxStatusResponse},
 };
 use console::style;
 use log::info;
@@ -31,17 +31,13 @@ where
 }
 
 pub trait OrchestratorApi {
-    //TODO: this should be move to another place.
-    // const CONFIRMATIONS_THRESHOLD: u32 = 6;
-    // const OPERATOR_ID: u32 = 1;
-
     fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()>;
 
     // Add a non-existent transaction for an existing instance.
     fn add_tx_to_instance(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
 
-    // The way that the protocol ask to deliver an existing tx id for a instance id.
-    // Is passing the full transaction
+    // The protocol requires delivering an existing transaction ID for an instance ID.
+    // This is achieved by passing the full transaction.
     fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
 
     fn is_ready(&mut self) -> Result<bool>;
@@ -224,11 +220,11 @@ where
                 instance_id
             ))?;
 
-        if tx_status.tx_was_seen && tx_status.confirmations == 1 {
+        if tx_status.confirmations == 1 {
             self.handle_confirmation_speed_up_transaction(instance_id, &speed_up_tx)?;
         }
 
-        if !tx_status.tx_was_seen {
+        if !tx_status.was_seen() {
             // If a speed-up transaction has not been seen (it has not been mined), no action is required.
             // The responsibility for creating a new speed-up transaction lies with the instance transaction that is delivered.
         }
@@ -251,7 +247,7 @@ where
                 instance_id
             ))?;
 
-        if tx_status.tx_was_seen {
+        if tx_status.was_seen() {
             if tx_status.confirmations == 1 {
                 //Confirmation in 1 means is it already included in the block.
                 self.handle_confirmation_transaction(instance_id, &tx_status)?;
@@ -259,12 +255,8 @@ where
                 return Ok(());
             }
 
-            // This constant defines the minimum number of confirmations required for a transaction to be considered complete.
-            // It is currently set to 6, but it should be moved to a configuration file for better flexibility.
-            //TODO: Move this to a configuration file
-            const CONFIRMATIONS_THRESHOLD: u32 = 6;
-
-            if tx_status.confirmations >= CONFIRMATIONS_THRESHOLD {
+            //TODO: use confirmation_threshold from configuration
+            if tx_status.confirmations >= self.monitor.get_confirmation_threshold() {
                 // Transaction was mined and has sufficient confirmations for
                 // move the transaction to complete.
                 self.handle_complete_transaction(instance_id, &tx_status)?;
@@ -274,7 +266,7 @@ where
             return Ok(());
         }
 
-        if !tx_status.tx_was_seen {
+        if !tx_status.was_seen() {
             // Get information for the last time the transaction was sent
             let in_progress_tx = self.store.get_instance_tx(instance_id, &tx_id)?;
 
@@ -291,10 +283,8 @@ where
     fn handle_confirmation_transaction(
         &mut self,
         instance_id: InstanceId,
-        tx_status: &TxStatus,
+        tx_status: &TxStatusResponse,
     ) -> Result<()> {
-        // TODO: Heads up the protocol there is a change here.
-
         // Update the transaction to completed given that transaction has more than the threshold confirmations
         self.store.update_instance_tx_status(
             instance_id,
@@ -338,7 +328,7 @@ where
     fn handle_complete_transaction(
         &mut self,
         instance_id: InstanceId,
-        tx_status: &TxStatus,
+        tx_status: &TxStatusResponse,
     ) -> Result<()> {
         // Transaction was mined and has sufficient confirmations to mark it as complete.
 
