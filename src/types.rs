@@ -18,6 +18,8 @@ pub enum TransactionStatus {
     ReadyToSend,
     // Represents a transaction that has been broadcast to the network and is waiting for confirmations.
     Sent,
+    // Represents a transaction that has been successfully confirmed by the network but a reorganizacion move it out of the chain.
+    Orphan,
     // Represents a transaction that has been successfully confirmed by the network
     Confirmed,
     // Represents when the transaction was confirmed an amount of blocks
@@ -35,6 +37,14 @@ pub struct TransactionInfo {
     pub tx_id: Txid,
     pub deliver_block_height: Option<BlockHeight>,
     pub status: TransactionStatus,
+}
+
+impl TransactionInfo {
+    pub fn is_transaction_owned(&self) -> bool {
+        // This method provides a simple way to determine if this transaction belongs to the current operator.
+        // A transaction is considered owned if it has been sent by the operator.
+        self.tx.is_some() && self.deliver_block_height.is_some()
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]

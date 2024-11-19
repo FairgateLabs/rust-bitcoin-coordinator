@@ -34,9 +34,10 @@ pub trait OrchestratorApi {
     fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()>;
 
     // Add a non-existent transaction for an existing instance.
+    // This will be use in the final step.
     fn add_tx_to_instance(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
 
-    // The protocol requires delivering an existing transaction ID for an instance ID.
+    // The protocol requires delivering an existing transaction for an instance.
     // This is achieved by passing the full transaction.
     fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
 
@@ -178,8 +179,6 @@ where
 
     fn process_instance_news(&mut self) -> Result<()> {
         // Get any news in each instance that are being monitored.
-        // TODO: Monitor need to implement reorganisations in news. at this moment Monitor
-        // is not updating every instance update after a reorg.
         // Get instances news also returns the speed ups txs added for each instance.
         let news = self.monitor.get_instance_news()?;
 
@@ -197,7 +196,7 @@ where
                 let is_speed_up = self.store.is_speed_up_tx(instance_id, tx_id)?;
 
                 if is_speed_up {
-                    self.process_speed_up_change(instance_id, tx_id)?;
+                    self.process_speed_up_change(instance_id, &tx_id)?;
                 } else {
                     self.process_instance_tx_change(instance_id, tx_id)?;
                 }
@@ -207,21 +206,26 @@ where
         Ok(())
     }
 
-    fn process_speed_up_change(&mut self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
-        let speed_up_tx = self.store.get_speed_up_tx(instance_id, &tx_id)?.unwrap();
+    fn process_speed_up_change(&mut self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
         // This indicates that this is a speed-up transaction that has been mined with 1 confirmation,
         // which means it should be treated as the new funding transaction. // Get the transaction's status from the monitor
         let tx_status = self
             .monitor
-            .get_instance_tx_status(instance_id, tx_id)?
+            .get_instance_tx_status(instance_id, *tx_id)?
             .ok_or(anyhow::anyhow!(
                 "No transaction status found for transaction ID: {} and instance ID: {}",
                 tx_id,
                 instance_id
             ))?;
 
-        if tx_status.confirmations == 1 {
-            self.handle_confirmation_speed_up_transaction(instance_id, &speed_up_tx)?;
+        if tx_status.was_seen() {
+            if tx_status.confirmations == 1 {
+                self.handle_confirmation_speed_up_transaction(instance_id, tx_id)?;
+            }
+
+            if tx_status.is_orphan() {
+                self.handle_orphan_speed_up_transaction(instance_id, &tx_status.tx_id)?;
+            }
         }
 
         if !tx_status.was_seen() {
@@ -229,7 +233,7 @@ where
             // The responsibility for creating a new speed-up transaction lies with the instance transaction that is delivered.
         }
 
-        // TODO: In the event of a reorganization, we would need to do the opposite.
+        // In the event of a reorganization, we would need to do the opposite.
         // This involves removing the speed-up transaction and potentially replacing it with another transaction
         // that could take its place as the last speed-up transaction or become the new last funding transaction.
 
@@ -247,8 +251,12 @@ where
                 instance_id
             ))?;
 
-        if tx_status.was_seen() {
+        let was_seen = tx_status.was_seen();
+
+        if was_seen {
             if tx_status.confirmations == 1 {
+                // If tx is orphan then confirmations should be 0.  No need to process reorgs here.
+
                 //Confirmation in 1 means is it already included in the block.
                 self.handle_confirmation_transaction(instance_id, &tx_status)?;
 
@@ -263,10 +271,14 @@ where
                 return Ok(());
             }
 
+            if tx_status.is_orphan() {
+                self.handle_orphan_transaction(instance_id, &tx_status)?;
+            }
+
             return Ok(());
         }
 
-        if !tx_status.was_seen() {
+        if !was_seen {
             // Get information for the last time the transaction was sent
             let in_progress_tx = self.store.get_instance_tx(instance_id, &tx_id)?;
 
@@ -303,8 +315,13 @@ where
     fn handle_confirmation_speed_up_transaction(
         &mut self,
         instance_id: InstanceId,
-        speed_up_tx: &SpeedUpTx,
+        speed_up_tx_id: &Txid,
     ) -> Result<()> {
+        let speed_up_tx = self
+            .store
+            .get_speed_up_tx(instance_id, speed_up_tx_id)?
+            .unwrap();
+
         //Confirmation in 1 means the transaction is already included in the block.
         //The new transaction funding is gonna be this a speed-up transaction.
         let funding_info = FundingTx {
@@ -321,6 +338,64 @@ where
         // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
         self.monitor
             .acknowledge_instance_tx_news(instance_id, &speed_up_tx.tx_id)?;
+
+        Ok(())
+    }
+
+    fn handle_orphan_speed_up_transaction(
+        &mut self,
+        instance_id: InstanceId,
+        speed_up_tx_id: &Txid,
+    ) -> Result<()> {
+        //Speed up previouly was mined, now is orphan then, we have to remove it as a funding tx.
+        self.store.remove_funding_tx(instance_id, speed_up_tx_id)?;
+
+        // Acknowledge the transaction news to the monitor to update its state.
+        // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
+        self.monitor
+            .acknowledge_instance_tx_news(instance_id, speed_up_tx_id)?;
+
+        Ok(())
+    }
+
+    fn handle_orphan_transaction(
+        &mut self,
+        instance_id: InstanceId,
+        tx_status: &TxStatusResponse,
+    ) -> Result<()> {
+        // Transaction was mined and now is orphan.
+
+        // Notify the protocol about the transaction changes, specifically for confirmed transactions.
+        // This step is crucial for the protocol to be aware of the transaction's status and proceed accordingly.
+        self.notify_protocol_tx_changes(
+            instance_id,
+            &tx_status.tx_id,
+            &tx_status.tx_hex.clone().unwrap(),
+        )?;
+
+        let tx = self
+            .store
+            .get_instance_tx(instance_id, &tx_status.tx_id)?
+            .unwrap();
+
+        if tx.is_transaction_owned() {
+            // Assuming this transaction is in the mempool after a reorganization,
+            // it is now waiting to be included in a block again.
+            self.store.update_instance_tx_status(
+                instance_id,
+                &tx_status.tx_id,
+                TransactionStatus::Sent,
+            )?;
+        } else {
+            self.store.update_instance_tx_status(
+                instance_id,
+                &tx_status.tx_id,
+                TransactionStatus::Orphan,
+            )?;
+        }
+
+        self.monitor
+            .acknowledge_instance_tx_news(instance_id, &tx_status.tx_id)?;
 
         Ok(())
     }

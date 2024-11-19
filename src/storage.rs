@@ -55,6 +55,7 @@ pub trait BitvmxStoreApi {
     //FUNDING
     fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>>;
     fn add_funding_tx(&self, instance_id: InstanceId, tx: &FundingTx) -> Result<()>;
+    fn remove_funding_tx(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
 
     //SPEED UP
     fn get_speed_up_txs_for_child(
@@ -442,6 +443,25 @@ impl BitvmxStoreApi for BitvmxStore {
         status: TransactionStatus,
     ) -> Result<()> {
         self.update_instance_tx_status(instance_id, tx_id, status)
+    }
+
+    fn remove_funding_tx(&self, instance_id: InstanceId, funding_tx_id: &Txid) -> Result<()> {
+        let funding_tx_key = self.get_key(StoreKey::InstanceFundingList(instance_id));
+
+        // Retrieve the current list of funding transactions for the instance from storage.
+        let mut funding_txs = self
+            .store
+            .get::<&str, Vec<FundingTx>>(&funding_tx_key)
+            .context("Failed to retrieve funding transactions")?
+            .unwrap_or_default();
+
+        // Remove the specified funding transaction from the list.
+        funding_txs.retain(|t| t.tx_id != *funding_tx_id);
+
+        // Save the updated list of funding transactions back to storage.
+        self.store.set(&funding_tx_key, &funding_txs)?;
+
+        Ok(())
     }
 }
 #[automock]
