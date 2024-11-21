@@ -73,6 +73,10 @@ pub struct TransactionFullInfo {
 pub struct BitvmxInstance<T> {
     pub instance_id: InstanceId,
     pub txs: Vec<T>,
+    // TODO: The instance could receive the txid of the funding or the transaction to be mined.
+    // If the txid is sent, it is necessary to check that this transaction is mined.
+    // On the other hand, if the transaction to be mined is sent, it is necessary to dispatch
+    // this transaction and wait for it to be mined in order to start sending speed up transactions.
     pub funding_tx: FundingTx,
 }
 

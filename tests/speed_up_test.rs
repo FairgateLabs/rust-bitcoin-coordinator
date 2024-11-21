@@ -223,6 +223,254 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/*
+Test Summary:
+
+    First Tick:
+    - A transaction is submitted for monitoring.
+    - After the first tick, the transaction is unmined. A speed-up action is initiated.
+
+    Second Tick:
+    - The transaction remains unmined. A second speed-up action is triggered.
+
+    Third Tick:
+    - The transaction is successfully mined.
+    - The speed-up transaction replaces the original transaction as the new funding transaction.
+
+    Forth Tick - Chain Reorganization:
+    - A chain reorganization occurs, resulting in both the original and the speed-up transactions being excluded from the blockchain.
+    - The orphaned speed-up transaction is removed from the new funding transaction pool.
+*/
+
+#[test]
+fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
+    // Setup mocks for monitor, dispatcher, account, and storage to simulate the environment.
+    let (mut mock_monitor, store, account, mut mock_dispatcher) = get_mocks();
+    // Setup a mock instance containing a single transaction, marked for dispatch and monitoring.
+    let (instance_id, instance, tx) = get_mock_data();
+
+    println!("{}", tx.compute_txid());
+
+    // Indicate the monitor is ready to track the instance.
+    mock_monitor.expect_is_ready().returning(|| Ok(true));
+
+    // The dispatcher is expected to attempt sending the transaction `T` once initially.
+    mock_dispatcher
+        .expect_send()
+        .times(1)
+        .with(eq(tx.clone()))
+        .returning(move |tx_ret| Ok(tx_ret.compute_txid()));
+
+    // Simulate that the monitor's instance news initially has no updates about the transaction.
+    mock_monitor
+        .expect_get_instance_news()
+        .times(1)
+        .returning(move || Ok(vec![]));
+
+    // Define unique mock transaction IDs for each speed-up attempt.
+    let tx_speed_up_id =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
+
+    let tx_id = tx.compute_txid();
+    mock_monitor
+        .expect_get_instance_news()
+        .times(2)
+        .returning(move || Ok(vec![(instance_id, vec![tx_id, tx_speed_up_id])]));
+
+    // Transaction status initially shows it as unmined (not seen).
+    let tx_status_first_time = TxStatusResponse {
+        tx_id,
+        tx_hex: None,
+        block_info: None,
+        confirmations: 0,
+    };
+
+    // Mock the dispatcher to check if the transaction needs to be sped up. It should decide "no."
+    mock_dispatcher
+        .expect_should_speed_up()
+        .with(eq(Amount::default()))
+        .returning(|_| Ok(false));
+
+    mock_monitor
+        .expect_get_instance_tx_status()
+        .times(1)
+        .with(eq(instance_id), eq(tx_id))
+        .returning(move |_, _| Ok(Some(tx_status_first_time.clone())));
+
+    let tx_status_second_time = TxStatusResponse {
+        tx_id,
+        tx_hex: Some("0x123".to_string()),
+        block_info: Some(BlockInfo {
+            block_height: 50,
+            block_hash: BlockHash::from_str(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            )
+            .unwrap(),
+            is_orphan: false,
+        }),
+        confirmations: 1,
+    };
+
+    mock_monitor
+        .expect_get_instance_tx_status()
+        .times(1)
+        .with(eq(instance_id), eq(tx_id))
+        .returning(move |_, _| Ok(Some(tx_status_second_time.clone())));
+
+    let tx_status_third_time = TxStatusResponse {
+        tx_id,
+        tx_hex: Some("0x123".to_string()),
+        block_info: Some(BlockInfo {
+            block_height: 50,
+            block_hash: BlockHash::from_str(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            )
+            .unwrap(),
+            is_orphan: true,
+        }),
+        confirmations: 0,
+    };
+
+    mock_monitor
+        .expect_get_instance_tx_status()
+        .times(2)
+        .with(eq(instance_id), eq(tx_id))
+        .returning(move |_, _| Ok(Some(tx_status_third_time.clone())));
+
+    // Speed up tx status initially shows it as seen.
+    let tx_speed_up_status = TxStatusResponse {
+        tx_id: tx_speed_up_id,
+        tx_hex: Some("0x1234".to_string()),
+        block_info: Some(BlockInfo {
+            block_height: 100,
+            block_hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .unwrap(),
+            is_orphan: false,
+        }),
+        confirmations: 1,
+    };
+
+    mock_monitor
+        .expect_get_instance_tx_status()
+        .times(1)
+        .with(eq(instance_id), eq(tx_speed_up_id))
+        .returning(move |_, _| Ok(Some(tx_speed_up_status.clone())));
+
+    //Speed up tx status then should be reorg
+    let tx_status = TxStatusResponse {
+        tx_id: tx_speed_up_id,
+        tx_hex: Some("0x1234".to_string()),
+        block_info: Some(BlockInfo {
+            block_height: 100,
+            block_hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .unwrap(),
+            is_orphan: true,
+        }),
+        confirmations: 0,
+    };
+
+    mock_monitor
+        .expect_get_instance_tx_status()
+        .times(1)
+        .with(eq(instance_id), eq(tx_speed_up_id))
+        .returning(move |_, _| Ok(Some(tx_status.clone())));
+
+    mock_monitor
+        .expect_get_confirmation_threshold()
+        .returning(|| 6);
+
+    // First speed-up attempt: Create a new speed-up transaction based on original funding transaction.
+    mock_dispatcher
+        .expect_speed_up()
+        .times(1)
+        .with(
+            eq(tx.clone()),
+            eq(account.pk),
+            eq(instance.funding_tx.tx_id),
+            eq((
+                instance.funding_tx.utxo_index,
+                instance.funding_tx.utxo_output.clone(),
+                account.pk,
+            )),
+        )
+        .returning(move |_, _, _, _| Ok((tx_speed_up_id, Amount::default())));
+
+    // Configure monitor to begin tracking the instance containing the transaction.
+    let instance_data = InstanceData {
+        instance_id,
+        txs: vec![instance.txs[0].tx_id],
+    };
+
+    mock_monitor
+        .expect_save_instances_for_tracking()
+        .with(eq(vec![instance_data]))
+        .returning(|_| Ok(()));
+
+    // Simulate blockchain height changes with each tick, representing block progress.
+    mock_monitor
+        .expect_get_current_height()
+        .times(1)
+        .returning(|| 0);
+    mock_monitor
+        .expect_get_current_height()
+        .times(1)
+        .returning(|| 1);
+    mock_monitor
+        .expect_get_current_height()
+        .times(1)
+        .returning(|| 2);
+    mock_monitor
+        .expect_get_current_height()
+        .times(1)
+        .returning(|| 3);
+    mock_monitor.expect_get_current_height().returning(|| 4);
+
+    // Acknowledge transaction updates twice to notify the monitor of our awareness of changes.
+    mock_monitor
+        .expect_acknowledge_instance_tx_news()
+        .times(2)
+        .with(eq(instance_id), eq(tx_speed_up_id))
+        .returning(|_, _| Ok(()));
+
+    // Acknowledge transaction twice to notify the monitor of our awareness of changes.
+    mock_monitor
+        .expect_acknowledge_instance_tx_news()
+        .times(2)
+        .with(eq(instance_id), eq(tx_id))
+        .returning(|_, _| Ok(()));
+
+    // Save both speed-up transactions in the monitor for tracking purposes.
+    mock_monitor
+        .expect_save_transaction_for_tracking()
+        .times(1)
+        .with(eq(instance_id), eq(tx_speed_up_id))
+        .returning(|_, _| Ok(()));
+
+    // Initialize the orchestrator with mocks and begin monitoring the instance.
+    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
+    orchestrator.monitor_instance(&instance.clone())?;
+
+    // Dispatch the transaction through the orchestrator.
+    orchestrator.send_tx_instance(instance_id, &tx)?;
+
+    // Simulate ticks to monitor and adjust transaction status with each blockchain height update.
+    println!("TICK");
+    orchestrator.tick()?; // Dispatch and observe unmined status.
+    println!("TICK");
+    orchestrator.tick()?; // Speed-up after unconfirmed status persists.
+    println!("TICK");
+    orchestrator.tick()?; // Transaction should be mined.
+
+    println!("TICK");
+    orchestrator.tick()?; // Found a reorg, then Transaction and Speed up are not mined.
+
+    Ok(())
+}
+
 fn get_mocks() -> (
     MockMonitorApi,
     BitvmxStore,

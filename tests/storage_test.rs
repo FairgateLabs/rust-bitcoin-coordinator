@@ -358,5 +358,15 @@ fn funding_tests() -> Result<(), anyhow::Error> {
     let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
     assert_eq!(funding_tx_to_validate.unwrap(), funding_tx_2);
 
+    //Remove the last funding tx and check if the first funding tx is retrieved
+    bitvmx_store.remove_funding_tx(instance_id, &tx_id_2)?;
+    let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
+    assert_eq!(funding_tx_to_validate.unwrap(), funding_tx);
+
+    // Remove the first funding transaction and verify it's no longer present
+    bitvmx_store.remove_funding_tx(instance_id, &tx_id_1)?;
+    let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
+    assert_eq!(funding_tx_to_validate, None);
+
     Ok(())
 }

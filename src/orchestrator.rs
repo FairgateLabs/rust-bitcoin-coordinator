@@ -170,7 +170,8 @@ where
                     style(tx.tx_id).blue(),
                     style(instance_id).red()
                 );
-                self.process_instance_tx_change(instance_id, tx.tx_id)?;
+
+                self.process_instance_tx_change(instance_id, &tx.tx_id)?;
             }
         }
 
@@ -198,8 +199,13 @@ where
                 if is_speed_up {
                     self.process_speed_up_change(instance_id, &tx_id)?;
                 } else {
-                    self.process_instance_tx_change(instance_id, tx_id)?;
+                    self.process_instance_tx_change(instance_id, &tx_id)?;
                 }
+
+                // Acknowledge the transaction news to the monitor to update its state.
+                // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
+                self.monitor
+                    .acknowledge_instance_tx_news(instance_id, &tx_id)?;
             }
         }
 
@@ -211,14 +217,14 @@ where
         // which means it should be treated as the new funding transaction. // Get the transaction's status from the monitor
         let tx_status = self
             .monitor
-            .get_instance_tx_status(instance_id, *tx_id)?
+            .get_instance_tx_status(instance_id, tx_id)?
             .ok_or(anyhow::anyhow!(
                 "No transaction status found for transaction ID: {} and instance ID: {}",
                 tx_id,
                 instance_id
             ))?;
 
-        if tx_status.was_seen() {
+        if tx_status.is_confirmed() {
             if tx_status.confirmations == 1 {
                 self.handle_confirmation_speed_up_transaction(instance_id, tx_id)?;
             }
@@ -228,7 +234,7 @@ where
             }
         }
 
-        if !tx_status.was_seen() {
+        if !tx_status.is_confirmed() {
             // If a speed-up transaction has not been seen (it has not been mined), no action is required.
             // The responsibility for creating a new speed-up transaction lies with the instance transaction that is delivered.
         }
@@ -240,52 +246,67 @@ where
         Ok(())
     }
 
-    fn process_instance_tx_change(&mut self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
-        // Get the transaction's status from the monitor
+    fn process_instance_tx_change(&mut self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
         let tx_status = self
             .monitor
             .get_instance_tx_status(instance_id, tx_id)?
             .ok_or(anyhow::anyhow!(
-                "No transaction status found for transaction ID: {} and instance ID: {}",
+                "Transaction status not found for transaction ID: {} and instance ID: {}",
                 tx_id,
                 instance_id
             ))?;
 
-        let was_seen = tx_status.was_seen();
+        let is_confirmed = tx_status.is_confirmed();
 
-        if was_seen {
+        if is_confirmed {
             if tx_status.confirmations == 1 {
-                // If tx is orphan then confirmations should be 0.  No need to process reorgs here.
-
-                //Confirmation in 1 means is it already included in the block.
+                // If the transaction has only one confirmation:
+                // This means it has been included in a block but not yet deeply confirmed.
                 self.handle_confirmation_transaction(instance_id, &tx_status)?;
-
                 return Ok(());
             }
 
-            //TODO: use confirmation_threshold from configuration
             if tx_status.confirmations >= self.monitor.get_confirmation_threshold() {
-                // Transaction was mined and has sufficient confirmations for
-                // move the transaction to complete.
+                // If the transaction has sufficient confirmations, it is considered fully complete.
+                // Mark the transaction as completed
                 self.handle_complete_transaction(instance_id, &tx_status)?;
                 return Ok(());
             }
-
-            if tx_status.is_orphan() {
-                self.handle_orphan_transaction(instance_id, &tx_status)?;
-            }
-
-            return Ok(());
         }
 
-        if !was_seen {
-            // Get information for the last time the transaction was sent
-            let in_progress_tx = self.store.get_instance_tx(instance_id, &tx_id)?;
+        if !is_confirmed {
+            // Retrieve information about the last known state of this transaction
+            let in_progress_tx = self.store.get_instance_tx(instance_id, tx_id)?.unwrap();
 
-            if let Some(in_progress_tx) = in_progress_tx {
-                // The transaction is in progress for us, and was not seen yet in the chain.
-                // It means we have to resend or speed up the tx.
+            if in_progress_tx.is_transaction_owned() {
+                if tx_status.is_orphan() {
+                    // Transaction is considered "orphaned" (removed from its block due to a reorg).
+                    // Update its status to indicate it is back in the mempool.
+                    self.store.update_instance_tx_status(
+                        instance_id,
+                        tx_id,
+                        TransactionStatus::Sent,
+                    )?;
+                }
+
+                // The transaction is currently considered in-progress but has not been observed on-chain.
+                // Resend or accelerate the transaction to ensure it propagates properly.
                 self.handle_unseen_transaction(instance_id, &in_progress_tx)?;
+            } else if tx_status.is_orphan() {
+                // Notify the protocol of the status change for orphaned transactions.
+                // This ensures the protocol can adjust to the transaction's state.
+                self.notify_protocol_tx_changes(
+                    instance_id,
+                    &tx_status.tx_id,
+                    &tx_status.tx_hex.clone().unwrap(),
+                )?;
+
+                // Update the local storage to mark the transaction as orphaned.
+                self.store.update_instance_tx_status(
+                    instance_id,
+                    &tx_status.tx_id,
+                    TransactionStatus::Orphan,
+                )?;
             }
         }
 
@@ -303,11 +324,6 @@ where
             &tx_status.tx_id,
             TransactionStatus::Confirmed,
         )?;
-
-        // Acknowledge the transaction news to the monitor to update its state.
-        // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
-        self.monitor
-            .acknowledge_instance_tx_news(instance_id, &tx_status.tx_id)?;
 
         Ok(())
     }
@@ -334,11 +350,6 @@ where
         // The inverse should also be supported.
         self.store.add_funding_tx(instance_id, &funding_info)?;
 
-        // Acknowledge the transaction news to the monitor to update its state.
-        // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
-        self.monitor
-            .acknowledge_instance_tx_news(instance_id, &speed_up_tx.tx_id)?;
-
         Ok(())
     }
 
@@ -349,53 +360,6 @@ where
     ) -> Result<()> {
         //Speed up previouly was mined, now is orphan then, we have to remove it as a funding tx.
         self.store.remove_funding_tx(instance_id, speed_up_tx_id)?;
-
-        // Acknowledge the transaction news to the monitor to update its state.
-        // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
-        self.monitor
-            .acknowledge_instance_tx_news(instance_id, speed_up_tx_id)?;
-
-        Ok(())
-    }
-
-    fn handle_orphan_transaction(
-        &mut self,
-        instance_id: InstanceId,
-        tx_status: &TxStatusResponse,
-    ) -> Result<()> {
-        // Transaction was mined and now is orphan.
-
-        // Notify the protocol about the transaction changes, specifically for confirmed transactions.
-        // This step is crucial for the protocol to be aware of the transaction's status and proceed accordingly.
-        self.notify_protocol_tx_changes(
-            instance_id,
-            &tx_status.tx_id,
-            &tx_status.tx_hex.clone().unwrap(),
-        )?;
-
-        let tx = self
-            .store
-            .get_instance_tx(instance_id, &tx_status.tx_id)?
-            .unwrap();
-
-        if tx.is_transaction_owned() {
-            // Assuming this transaction is in the mempool after a reorganization,
-            // it is now waiting to be included in a block again.
-            self.store.update_instance_tx_status(
-                instance_id,
-                &tx_status.tx_id,
-                TransactionStatus::Sent,
-            )?;
-        } else {
-            self.store.update_instance_tx_status(
-                instance_id,
-                &tx_status.tx_id,
-                TransactionStatus::Orphan,
-            )?;
-        }
-
-        self.monitor
-            .acknowledge_instance_tx_news(instance_id, &tx_status.tx_id)?;
 
         Ok(())
     }
@@ -421,11 +385,6 @@ where
             &tx_status.tx_id,
             TransactionStatus::Finalized,
         )?;
-
-        // Acknowledge the transaction news to the monitor to update its state.
-        // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
-        self.monitor
-            .acknowledge_instance_tx_news(instance_id, &tx_status.tx_id)?;
 
         Ok(())
     }
@@ -508,6 +467,7 @@ where
             .context("Error sending pending transactions")?;
 
         let last_block_height: u32 = self.current_height;
+        println!("last_block_height {}", last_block_height);
         self.current_height = self.monitor.get_current_height();
 
         // If the last block height is the same as the current one, there's no need to continue.
