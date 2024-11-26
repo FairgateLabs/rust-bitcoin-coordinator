@@ -56,12 +56,6 @@ where
         let tx: Transaction = tx.unwrap();
         self.orchestrator.send_tx_instance(instance_id, &tx)?;
 
-        self.store.update_instance_tx_status(
-            instance_id,
-            &tx_id,
-            TransactionStatus::Acknowledged,
-        )?;
-
         Ok(())
     }
 }
@@ -81,6 +75,12 @@ where
         for (instance_id, txs) in confirmed_txs {
             for tx in txs {
                 self.send_next_step_tx(instance_id, tx.tx_id)?;
+
+                self.store.update_instance_tx_status(
+                    instance_id,
+                    &tx.tx_id,
+                    TransactionStatus::Acknowledged,
+                )?;
             }
         }
 
