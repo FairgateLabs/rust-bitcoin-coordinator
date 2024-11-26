@@ -144,18 +144,12 @@ where
         Ok(())
     }
 
-    fn notify_protocol_tx_changes(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-        tx_hex: &str,
-    ) -> Result<()> {
+    fn notify_protocol_tx_changes(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()> {
         // Implement the notification logic here
         info!(
-            "Found tx sent to protocol for instance_id: {:?}  tx_id: {} tx_hex {}",
+            "Found tx sent to protocol for instance_id: {:?}  tx_id: {}",
             instance_id,
-            style(tx_id).blue(),
-            tx_hex
+            style(tx.compute_txid()).blue(),
         );
         Ok(())
     }
@@ -295,11 +289,7 @@ where
             } else if tx_status.is_orphan() {
                 // Notify the protocol of the status change for orphaned transactions.
                 // This ensures the protocol can adjust to the transaction's state.
-                self.notify_protocol_tx_changes(
-                    instance_id,
-                    &tx_status.tx_id,
-                    &tx_status.tx_hex.clone().unwrap(),
-                )?;
+                self.notify_protocol_tx_changes(instance_id, &tx_status.tx.clone().unwrap())?;
 
                 // Update the local storage to mark the transaction as orphaned.
                 self.store.update_instance_tx_status(
@@ -373,11 +363,7 @@ where
 
         // Notify the protocol about the transaction changes, specifically for confirmed transactions.
         // This step is crucial for the protocol to be aware of the transaction's status and proceed accordingly.
-        self.notify_protocol_tx_changes(
-            instance_id,
-            &tx_status.tx_id,
-            &tx_status.tx_hex.clone().unwrap(),
-        )?;
+        self.notify_protocol_tx_changes(instance_id, &tx_status.tx.clone().unwrap())?;
 
         // Update the transaction to completed given that transaction has more than the threshold confirmations
         self.store.update_instance_tx_status(

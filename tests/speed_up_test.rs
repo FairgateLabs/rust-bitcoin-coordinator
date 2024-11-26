@@ -1,3 +1,4 @@
+use bitcoin::absolute::LockTime;
 use bitcoin::{
     absolute, transaction, Amount, BlockHash, Network, ScriptBuf, Transaction, TxOut, Txid,
 };
@@ -56,7 +57,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     // Transaction status initially shows it as unmined (not seen).
     let tx_status = TxStatusResponse {
         tx_id: tx.compute_txid(),
-        tx_hex: None,
+        tx: None,
         block_info: None,
         confirmations: 0,
     };
@@ -73,7 +74,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     // Simulate the transaction status updating as it is seen but still unconfirmed.
     let tx_status_confirmed = TxStatusResponse {
         tx_id: tx.compute_txid(),
-        tx_hex: Some("Ox123".to_string()),
+        tx: Some(tx.clone()),
         block_info: Some(BlockInfo {
             block_height: 4,
             block_hash: BlockHash::from_str(
@@ -93,7 +94,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     // Simulate transaction reaching a finalized state after multiple confirmations.
     let tx_status_finalized = TxStatusResponse {
         tx_id: tx.compute_txid(),
-        tx_hex: Some("Ox123".to_string()),
+        tx: Some(tx.clone()),
         block_info: Some(BlockInfo {
             block_height: 4,
             block_hash: BlockHash::from_str(
@@ -249,7 +250,8 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     // Setup a mock instance containing a single transaction, marked for dispatch and monitoring.
     let (instance_id, instance, tx) = get_mock_data();
 
-    println!("{}", tx.compute_txid());
+    let tx_clone = tx.clone();
+    let tx_id = tx.compute_txid();
 
     // Indicate the monitor is ready to track the instance.
     mock_monitor.expect_is_ready().returning(|| Ok(true));
@@ -258,7 +260,7 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     mock_dispatcher
         .expect_send()
         .times(1)
-        .with(eq(tx.clone()))
+        .with(eq(tx_clone))
         .returning(move |tx_ret| Ok(tx_ret.compute_txid()));
 
     // Simulate that the monitor's instance news initially has no updates about the transaction.
@@ -268,10 +270,15 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
         .returning(move || Ok(vec![]));
 
     // Define unique mock transaction IDs for each speed-up attempt.
-    let tx_speed_up_id =
-        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
+    let tx_speed_up = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
 
-    let tx_id = tx.compute_txid();
+    let tx_speed_up_id = tx_speed_up.compute_txid();
+
     mock_monitor
         .expect_get_instance_news()
         .times(2)
@@ -280,7 +287,7 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     // Transaction status initially shows it as unmined (not seen).
     let tx_status_first_time = TxStatusResponse {
         tx_id,
-        tx_hex: None,
+        tx: None,
         block_info: None,
         confirmations: 0,
     };
@@ -299,7 +306,7 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
 
     let tx_status_second_time = TxStatusResponse {
         tx_id,
-        tx_hex: Some("0x123".to_string()),
+        tx: Some(tx.clone()),
         block_info: Some(BlockInfo {
             block_height: 50,
             block_hash: BlockHash::from_str(
@@ -319,7 +326,7 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
 
     let tx_status_third_time = TxStatusResponse {
         tx_id,
-        tx_hex: Some("0x123".to_string()),
+        tx: Some(tx.clone()),
         block_info: Some(BlockInfo {
             block_height: 50,
             block_hash: BlockHash::from_str(
@@ -340,7 +347,7 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     // Speed up tx status initially shows it as seen.
     let tx_speed_up_status = TxStatusResponse {
         tx_id: tx_speed_up_id,
-        tx_hex: Some("0x1234".to_string()),
+        tx: Some(tx.clone()),
         block_info: Some(BlockInfo {
             block_height: 100,
             block_hash: BlockHash::from_str(
@@ -355,13 +362,13 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     mock_monitor
         .expect_get_instance_tx_status()
         .times(1)
-        .with(eq(instance_id), eq(tx_speed_up_id))
+        .with(eq(instance_id), eq(tx_speed_up.clone().compute_txid()))
         .returning(move |_, _| Ok(Some(tx_speed_up_status.clone())));
 
     //Speed up tx status then should be reorg
     let tx_status = TxStatusResponse {
-        tx_id: tx_speed_up_id,
-        tx_hex: Some("0x1234".to_string()),
+        tx_id: tx_speed_up.compute_txid(),
+        tx: Some(tx_speed_up.clone()),
         block_info: Some(BlockInfo {
             block_height: 100,
             block_hash: BlockHash::from_str(
@@ -376,7 +383,7 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     mock_monitor
         .expect_get_instance_tx_status()
         .times(1)
-        .with(eq(instance_id), eq(tx_speed_up_id))
+        .with(eq(instance_id), eq(tx_speed_up.compute_txid()))
         .returning(move |_, _| Ok(Some(tx_status.clone())));
 
     mock_monitor
@@ -397,7 +404,7 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
                 account.pk,
             )),
         )
-        .returning(move |_, _, _, _| Ok((tx_speed_up_id, Amount::default())));
+        .returning(move |_, _, _, _| Ok((tx_speed_up.compute_txid(), Amount::default())));
 
     // Configure monitor to begin tracking the instance containing the transaction.
     let instance_data = InstanceData {
