@@ -68,6 +68,10 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .returning(move |_, _| Ok(Some(tx_status.clone())));
 
     mock_monitor
+        .expect_get_address_news()
+        .returning(move || Ok(vec![]));
+
+    mock_monitor
         .expect_get_confirmation_threshold()
         .returning(|| 6);
 
@@ -267,6 +271,10 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     mock_monitor
         .expect_get_instance_news()
         .times(1)
+        .returning(move || Ok(vec![]));
+
+    mock_monitor
+        .expect_get_address_news()
         .returning(move || Ok(vec![]));
 
     // Define unique mock transaction IDs for each speed-up attempt.

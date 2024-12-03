@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use anyhow::{Context, Ok, Result};
-use bitcoin::{PublicKey, Transaction, TxOut, Txid};
+use bitcoin::{Address, PublicKey, Transaction, TxOut, Txid};
 use bitvmx_transaction_monitor::{
     monitor::MonitorApi,
     types::{BlockHeight, InstanceData, TxStatusResponse},
@@ -48,6 +48,8 @@ pub trait OrchestratorApi {
     fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<()>;
 
     fn notify_insufficient_funds(&self, instance_id: InstanceId) -> Result<()>;
+
+    fn monitor_address(&self, address: Address) -> Result<()>;
 }
 
 impl<'b, M, D, B> Orchestrator<'b, M, D, B>
@@ -469,6 +471,9 @@ where
         self.process_in_progress_txs()
             .context("Failed to process instance updates")?;
 
+        let _address_news = self.monitor.get_address_news()?;
+        //TODO: notify to the protocol new addresses found in transactions
+
         Ok(())
     }
 
@@ -541,5 +546,9 @@ where
 
     fn notify_insufficient_funds(&self, _instance_id: InstanceId) -> Result<()> {
         todo!()
+    }
+
+    fn monitor_address(&self, address: Address) -> Result<()> {
+        self.monitor.save_address_for_tracking(address)
     }
 }
