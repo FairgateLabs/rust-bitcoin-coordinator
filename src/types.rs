@@ -1,5 +1,5 @@
-use bitcoin::{Amount, Transaction, TxOut, Txid};
-use bitvmx_transaction_monitor::types::BlockHeight;
+use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
+use bitvmx_transaction_monitor::types::{AddressStatus, BlockHeight};
 use serde::{Deserialize, Serialize};
 
 pub type InstanceId = u32;
@@ -96,4 +96,20 @@ impl BitvmxInstance<TransactionFullInfo> {
             funding_tx: self.funding_tx.clone(),
         }
     }
+}
+
+/// News represents new events that need to be processed
+/// - txs_by_id: New transactions found for specific instance IDs
+/// - txs_by_address: New transactions found for monitored addresses
+/// - funds_requests: Instance IDs that need additional funding
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct News {
+    pub txs_by_id: Vec<(InstanceId, Vec<TransactionInfo>)>,
+    pub txs_by_address: Vec<(Address, Vec<AddressStatus>)>,
+    pub funds_requests: Vec<InstanceId>,
+}
+pub struct ProcessedNews {
+    pub txs_by_id: Vec<(InstanceId, Vec<Txid>)>,
+    pub txs_by_address: Vec<Address>,
+    pub funds_requests: Vec<InstanceId>,
 }

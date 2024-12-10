@@ -1,8 +1,8 @@
 use crate::{
     storage::BitvmxStoreApi,
     types::{
-        BitvmxInstance, FundingTx, InstanceId, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
-        TransactionStatus,
+        BitvmxInstance, FundingTx, InstanceId, News, ProcessedNews, SpeedUpTx, TransactionInfo,
+        TransactionPartialInfo, TransactionStatus,
     },
 };
 use anyhow::{Context, Ok, Result};
@@ -47,9 +47,11 @@ pub trait OrchestratorApi {
 
     fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<()>;
 
-    fn notify_insufficient_funds(&self, instance_id: InstanceId) -> Result<()>;
-
     fn monitor_address(&self, address: Address) -> Result<()>;
+
+    fn get_news(&self) -> Result<News>;
+
+    fn acknowledge_news(&self, processed_news: ProcessedNews) -> Result<()>;
 }
 
 impl<'b, M, D, B> Orchestrator<'b, M, D, B>
@@ -118,7 +120,7 @@ where
         if let Err(error) = dispatch_result {
             match error {
                 DispatcherError::InsufficientFunds => {
-                    self.notify_insufficient_funds(instance_id)?;
+                    self.store.add_funding_request(instance_id)?;
                     return Ok(());
                 }
                 e => return Err(e.into()),
@@ -299,6 +301,8 @@ where
                     &tx_status.tx_id,
                     TransactionStatus::Orphan,
                 )?;
+
+                self.store.add_instance_tx_news(instance_id, *tx_id)?;
             }
         }
 
@@ -316,6 +320,9 @@ where
             &tx_status.tx_id,
             TransactionStatus::Confirmed,
         )?;
+
+        self.store
+            .add_instance_tx_news(instance_id, tx_status.tx_id)?;
 
         Ok(())
     }
@@ -373,6 +380,9 @@ where
             &tx_status.tx_id,
             TransactionStatus::Finalized,
         )?;
+
+        self.store
+            .add_instance_tx_news(instance_id, tx_status.tx_id)?;
 
         Ok(())
     }
@@ -471,7 +481,7 @@ where
         self.process_in_progress_txs()
             .context("Failed to process instance updates")?;
 
-        let _address_news = self.monitor.get_address_news()?;
+        // let _address_news = self.monitor.get_address_news()?;
         //TODO: notify to the protocol new addresses found in transactions
 
         Ok(())
@@ -544,11 +554,70 @@ where
         self.store.add_funding_tx(instance_id, funding_tx)
     }
 
-    fn notify_insufficient_funds(&self, _instance_id: InstanceId) -> Result<()> {
-        todo!()
-    }
-
     fn monitor_address(&self, address: Address) -> Result<()> {
         self.monitor.save_address_for_tracking(address)
+    }
+
+    fn get_news(&self) -> Result<News> {
+        let instance_tx_news = self.store.get_instance_tx_news()?;
+        let mut txs_by_id: Vec<(InstanceId, Vec<TransactionInfo>)> = Vec::new();
+
+        for (instance_id, tx_ids) in instance_tx_news {
+            let mut instance_txs = Vec::new();
+
+            for tx_id in tx_ids {
+                let tx_info = self
+                    .store
+                    .get_instance_tx(instance_id, &tx_id)?
+                    .expect("Transaction not found in instance");
+
+                instance_txs.push(tx_info);
+            }
+
+            txs_by_id.push((instance_id, instance_txs));
+        }
+
+        let txs_by_address = self
+            .monitor
+            .get_address_news()
+            .context("Failed to get address news from monitor")?;
+
+        let funds_requests = self
+            .store
+            .get_funding_requests()
+            .context("Failed to get funding requests from store")?;
+
+        Ok(News {
+            txs_by_id,
+            txs_by_address,
+            funds_requests,
+        })
+    }
+
+    fn acknowledge_news(&self, processed_news: ProcessedNews) -> Result<()> {
+        // Acknowledge transaction news for each instance
+        for (instance_id, tx_ids) in processed_news.txs_by_id {
+            for tx_id in tx_ids {
+                self.store
+                    .acknowledge_instance_tx_news(instance_id, tx_id)
+                    .context("Failed to acknowledge instance tx news")?;
+            }
+        }
+
+        // Acknowledge address news
+        for address in processed_news.txs_by_address {
+            self.monitor
+                .acknowledge_address_news(address)
+                .context("Failed to acknowledge address news")?;
+        }
+
+        // Acknowledge funding requests
+        for instance_id in processed_news.funds_requests {
+            self.store
+                .acknowledge_funding_request(instance_id)
+                .context("Failed to acknowledge funding request")?;
+        }
+
+        Ok(())
     }
 }

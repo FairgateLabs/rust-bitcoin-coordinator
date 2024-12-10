@@ -17,6 +17,8 @@ enum StoreKey {
     InstanceList,
     InstanceFundingList(InstanceId),
     InstanceSpeedUpList(InstanceId),
+    FundingRequestList,
+    InstanceTxNews,
 }
 
 #[automock]
@@ -52,12 +54,14 @@ pub trait BitvmxStoreApi {
         status: TransactionStatus,
     ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>>;
 
-    //FUNDING
-    fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>>;
-    fn add_funding_tx(&self, instance_id: InstanceId, tx: &FundingTx) -> Result<()>;
-    fn remove_funding_tx(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
+    fn update_instance_tx_status(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+        status: TransactionStatus,
+    ) -> Result<()>;
 
-    //SPEED UP
+    // SPEED UP TRANSACTIONS
     fn get_speed_up_txs_for_child(
         &self,
         instance_id: InstanceId,
@@ -70,12 +74,23 @@ pub trait BitvmxStoreApi {
 
     fn is_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool>;
 
-    fn update_instance_tx_status(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-        status: TransactionStatus,
-    ) -> Result<()>;
+    // FUNDING TRANSACTIONS
+    // Funding transactions are used to provide capital to speed-up transactions
+    // when fee acceleration is needed
+    fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>>;
+    fn add_funding_tx(&self, instance_id: InstanceId, tx: &FundingTx) -> Result<()>;
+    fn remove_funding_tx(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
+
+    // FUNDING TRANSACTIONS REQUESTS
+    // Funding requests are created when an instance run out off funds
+    // and requires additional funding to speed up transactions
+    fn add_funding_request(&self, instance_id: InstanceId) -> Result<()>;
+    fn acknowledge_funding_request(&self, instance_id: InstanceId) -> Result<()>;
+    fn get_funding_requests(&self) -> Result<Vec<InstanceId>>;
+
+    fn add_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
+    fn get_instance_tx_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
 }
 
 impl BitvmxStore {
@@ -95,6 +110,8 @@ impl BitvmxStore {
             StoreKey::InstanceSpeedUpList(instance_id) => {
                 format!("instance/{}/list", instance_id)
             }
+            StoreKey::FundingRequestList => "funding/request/list".to_string(),
+            StoreKey::InstanceTxNews => "instance/news".to_string(),
         }
     }
 
@@ -461,6 +478,100 @@ impl BitvmxStoreApi for BitvmxStore {
         // Save the updated list of funding transactions back to storage.
         self.store.set(&funding_tx_key, &funding_txs)?;
 
+        Ok(())
+    }
+
+    fn add_funding_request(&self, instance_id: InstanceId) -> Result<()> {
+        let funding_request_key = self.get_key(StoreKey::FundingRequestList);
+        let mut funding_requests = self
+            .store
+            .get::<&str, Vec<InstanceId>>(&funding_request_key)
+            .context("Failed to retrieve funding requests")?
+            .unwrap_or_default();
+
+        funding_requests.push(instance_id);
+        self.store.set(&funding_request_key, &funding_requests)?;
+        Ok(())
+    }
+
+    fn acknowledge_funding_request(&self, instance_id: InstanceId) -> Result<()> {
+        let funding_request_key = self.get_key(StoreKey::FundingRequestList);
+        let mut funding_requests = self
+            .store
+            .get::<&str, Vec<InstanceId>>(&funding_request_key)
+            .context("Failed to retrieve funding requests")?
+            .unwrap_or_default();
+
+        funding_requests.retain(|&id| id != instance_id);
+        self.store.set(&funding_request_key, &funding_requests)?;
+        Ok(())
+    }
+
+    fn get_funding_requests(&self) -> Result<Vec<InstanceId>> {
+        let funding_request_key = self.get_key(StoreKey::FundingRequestList);
+        let funding_requests = self
+            .store
+            .get::<&str, Vec<InstanceId>>(&funding_request_key)
+            .context("Failed to retrieve funding requests")?
+            .unwrap_or_default();
+        Ok(funding_requests)
+    }
+
+    fn add_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+        let instance_tx_news_key = self.get_key(StoreKey::InstanceTxNews);
+        let mut instance_tx_news = self
+            .store
+            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)
+            .context("Failed to retrieve instance tx news")?
+            .unwrap_or_default();
+
+        // create a new entry for the instance if it doesn't exist
+        if !instance_tx_news.iter().any(|(id, _)| *id == instance_id) {
+            instance_tx_news.push((instance_id, vec![]));
+        }
+
+        // add the tx_id to the instance's list of news
+        if let Some(instance_txs) = instance_tx_news
+            .iter_mut()
+            .find(|(id, _)| *id == instance_id)
+        {
+            instance_txs.1.push(tx_id);
+        }
+
+        self.store.set(&instance_tx_news_key, &instance_tx_news)?;
+        Ok(())
+    }
+
+    fn get_instance_tx_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {
+        let instance_tx_news_key = self.get_key(StoreKey::InstanceTxNews);
+        let instance_tx_news = self
+            .store
+            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)
+            .context("Failed to retrieve instance tx news")?
+            .unwrap_or_default();
+        Ok(instance_tx_news)
+    }
+
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+        let instance_tx_news_key = self.get_key(StoreKey::InstanceTxNews);
+        let mut instance_tx_news = self
+            .store
+            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)
+            .context("Failed to retrieve instance tx news")?
+            .unwrap_or_default();
+
+        // Find the instance's transaction and remove the tx_id
+        if let Some(instance_txs) = instance_tx_news
+            .iter_mut()
+            .find(|(id, _)| *id == instance_id)
+        {
+            instance_txs.1.retain(|&t| t != tx_id);
+        }
+
+        // Remove any empty instance entries
+        instance_tx_news.retain(|(_, txs)| !txs.is_empty());
+
+        self.store.set(&instance_tx_news_key, &instance_tx_news)?;
         Ok(())
     }
 }
