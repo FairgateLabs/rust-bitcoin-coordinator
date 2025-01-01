@@ -3,7 +3,7 @@ use bitcoin::{
     absolute, transaction, Amount, BlockHash, Network, ScriptBuf, Transaction, TxOut, Txid,
 };
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
-use bitvmx_transaction_monitor::types::{BlockInfo, InstanceData, TxStatusResponse};
+use bitvmx_transaction_monitor::types::{BlockInfo, InstanceData, TransactionStatus};
 use bitvmx_unstable::orchestrator::{Orchestrator, OrchestratorApi};
 use bitvmx_unstable::storage::BitvmxStore;
 use bitvmx_unstable::types::{BitvmxInstance, FundingTx, TransactionPartialInfo};
@@ -49,71 +49,63 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
 
     // Update: After dispatch, the transaction ID appears in the instance news.
     let tx_id = tx.compute_txid();
+
+    // Transaction is find in the fourth tick, then block height is at that tick.
+    let tx_status = TransactionStatus {
+        tx_id: tx_id.clone(),
+        tx: None,
+        block_info: Some(BlockInfo {
+            block_height: 3,
+            block_hash: BlockHash::from_str(
+                "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
+            )?,
+            is_orphan: false,
+        }),
+        confirmations: 1,
+    };
+
     mock_monitor
         .expect_get_instance_news()
-        .times(2)
-        .returning(move || Ok(vec![(instance_id, vec![tx_id])]));
+        .times(1)
+        .returning(move || Ok(vec![(instance_id, vec![tx_status.clone()])]));
+
+    // Transaction is finalized in the fifth tick, then block height is at that tick at height 10.
+    let tx_status = TransactionStatus {
+        tx_id: tx_id.clone(),
+        tx: None,
+        block_info: Some(BlockInfo {
+            block_height: 3,
+            block_hash: BlockHash::from_str(
+                "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
+            )?,
+            is_orphan: false,
+        }),
+        confirmations: 7,
+    };
+
+    mock_monitor
+        .expect_get_instance_news()
+        .times(1)
+        .returning(move || Ok(vec![(instance_id, vec![tx_status.clone()])]));
 
     // Transaction status initially shows it as unmined (not seen).
-    let tx_status = TxStatusResponse {
+    let tx_status = TransactionStatus {
         tx_id: tx.compute_txid(),
         tx: None,
         block_info: None,
         confirmations: 0,
     };
+
+    // Status of transaction is still unmined.
     mock_monitor
         .expect_get_instance_tx_status()
         .times(2)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status.clone())));
-
-    mock_monitor
-        .expect_get_address_news()
-        .returning(move || Ok(vec![]));
+        .with(eq(tx_id))
+        .returning(move |_| Ok(Some(tx_status.clone())));
 
     mock_monitor
         .expect_get_confirmation_threshold()
         .returning(|| 6);
-
-    // Simulate the transaction status updating as it is seen but still unconfirmed.
-    let tx_status_confirmed = TxStatusResponse {
-        tx_id: tx.compute_txid(),
-        tx: Some(tx.clone()),
-        block_info: Some(BlockInfo {
-            block_height: 4,
-            block_hash: BlockHash::from_str(
-                "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
-            )
-            .unwrap(),
-            is_orphan: false,
-        }),
-        confirmations: 1, // Transaction is confirmed (mined).
-    };
-    mock_monitor
-        .expect_get_instance_tx_status()
-        .times(1)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status_confirmed.clone())));
-
-    // Simulate transaction reaching a finalized state after multiple confirmations.
-    let tx_status_finalized = TxStatusResponse {
-        tx_id: tx.compute_txid(),
-        tx: Some(tx.clone()),
-        block_info: Some(BlockInfo {
-            block_height: 4,
-            block_hash: BlockHash::from_str(
-                "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
-            )
-            .unwrap(),
-            is_orphan: false,
-        }),
-        confirmations: 7, // Transaction is finalized.
-    };
-    mock_monitor
-        .expect_get_instance_tx_status()
-        .times(1)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status_finalized.clone())));
 
     // Mock the dispatcher to check if the transaction needs to be sped up. It should decide "yes."
     mock_dispatcher
@@ -267,14 +259,10 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
         .with(eq(tx_clone))
         .returning(move |tx_ret| Ok(tx_ret.compute_txid()));
 
-    // Simulate that the monitor's instance news initially has no updates about the transaction.
+    // Simulate that the monitor's instance news initially has no updates about the transaction, and the second tick also did not mined the transaction.
     mock_monitor
         .expect_get_instance_news()
         .times(1)
-        .returning(move || Ok(vec![]));
-
-    mock_monitor
-        .expect_get_address_news()
         .returning(move || Ok(vec![]));
 
     // Define unique mock transaction IDs for each speed-up attempt.
@@ -287,18 +275,81 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
 
     let tx_speed_up_id = tx_speed_up.compute_txid();
 
+    let tx_status = TransactionStatus {
+        tx_id,
+        tx: Some(tx.clone()),
+        block_info: Some(BlockInfo {
+            block_height: 50,
+            block_hash: BlockHash::from_str(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            )
+            .unwrap(),
+            is_orphan: false,
+        }),
+        confirmations: 1,
+    };
+
+    let tx_status_speed_up = TransactionStatus {
+        tx_id: tx_speed_up.compute_txid(),
+        tx: Some(tx.clone()),
+        block_info: Some(BlockInfo {
+            block_height: 100,
+            block_hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .unwrap(),
+            is_orphan: false,
+        }),
+        confirmations: 1,
+    };
+
     mock_monitor
         .expect_get_instance_news()
-        .times(2)
-        .returning(move || Ok(vec![(instance_id, vec![tx_id, tx_speed_up_id])]));
+        .times(1)
+        .returning(move || {
+            Ok(vec![(
+                instance_id,
+                vec![tx_status.clone(), tx_status_speed_up.clone()],
+            )])
+        });
 
-    // Transaction status initially shows it as unmined (not seen).
-    let tx_status_first_time = TxStatusResponse {
+    let tx_status = TransactionStatus {
         tx_id,
-        tx: None,
-        block_info: None,
+        tx: Some(tx.clone()),
+        block_info: Some(BlockInfo {
+            block_height: 50,
+            block_hash: BlockHash::from_str(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            )
+            .unwrap(),
+            is_orphan: true,
+        }),
         confirmations: 0,
     };
+
+    let tx_status_speed_up = TransactionStatus {
+        tx_id: tx_speed_up.compute_txid(),
+        tx: Some(tx.clone()),
+        block_info: Some(BlockInfo {
+            block_height: 100,
+            block_hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .unwrap(),
+            is_orphan: true,
+        }),
+        confirmations: 0,
+    };
+
+    mock_monitor
+        .expect_get_instance_news()
+        .times(1)
+        .returning(move || {
+            Ok(vec![(
+                instance_id,
+                vec![tx_status.clone(), tx_status_speed_up.clone()],
+            )])
+        });
 
     // Mock the dispatcher to check if the transaction needs to be sped up. It should decide "no."
     mock_dispatcher
@@ -306,33 +357,21 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
         .with(eq(Amount::default()))
         .returning(|_| Ok(false));
 
-    mock_monitor
-        .expect_get_instance_tx_status()
-        .times(1)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status_first_time.clone())));
-
-    let tx_status_second_time = TxStatusResponse {
+    // Transaction status initially shows it as unmined (not seen).
+    let tx_status_first_time = TransactionStatus {
         tx_id,
-        tx: Some(tx.clone()),
-        block_info: Some(BlockInfo {
-            block_height: 50,
-            block_hash: BlockHash::from_str(
-                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            )
-            .unwrap(),
-            is_orphan: false,
-        }),
-        confirmations: 1,
+        tx: None,
+        block_info: None,
+        confirmations: 0,
     };
 
     mock_monitor
         .expect_get_instance_tx_status()
         .times(1)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status_second_time.clone())));
+        .with(eq(tx_id))
+        .returning(move |_| Ok(Some(tx_status_first_time.clone())));
 
-    let tx_status_third_time = TxStatusResponse {
+    let tx_status = TransactionStatus {
         tx_id,
         tx: Some(tx.clone()),
         block_info: Some(BlockInfo {
@@ -348,55 +387,9 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
 
     mock_monitor
         .expect_get_instance_tx_status()
-        .times(2)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status_third_time.clone())));
-
-    // Speed up tx status initially shows it as seen.
-    let tx_speed_up_status = TxStatusResponse {
-        tx_id: tx_speed_up_id,
-        tx: Some(tx.clone()),
-        block_info: Some(BlockInfo {
-            block_height: 100,
-            block_hash: BlockHash::from_str(
-                "0000000000000000000000000000000000000000000000000000000000000000",
-            )
-            .unwrap(),
-            is_orphan: false,
-        }),
-        confirmations: 1,
-    };
-
-    mock_monitor
-        .expect_get_instance_tx_status()
         .times(1)
-        .with(eq(instance_id), eq(tx_speed_up.clone().compute_txid()))
-        .returning(move |_, _| Ok(Some(tx_speed_up_status.clone())));
-
-    //Speed up tx status then should be reorg
-    let tx_status = TxStatusResponse {
-        tx_id: tx_speed_up.compute_txid(),
-        tx: Some(tx_speed_up.clone()),
-        block_info: Some(BlockInfo {
-            block_height: 100,
-            block_hash: BlockHash::from_str(
-                "0000000000000000000000000000000000000000000000000000000000000000",
-            )
-            .unwrap(),
-            is_orphan: true,
-        }),
-        confirmations: 0,
-    };
-
-    mock_monitor
-        .expect_get_instance_tx_status()
-        .times(1)
-        .with(eq(instance_id), eq(tx_speed_up.compute_txid()))
-        .returning(move |_, _| Ok(Some(tx_status.clone())));
-
-    mock_monitor
-        .expect_get_confirmation_threshold()
-        .returning(|| 6);
+        .with(eq(tx_id.clone()))
+        .returning(move |_| Ok(Some(tx_status.clone())));
 
     // First speed-up attempt: Create a new speed-up transaction based on original funding transaction.
     mock_dispatcher
@@ -473,14 +466,9 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     orchestrator.send_tx_instance(instance_id, &tx)?;
 
     // Simulate ticks to monitor and adjust transaction status with each blockchain height update.
-    println!("TICK");
     orchestrator.tick()?; // Dispatch and observe unmined status.
-    println!("TICK");
     orchestrator.tick()?; // Speed-up after unconfirmed status persists.
-    println!("TICK");
     orchestrator.tick()?; // Transaction should be mined.
-
-    println!("TICK");
     orchestrator.tick()?; // Found a reorg, then Transaction and Speed up are not mined.
 
     Ok(())

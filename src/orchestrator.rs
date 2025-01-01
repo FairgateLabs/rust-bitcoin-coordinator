@@ -1,15 +1,16 @@
 use crate::{
     storage::BitvmxStoreApi,
     types::{
-        BitvmxInstance, FundingTx, InstanceId, News, ProcessedNews, SpeedUpTx, TransactionInfo,
-        TransactionPartialInfo, TransactionStatus,
+        AddressNew, BitvmxInstance, FundingTx, InstanceId, News, ProcessedNews, SpeedUpTx,
+        TransactionBlockchainStatus, TransactionInfo, TransactionNew, TransactionPartialInfo,
+        TransactionState,
     },
 };
 use anyhow::{Context, Ok, Result};
 use bitcoin::{Address, PublicKey, Transaction, TxOut, Txid};
 use bitvmx_transaction_monitor::{
     monitor::MonitorApi,
-    types::{BlockHeight, InstanceData, TxStatusResponse},
+    types::{BlockHeight, InstanceData, TransactionStatus},
 };
 use console::style;
 use log::info;
@@ -72,7 +73,7 @@ where
 
     fn process_pending_txs(&mut self) -> Result<()> {
         // Get pending instance transactions to be send to the blockchain
-        let pending_txs = self.store.get_txs_info(TransactionStatus::ReadyToSend)?;
+        let pending_txs = self.store.get_txs_info(TransactionState::ReadyToSend)?;
 
         info!(
             "transactions pending to be sent #{}",
@@ -94,7 +95,7 @@ where
 
                 // TODO: check atomics transactions. to perform add and remove.
 
-                self.store.add_in_progress_instance_tx(
+                self.store.update_instance_tx_as_sent(
                     instance_id,
                     &tx_info.tx_id,
                     self.current_height,
@@ -148,28 +149,28 @@ where
         Ok(())
     }
 
-    fn notify_protocol_tx_changes(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()> {
-        // Implement the notification logic here
-        info!(
-            "Found tx sent to protocol for instance_id: {:?}  tx_id: {}",
-            instance_id,
-            style(tx.compute_txid()).blue(),
-        );
-        Ok(())
-    }
-
     fn process_in_progress_txs(&mut self) -> Result<()> {
-        let instance_txs = self.store.get_txs_info(TransactionStatus::Sent)?;
+        //TODO: THIS COULD BE IMPROVED.
+        // If transaction still in sent means it should be speed up, and is not confirmed.
+        // otherwise it should be moved as confirmed in the previous validations for news.
+        let instance_txs = self.store.get_txs_info(TransactionState::Sent)?;
+
         for (instance_id, txs) in instance_txs {
-            for tx in txs {
+            for tx_info in txs {
                 info!(
                     "{} Processing transaction: {} for instance: {}",
                     style("→").cyan(),
-                    style(tx.tx_id).blue(),
+                    style(tx_info.tx_id).blue(),
                     style(instance_id).red()
                 );
 
-                self.process_instance_tx_change(instance_id, &tx.tx_id)?;
+                // Get the latest transaction status from monitor for this transaction
+                let tx_status = self
+                    .monitor
+                    .get_instance_tx_status(&tx_info.tx_id)
+                    .context("Failed to get instance transaction status from monitor")?;
+
+                self.process_instance_tx_change(instance_id, &tx_status.unwrap())?;
             }
         }
 
@@ -181,50 +182,45 @@ where
         // Get instances news also returns the speed ups txs added for each instance.
         let news = self.monitor.get_instance_news()?;
 
-        for (instance_id, tx_ids) in &news {
+        for (instance_id, txs_status) in &news {
             info!(
                 "{} Instance ID: {} has new transactions: {}",
                 style("News").green(),
                 style(instance_id).green(),
-                style(tx_ids.len()).red()
+                style(txs_status.len()).red()
             );
         }
 
-        for (instance_id, tx_ids) in news {
-            for tx_id in tx_ids {
-                let is_speed_up = self.store.is_speed_up_tx(instance_id, tx_id)?;
+        for (instance_id, txs_status) in news {
+            for tx_status in txs_status {
+                let is_speed_up = self.store.is_speed_up_tx(instance_id, &tx_status.tx_id)?;
 
                 if is_speed_up {
-                    self.process_speed_up_change(instance_id, &tx_id)?;
+                    self.process_speed_up_change(instance_id, &tx_status)?;
                 } else {
-                    self.process_instance_tx_change(instance_id, &tx_id)?;
+                    self.process_instance_tx_change(instance_id, &tx_status)?;
                 }
 
                 // Acknowledge the transaction news to the monitor to update its state.
                 // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
                 self.monitor
-                    .acknowledge_instance_tx_news(instance_id, &tx_id)?;
+                    .acknowledge_instance_tx_news(instance_id, &tx_status.tx_id)?;
             }
         }
 
         Ok(())
     }
 
-    fn process_speed_up_change(&mut self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
+    fn process_speed_up_change(
+        &mut self,
+        instance_id: InstanceId,
+        tx_status: &TransactionStatus,
+    ) -> Result<()> {
         // This indicates that this is a speed-up transaction that has been mined with 1 confirmation,
-        // which means it should be treated as the new funding transaction. // Get the transaction's status from the monitor
-        let tx_status = self
-            .monitor
-            .get_instance_tx_status(instance_id, tx_id)?
-            .ok_or(anyhow::anyhow!(
-                "No transaction status found for transaction ID: {} and instance ID: {}",
-                tx_id,
-                instance_id
-            ))?;
-
+        // which means it should be treated as the new funding transaction.
         if tx_status.is_confirmed() {
             if tx_status.confirmations == 1 {
-                self.handle_confirmation_speed_up_transaction(instance_id, tx_id)?;
+                self.handle_confirmation_speed_up_transaction(instance_id, &tx_status.tx_id)?;
             }
 
             if tx_status.is_orphan() {
@@ -244,37 +240,35 @@ where
         Ok(())
     }
 
-    fn process_instance_tx_change(&mut self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
-        let tx_status = self
-            .monitor
-            .get_instance_tx_status(instance_id, tx_id)?
-            .ok_or(anyhow::anyhow!(
-                "Transaction status not found for transaction ID: {} and instance ID: {}",
-                tx_id,
-                instance_id
-            ))?;
-
+    fn process_instance_tx_change(
+        &mut self,
+        instance_id: InstanceId,
+        tx_status: &TransactionStatus,
+    ) -> Result<()> {
         let is_confirmed = tx_status.is_confirmed();
 
         if is_confirmed {
             if tx_status.confirmations == 1 {
                 // If the transaction has only one confirmation:
                 // This means it has been included in a block but not yet deeply confirmed.
-                self.handle_confirmation_transaction(instance_id, &tx_status)?;
+                self.handle_confirmation_transaction(instance_id, tx_status)?;
                 return Ok(());
             }
 
             if tx_status.confirmations >= self.monitor.get_confirmation_threshold() {
                 // If the transaction has sufficient confirmations, it is considered fully complete.
                 // Mark the transaction as completed
-                self.handle_complete_transaction(instance_id, &tx_status)?;
+                self.handle_complete_transaction(instance_id, tx_status)?;
                 return Ok(());
             }
         }
 
         if !is_confirmed {
             // Retrieve information about the last known state of this transaction
-            let in_progress_tx = self.store.get_instance_tx(instance_id, tx_id)?.unwrap();
+            let in_progress_tx = self
+                .store
+                .get_instance_tx(instance_id, &tx_status.tx_id)?
+                .unwrap();
 
             if in_progress_tx.is_transaction_owned() {
                 if tx_status.is_orphan() {
@@ -282,8 +276,8 @@ where
                     // Update its status to indicate it is back in the mempool.
                     self.store.update_instance_tx_status(
                         instance_id,
-                        tx_id,
-                        TransactionStatus::Sent,
+                        &tx_status.tx_id,
+                        TransactionState::Sent,
                     )?;
                 }
 
@@ -291,18 +285,15 @@ where
                 // Resend or accelerate the transaction to ensure it propagates properly.
                 self.handle_unseen_transaction(instance_id, &in_progress_tx)?;
             } else if tx_status.is_orphan() {
-                // Notify the protocol of the status change for orphaned transactions.
-                // This ensures the protocol can adjust to the transaction's state.
-                self.notify_protocol_tx_changes(instance_id, &tx_status.tx.clone().unwrap())?;
-
                 // Update the local storage to mark the transaction as orphaned.
                 self.store.update_instance_tx_status(
                     instance_id,
                     &tx_status.tx_id,
-                    TransactionStatus::Orphan,
+                    TransactionState::Orphan,
                 )?;
 
-                self.store.add_instance_tx_news(instance_id, *tx_id)?;
+                self.store
+                    .add_instance_tx_news(instance_id, tx_status.tx_id)?;
             }
         }
 
@@ -312,13 +303,13 @@ where
     fn handle_confirmation_transaction(
         &mut self,
         instance_id: InstanceId,
-        tx_status: &TxStatusResponse,
+        tx_status: &TransactionStatus,
     ) -> Result<()> {
         // Update the transaction to completed given that transaction has more than the threshold confirmations
         self.store.update_instance_tx_status(
             instance_id,
             &tx_status.tx_id,
-            TransactionStatus::Confirmed,
+            TransactionState::Confirmed,
         )?;
 
         self.store
@@ -366,19 +357,15 @@ where
     fn handle_complete_transaction(
         &mut self,
         instance_id: InstanceId,
-        tx_status: &TxStatusResponse,
+        tx_status: &TransactionStatus,
     ) -> Result<()> {
         // Transaction was mined and has sufficient confirmations to mark it as complete.
-
-        // Notify the protocol about the transaction changes, specifically for confirmed transactions.
-        // This step is crucial for the protocol to be aware of the transaction's status and proceed accordingly.
-        self.notify_protocol_tx_changes(instance_id, &tx_status.tx.clone().unwrap())?;
 
         // Update the transaction to completed given that transaction has more than the threshold confirmations
         self.store.update_instance_tx_status(
             instance_id,
             &tx_status.tx_id,
-            TransactionStatus::Finalized,
+            TransactionState::Finalized,
         )?;
 
         self.store
@@ -465,7 +452,6 @@ where
             .context("Error sending pending transactions")?;
 
         let last_block_height: u32 = self.current_height;
-        println!("last_block_height {}", last_block_height);
         self.current_height = self.monitor.get_current_height();
 
         // If the last block height is the same as the current one, there's no need to continue.
@@ -480,9 +466,6 @@ where
         // Handle any updates related to instances, including new information about transactions that have not been reviewed yet.
         self.process_in_progress_txs()
             .context("Failed to process instance updates")?;
-
-        // let _address_news = self.monitor.get_address_news()?;
-        //TODO: notify to the protocol new addresses found in transactions
 
         Ok(())
     }
@@ -530,7 +513,7 @@ where
         self.store.update_instance_tx_status(
             instance_id,
             &tx.compute_txid(),
-            TransactionStatus::ReadyToSend,
+            TransactionState::ReadyToSend,
         )?;
 
         info!(
@@ -560,27 +543,79 @@ where
 
     fn get_news(&self) -> Result<News> {
         let instance_tx_news = self.store.get_instance_tx_news()?;
-        let mut txs_by_id: Vec<(InstanceId, Vec<TransactionInfo>)> = Vec::new();
+        let mut txs_by_id: Vec<(InstanceId, Vec<TransactionNew>)> = Vec::new();
 
         for (instance_id, tx_ids) in instance_tx_news {
             let mut instance_txs = Vec::new();
 
             for tx_id in tx_ids {
+                // Transaction information is stored in both the monitor and orchastrator storage.
+                // News are generated when a transaction changes state to either:
+                // - Orphaned (removed from chain due to reorg)
+                // - Confirmed (included in a block)
+                // - Finalized (reached required confirmation threshold)
                 let tx_info = self
                     .store
                     .get_instance_tx(instance_id, &tx_id)?
                     .expect("Transaction not found in instance");
 
-                instance_txs.push(tx_info);
+                let tx_status = self
+                    .monitor
+                    .get_instance_tx_status(&tx_id)?
+                    .expect("Transaction status not found in monitor");
+
+                let status = match tx_info.state {
+                    TransactionState::Orphan => TransactionBlockchainStatus::Orphan,
+                    TransactionState::Confirmed => TransactionBlockchainStatus::Confirmed,
+                    TransactionState::Finalized => TransactionBlockchainStatus::Finalized,
+                    _ => continue, // Skip other states
+                };
+
+                instance_txs.push(TransactionNew {
+                    tx: tx_status.tx.unwrap(),
+                    block_info: tx_status.block_info.unwrap(),
+                    confirmations: tx_status.confirmations,
+                    status,
+                });
             }
 
             txs_by_id.push((instance_id, instance_txs));
         }
 
-        let txs_by_address = self
+        let address_news = self
             .monitor
             .get_address_news()
             .context("Failed to get address news from monitor")?;
+
+        let mut txs_by_address = Vec::new();
+
+        for (address, address_statuses) in address_news {
+            for address_status in address_statuses {
+                let mut txs = Vec::new();
+
+                let tx_status = self
+                    .monitor
+                    .get_instance_tx_status(&address_status.tx.unwrap().compute_txid())?
+                    .unwrap();
+
+                let state = if tx_status.confirmations > self.monitor.get_confirmation_threshold() {
+                    TransactionBlockchainStatus::Finalized
+                } else if tx_status.confirmations == 1 {
+                    TransactionBlockchainStatus::Confirmed
+                } else {
+                    TransactionBlockchainStatus::Orphan
+                };
+
+                txs.push(AddressNew {
+                    tx: tx_status.tx.unwrap(),
+                    block_info: tx_status.block_info.unwrap(),
+                    confirmations: tx_status.confirmations,
+                    status: state,
+                });
+
+                txs_by_address.push((address.clone(), txs));
+            }
+        }
 
         let funds_requests = self
             .store

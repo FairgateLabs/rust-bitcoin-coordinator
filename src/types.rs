@@ -1,5 +1,5 @@
 use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
-use bitvmx_transaction_monitor::types::{AddressStatus, BlockHeight};
+use bitvmx_transaction_monitor::types::{BlockHeight, BlockInfo};
 use serde::{Deserialize, Serialize};
 
 pub type InstanceId = u32;
@@ -11,7 +11,17 @@ pub struct FundingTx {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub enum TransactionStatus {
+pub enum TransactionBlockchainStatus {
+    // Represents a transaction that has been successfully confirmed by the network but a reorganizacion move it out of the chain.
+    Orphan,
+    // Represents a transaction that has been successfully confirmed by the network
+    Confirmed,
+    // Represents when the transaction was confirmed an amount of blocks
+    Finalized,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub enum TransactionState {
     // Represents a transaction that is being monitored.
     New,
     // Represents a transaction that has been chosen by the protocol to be sent.
@@ -30,13 +40,13 @@ pub enum TransactionStatus {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TransactionInfo {
+    pub tx_id: Txid,
     // Represents the transaction itself, which is added when the transaction is ready to be sent.
     pub tx: Option<Transaction>,
     // Represents the hexadecimal representation of the transaction, which is added when the transaction is seen on the blockchain and confirmed.
     pub tx_hex: Option<String>,
-    pub tx_id: Txid,
     pub deliver_block_height: Option<BlockHeight>,
-    pub status: TransactionStatus,
+    pub state: TransactionState,
 }
 
 impl TransactionInfo {
@@ -45,6 +55,22 @@ impl TransactionInfo {
         // A transaction is considered owned if it has been sent by the operator.
         self.tx.is_some() && self.deliver_block_height.is_some()
     }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct TransactionNew {
+    pub tx: Transaction,
+    pub block_info: BlockInfo,
+    pub confirmations: u32,
+    pub status: TransactionBlockchainStatus,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct AddressNew {
+    pub tx: Transaction,
+    pub block_info: BlockInfo,
+    pub confirmations: u32,
+    pub status: TransactionBlockchainStatus,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -104,8 +130,8 @@ impl BitvmxInstance<TransactionFullInfo> {
 /// - funds_requests: Instance IDs that need additional funding
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct News {
-    pub txs_by_id: Vec<(InstanceId, Vec<TransactionInfo>)>,
-    pub txs_by_address: Vec<(Address, Vec<AddressStatus>)>,
+    pub txs_by_id: Vec<(InstanceId, Vec<TransactionNew>)>,
+    pub txs_by_address: Vec<(Address, Vec<AddressNew>)>,
     pub funds_requests: Vec<InstanceId>,
 }
 pub struct ProcessedNews {

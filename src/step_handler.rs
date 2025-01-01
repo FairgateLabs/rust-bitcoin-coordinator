@@ -1,7 +1,7 @@
 use crate::{
     orchestrator::OrchestratorApi,
     storage::StepHandlerApi,
-    types::{InstanceId, TransactionStatus},
+    types::{InstanceId, TransactionState},
 };
 use anyhow::{Context, Ok, Result};
 use bitcoin::{Transaction, Txid};
@@ -70,7 +70,7 @@ where
             .tick()
             .context("Failed tick orchestrator")?;
 
-        let confirmed_txs = self.store.get_txs_info(TransactionStatus::Finalized)?;
+        let confirmed_txs = self.store.get_txs_info(TransactionState::Finalized)?;
 
         for (instance_id, txs) in confirmed_txs {
             for tx in txs {
@@ -79,7 +79,7 @@ where
                 self.store.update_instance_tx_status(
                     instance_id,
                     &tx.tx_id,
-                    TransactionStatus::Acknowledged,
+                    TransactionState::Acknowledged,
                 )?;
             }
         }
