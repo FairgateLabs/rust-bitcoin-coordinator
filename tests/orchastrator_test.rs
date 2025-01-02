@@ -23,7 +23,7 @@ fn orchastrator_is_ready_method_test() -> Result<(), anyhow::Error> {
         .times(1)
         .returning(|| Ok(true));
 
-    let mut orchastrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
+    let mut orchastrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
 
     let is_ready = orchastrator.is_ready()?;
 
@@ -48,9 +48,9 @@ fn tick_method_is_not_ready() -> Result<(), anyhow::Error> {
 
     mock_monitor.expect_tick().times(1).returning(|| Ok(()));
 
-    let mut orchastrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
+    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
 
-    orchastrator.tick()?;
+    orchestrator.tick()?;
 
     Ok(())
 }
@@ -71,9 +71,9 @@ fn monitor_instance_test() -> Result<(), anyhow::Error> {
         .with(eq(vec![instance_data]))
         .returning(|_| Ok(()));
 
-    let orchastrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
+    let orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
 
-    orchastrator.monitor_instance(&instance)?;
+    orchestrator.monitor_instance(&instance)?;
 
     Ok(())
 }

@@ -1,8 +1,8 @@
-use crate::types::{
+use crate::{errors::StorageError, types::{
     BitvmxInstance, FundingTx, InstanceId, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
     TransactionStatus,
-};
-use anyhow::{Context, Ok, Result};
+}};
+
 use bitcoin::{Transaction, Txid};
 use bitvmx_transaction_monitor::types::BlockHeight;
 use mockall::automock;
@@ -23,80 +23,79 @@ enum StoreKey {
 
 #[automock]
 pub trait BitvmxStoreApi {
-    fn tx_exists(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<bool>;
-    fn get_instance(&self, instance_id: InstanceId) -> Result<Vec<TransactionInfo>>;
-    fn get_instances(&self) -> Result<Vec<InstanceId>>;
+    fn tx_exists(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<bool, StorageError>;
+    fn get_instance(&self, instance_id: InstanceId) -> Result<Vec<TransactionInfo>, StorageError>;
+    fn get_instances(&self) -> Result<Vec<InstanceId>, StorageError>;
     fn get_instance_tx(
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
-    ) -> Result<Option<TransactionInfo>>;
+    ) -> Result<Option<TransactionInfo>, StorageError>;
 
-    fn add_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()>;
+    fn add_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<(), StorageError>;
     fn add_instance_tx_hex(
         &self,
         instance_id: InstanceId,
         tx_id: Txid,
         tx_hex: String,
-    ) -> Result<()>;
-    fn add_tx_to_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
-    fn remove_instance(&self, instance_id: InstanceId) -> Result<()>;
+    ) -> Result<(), StorageError>;
+    fn add_tx_to_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<(), StorageError>;
+    fn remove_instance(&self, instance_id: InstanceId) -> Result<(), StorageError>;
 
     fn add_in_progress_instance_tx(
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
         block_height: BlockHeight,
-    ) -> Result<()>;
+    ) -> Result<(), StorageError>;
 
     fn get_txs_info(
         &self,
         status: TransactionStatus,
-    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>>;
+    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>, StorageError>;
 
     fn update_instance_tx_status(
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
         status: TransactionStatus,
-    ) -> Result<()>;
+    ) -> Result<(), StorageError>;
 
     // SPEED UP TRANSACTIONS
     fn get_speed_up_txs_for_child(
         &self,
         instance_id: InstanceId,
         child_tx_id: &Txid,
-    ) -> Result<Vec<SpeedUpTx>>;
+    ) -> Result<Vec<SpeedUpTx>, StorageError>;
 
-    fn add_speed_up_tx(&self, instance_id: InstanceId, speed_up_tx: &SpeedUpTx) -> Result<()>;
+    fn add_speed_up_tx(&self, instance_id: InstanceId, speed_up_tx: &SpeedUpTx) -> Result<(), StorageError>;
 
-    fn get_speed_up_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<Option<SpeedUpTx>>;
+    fn get_speed_up_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<Option<SpeedUpTx>, StorageError>;
 
-    fn is_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool>;
+    fn is_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool, StorageError>;
 
     // FUNDING TRANSACTIONS
     // Funding transactions are used to provide capital to speed-up transactions
     // when fee acceleration is needed
-    fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>>;
-    fn add_funding_tx(&self, instance_id: InstanceId, tx: &FundingTx) -> Result<()>;
-    fn remove_funding_tx(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
+    fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>, StorageError>;
+    fn add_funding_tx(&self, instance_id: InstanceId, tx: &FundingTx) -> Result<(), StorageError>;
+    fn remove_funding_tx(&self, instance_id: InstanceId, tx: &Txid) -> Result<(), StorageError>;
 
     // FUNDING TRANSACTIONS REQUESTS
     // Funding requests are created when an instance run out off funds
     // and requires additional funding to speed up transactions
-    fn add_funding_request(&self, instance_id: InstanceId) -> Result<()>;
-    fn acknowledge_funding_request(&self, instance_id: InstanceId) -> Result<()>;
-    fn get_funding_requests(&self) -> Result<Vec<InstanceId>>;
+    fn add_funding_request(&self, instance_id: InstanceId) -> Result<(), StorageError>;
+    fn acknowledge_funding_request(&self, instance_id: InstanceId) -> Result<(), StorageError>;
+    fn get_funding_requests(&self) -> Result<Vec<InstanceId>, StorageError>;
 
-    fn add_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
-    fn get_instance_tx_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
+    fn add_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<(), StorageError>;
+    fn get_instance_tx_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>, StorageError>;
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<(), StorageError>;
 }
 
 impl BitvmxStore {
-    pub fn new_with_path(store_path: &str) -> Result<Self> {
-        let store = Storage::new_with_path(&PathBuf::from(store_path.to_string()))
-            .context("There is an error creating storage in BitvmxStore")?;
+    pub fn new_with_path(store_path: &str) -> Result<Self, StorageError> {
+        let store = Storage::new_with_path(&PathBuf::from(store_path.to_string()))?;
         Ok(Self { store })
     }
 
@@ -120,7 +119,7 @@ impl BitvmxStore {
         instance_id: InstanceId,
         tx_id: &Txid,
         status: TransactionStatus,
-    ) -> Result<()> {
+    ) -> Result<(), StorageError> {
         //TODO: Implement transaction status transition validation to ensure the correct sequence:
         // Pending -> InProgress -> Completed, and in reorganization scenarios, do the reverse order.
         let mut txs = self.get_instance(instance_id)?;
@@ -140,7 +139,7 @@ impl BitvmxStore {
     fn get_txs_info(
         &self,
         status: TransactionStatus,
-    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
+    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>, StorageError> {
         let instances_ids = self.get_instances()?;
         let mut ret_instance_txs: Vec<(InstanceId, Vec<TransactionInfo>)> = Vec::new();
 
@@ -167,37 +166,32 @@ impl BitvmxStoreApi for BitvmxStore {
     fn get_txs_info(
         &self,
         status: TransactionStatus,
-    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
+    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>, StorageError> {
         self.get_txs_info(status)
     }
 
-    fn get_instances(&self) -> Result<Vec<InstanceId>> {
+    fn get_instances(&self) -> Result<Vec<InstanceId>, StorageError> {
         let instances_list_key = self.get_key(StoreKey::InstanceList);
 
         let all_instance_ids = self
             .store
-            .get::<&str, Vec<u32>>(&instances_list_key)
-            .context("Failed to retrieve instances")?
+            .get::<&str, Vec<u32>>(&instances_list_key)?
             .unwrap_or_default();
 
         Ok(all_instance_ids)
     }
 
-    fn get_instance(&self, instance_id: InstanceId) -> Result<Vec<TransactionInfo>> {
+    fn get_instance(&self, instance_id: InstanceId) -> Result<Vec<TransactionInfo>, StorageError> {
         let key = self.get_key(StoreKey::Instance(instance_id));
         let txs = self
             .store
-            .get::<&str, Vec<TransactionInfo>>(&key)
-            .context(format!(
-                "Failed to retrieve instance with ID {}",
-                instance_id
-            ))?
+            .get::<&str, Vec<TransactionInfo>>(&key)?
             .unwrap_or_default();
 
         Ok(txs)
     }
 
-    fn add_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()> {
+    fn add_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<(), StorageError> {
         let mut txs_to_insert: Vec<TransactionInfo> = vec![];
 
         for tx in instance.txs.iter() {
@@ -216,11 +210,7 @@ impl BitvmxStoreApi for BitvmxStore {
         // Map BitvmxInstance
         // 1. Store the instance under its ID
         self.store
-            .set(&instance_key, txs_to_insert)
-            .context(format!(
-                "Failed to store instance under key {}",
-                instance_key
-            ))?;
+            .set(&instance_key, txs_to_insert)?;
 
         // 2. Maintain the list of all instances (instance/list)
         let instances_key = self.get_key(StoreKey::InstanceList);
@@ -234,8 +224,7 @@ impl BitvmxStoreApi for BitvmxStore {
         if !all_instances.contains(&instance.instance_id) {
             all_instances.push(instance.instance_id);
             self.store
-                .set(&instances_key, &all_instances)
-                .context("Failed to update instances list")?;
+                .set(&instances_key, &all_instances)?;
         }
 
         self.add_funding_tx(instance.instance_id, &instance.funding_tx)?;
@@ -245,11 +234,10 @@ impl BitvmxStoreApi for BitvmxStore {
 
     // This method is currently used for testing purposes only and may not be necessary in the future.
     // It is intended to facilitate the testing of instance-related operations within the storage system.
-    fn remove_instance(&self, instance_id: InstanceId) -> Result<()> {
+    fn remove_instance(&self, instance_id: InstanceId) -> Result<(), StorageError> {
         let instance_key = self.get_key(StoreKey::Instance(instance_id));
         self.store
-            .delete(&instance_key)
-            .context("Failed to delete instance")?;
+            .delete(&instance_key)?;
 
         let instances_key = self.get_key(StoreKey::InstanceList);
 
@@ -264,13 +252,11 @@ impl BitvmxStoreApi for BitvmxStore {
         let speed_up_tx_key = self.get_key(StoreKey::InstanceSpeedUpList(instance_id));
 
         self.store
-            .delete(&speed_up_tx_key)
-            .context("Failed to delete speed up transactions for instance")?;
+            .delete(&speed_up_tx_key)?;
 
         let speed_up_txs_key = self.get_key(StoreKey::InstanceSpeedUpList(instance_id));
         self.store
-            .delete(&speed_up_txs_key)
-            .context("Failed to delete speed up transactions for instance")?;
+            .delete(&speed_up_txs_key)?;
 
         Ok(())
     }
@@ -279,7 +265,7 @@ impl BitvmxStoreApi for BitvmxStore {
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
-    ) -> Result<Option<TransactionInfo>> {
+    ) -> Result<Option<TransactionInfo>, StorageError> {
         let txs = self.get_instance(instance_id)?;
 
         for tx in &txs {
@@ -291,12 +277,12 @@ impl BitvmxStoreApi for BitvmxStore {
         Ok(None)
     }
 
-    fn tx_exists(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<bool> {
+    fn tx_exists(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<bool, StorageError> {
         let tx_instance = self.get_instance_tx(instance_id, tx_id)?;
         Ok(tx_instance.is_some())
     }
 
-    fn add_tx_to_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()> {
+    fn add_tx_to_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<(), StorageError> {
         let mut txs = self.get_instance(instance_id)?;
 
         let tx_id = tx.compute_txid();
@@ -318,16 +304,12 @@ impl BitvmxStoreApi for BitvmxStore {
         instance_id: InstanceId,
         tx_id: &Txid,
         block_height: BlockHeight,
-    ) -> Result<()> {
+    ) -> Result<(), StorageError> {
         let key = self.get_key(StoreKey::Instance(instance_id));
 
         let mut txs = self
             .store
-            .get::<&str, Vec<TransactionInfo>>(&key)
-            .context(format!(
-                "Failed to retrieve instance with ID {}",
-                instance_id
-            ))?
+            .get::<&str, Vec<TransactionInfo>>(&key)?
             .unwrap_or_default();
 
         if let Some(tx) = txs.iter_mut().find(|x| x.tx_id == *tx_id) {
@@ -345,7 +327,7 @@ impl BitvmxStoreApi for BitvmxStore {
         instance_id: InstanceId,
         tx_id: Txid,
         tx_hex: String,
-    ) -> Result<()> {
+    ) -> Result<(), StorageError> {
         let mut txs = self.get_instance(instance_id)?;
         let tx_index = txs
             .iter_mut()
@@ -357,12 +339,11 @@ impl BitvmxStoreApi for BitvmxStore {
         Ok(())
     }
 
-    fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>> {
+    fn get_funding_tx(&self, instance_id: InstanceId) -> Result<Option<FundingTx>, StorageError> {
         let funding_tx_key = self.get_key(StoreKey::InstanceFundingList(instance_id));
         let funding_txs = self
             .store
-            .get::<&str, Vec<FundingTx>>(&funding_tx_key)
-            .context("Failed to retrieve funding transaction")?
+            .get::<&str, Vec<FundingTx>>(&funding_tx_key)?
             .unwrap_or_default();
 
         if let Some(last_funding_tx) = funding_txs.last() {
@@ -372,20 +353,18 @@ impl BitvmxStoreApi for BitvmxStore {
         }
     }
 
-    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<()> {
+    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<(), StorageError> {
         let funding_tx_key = self.get_key(StoreKey::InstanceFundingList(instance_id));
 
         let mut funding_txs = self
             .store
-            .get::<&str, Vec<FundingTx>>(&funding_tx_key)
-            .context("Failed to retrieve funding transaction")?
+            .get::<&str, Vec<FundingTx>>(&funding_tx_key)?
             .unwrap_or_default();
 
         funding_txs.push(funding_tx.clone());
 
         self.store
-            .set(&funding_tx_key, &funding_txs)
-            .context("Failed to save funding transaction")?;
+            .set(&funding_tx_key, &funding_txs)?;
 
         Ok(())
     }
@@ -394,14 +373,13 @@ impl BitvmxStoreApi for BitvmxStore {
         &self,
         instance_id: InstanceId,
         child_tx_id: &Txid,
-    ) -> Result<Vec<SpeedUpTx>> {
+    ) -> Result<Vec<SpeedUpTx>, StorageError> {
         let speed_up_tx_key = self.get_key(StoreKey::InstanceSpeedUpList(instance_id));
 
         // Retrieve the speed up transactions from the storage
         let mut speed_up_txs = self
             .store
-            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)
-            .context("Failed to retrieve speed up transactions")?
+            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)?
             .unwrap_or_default();
 
         speed_up_txs.retain(|t| t.child_tx_id == *child_tx_id);
@@ -409,14 +387,13 @@ impl BitvmxStoreApi for BitvmxStore {
         Ok(speed_up_txs)
     }
 
-    fn get_speed_up_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<Option<SpeedUpTx>> {
+    fn get_speed_up_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<Option<SpeedUpTx>, StorageError> {
         let speed_up_tx_key = self.get_key(StoreKey::InstanceSpeedUpList(instance_id));
 
         // Retrieve the list of speed up transactions from storage
         let speed_up_txs = self
             .store
-            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)
-            .context("Failed to retrieve speed up transactions")?
+            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)?
             .unwrap_or_default();
 
         // Find the specific speed up transaction that matches the given tx_id
@@ -429,14 +406,13 @@ impl BitvmxStoreApi for BitvmxStore {
     // Speed up transactions are stored in a list, with the most recent transaction added to the end of the list.
     // This design ensures that if the last transaction in the list is pending, there cannot be another pending speed up transaction
     // for the same instance, except for one that is specifically related to the same child transaction.
-    fn add_speed_up_tx(&self, instance_id: InstanceId, speed_up_tx: &SpeedUpTx) -> Result<()> {
+    fn add_speed_up_tx(&self, instance_id: InstanceId, speed_up_tx: &SpeedUpTx) -> Result<(), StorageError> {
         let speed_up_tx_key = self.get_key(StoreKey::InstanceSpeedUpList(instance_id));
 
         // Retrieve the current list of speed up transactions for the instance from storage.
         let mut speed_up_txs = self
             .store
-            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)
-            .context("Failed to retrieve speed up transactions")?
+            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)?
             .unwrap_or_default();
 
         // Add the newly created speed up transaction to the end of the list.
@@ -448,7 +424,7 @@ impl BitvmxStoreApi for BitvmxStore {
         Ok(())
     }
 
-    fn is_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool> {
+    fn is_speed_up_tx(&self, instance_id: u32, tx_id: Txid) -> Result<bool, StorageError> {
         let speed_up_tx = self.get_speed_up_tx(instance_id, &tx_id)?;
         Ok(speed_up_tx.is_some())
     }
@@ -458,18 +434,17 @@ impl BitvmxStoreApi for BitvmxStore {
         instance_id: InstanceId,
         tx_id: &Txid,
         status: TransactionStatus,
-    ) -> Result<()> {
+    ) -> Result<(), StorageError> {
         self.update_instance_tx_status(instance_id, tx_id, status)
     }
 
-    fn remove_funding_tx(&self, instance_id: InstanceId, funding_tx_id: &Txid) -> Result<()> {
+    fn remove_funding_tx(&self, instance_id: InstanceId, funding_tx_id: &Txid) -> Result<(), StorageError> {
         let funding_tx_key = self.get_key(StoreKey::InstanceFundingList(instance_id));
 
         // Retrieve the current list of funding transactions for the instance from storage.
         let mut funding_txs = self
             .store
-            .get::<&str, Vec<FundingTx>>(&funding_tx_key)
-            .context("Failed to retrieve funding transactions")?
+            .get::<&str, Vec<FundingTx>>(&funding_tx_key)?
             .unwrap_or_default();
 
         // Remove the specified funding transaction from the list.
@@ -481,12 +456,11 @@ impl BitvmxStoreApi for BitvmxStore {
         Ok(())
     }
 
-    fn add_funding_request(&self, instance_id: InstanceId) -> Result<()> {
+    fn add_funding_request(&self, instance_id: InstanceId) -> Result<(), StorageError> {
         let funding_request_key = self.get_key(StoreKey::FundingRequestList);
         let mut funding_requests = self
             .store
-            .get::<&str, Vec<InstanceId>>(&funding_request_key)
-            .context("Failed to retrieve funding requests")?
+            .get::<&str, Vec<InstanceId>>(&funding_request_key)?
             .unwrap_or_default();
 
         funding_requests.push(instance_id);
@@ -494,12 +468,11 @@ impl BitvmxStoreApi for BitvmxStore {
         Ok(())
     }
 
-    fn acknowledge_funding_request(&self, instance_id: InstanceId) -> Result<()> {
+    fn acknowledge_funding_request(&self, instance_id: InstanceId) -> Result<(), StorageError> {
         let funding_request_key = self.get_key(StoreKey::FundingRequestList);
         let mut funding_requests = self
             .store
-            .get::<&str, Vec<InstanceId>>(&funding_request_key)
-            .context("Failed to retrieve funding requests")?
+            .get::<&str, Vec<InstanceId>>(&funding_request_key)?
             .unwrap_or_default();
 
         funding_requests.retain(|&id| id != instance_id);
@@ -507,22 +480,20 @@ impl BitvmxStoreApi for BitvmxStore {
         Ok(())
     }
 
-    fn get_funding_requests(&self) -> Result<Vec<InstanceId>> {
+    fn get_funding_requests(&self) -> Result<Vec<InstanceId>, StorageError> {
         let funding_request_key = self.get_key(StoreKey::FundingRequestList);
         let funding_requests = self
             .store
-            .get::<&str, Vec<InstanceId>>(&funding_request_key)
-            .context("Failed to retrieve funding requests")?
+            .get::<&str, Vec<InstanceId>>(&funding_request_key)?
             .unwrap_or_default();
         Ok(funding_requests)
     }
 
-    fn add_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+    fn add_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<(), StorageError> {
         let instance_tx_news_key = self.get_key(StoreKey::InstanceTxNews);
         let mut instance_tx_news = self
             .store
-            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)
-            .context("Failed to retrieve instance tx news")?
+            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)?
             .unwrap_or_default();
 
         // create a new entry for the instance if it doesn't exist
@@ -542,22 +513,20 @@ impl BitvmxStoreApi for BitvmxStore {
         Ok(())
     }
 
-    fn get_instance_tx_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {
+    fn get_instance_tx_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>, StorageError> {
         let instance_tx_news_key = self.get_key(StoreKey::InstanceTxNews);
         let instance_tx_news = self
             .store
-            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)
-            .context("Failed to retrieve instance tx news")?
+            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)?
             .unwrap_or_default();
         Ok(instance_tx_news)
     }
 
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<(), StorageError> {
         let instance_tx_news_key = self.get_key(StoreKey::InstanceTxNews);
         let mut instance_tx_news = self
             .store
-            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)
-            .context("Failed to retrieve instance tx news")?
+            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)?
             .unwrap_or_default();
 
         // Find the instance's transaction and remove the tx_id
@@ -578,22 +547,22 @@ impl BitvmxStoreApi for BitvmxStore {
 #[automock]
 pub trait StepHandlerApi {
     fn get_tx_to_answer(&self, instance_id: InstanceId, tx_id: Txid)
-        -> Result<Option<Transaction>>;
+        -> Result<Option<Transaction>, StorageError>;
 
     fn set_tx_to_answer(&self, instance_id: InstanceId, tx_id: Txid, tx: Transaction)
-        -> Result<()>;
+        -> Result<(), StorageError>;
 
     fn update_instance_tx_status(
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
         status: TransactionStatus,
-    ) -> Result<()>;
+    ) -> Result<(), StorageError>;
 
     fn get_txs_info(
         &self,
         status: TransactionStatus,
-    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>>;
+    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>, StorageError>;
 }
 
 impl StepHandlerApi for BitvmxStore {
@@ -601,13 +570,12 @@ impl StepHandlerApi for BitvmxStore {
         &self,
         instance_id: InstanceId,
         tx_id: Txid,
-    ) -> Result<Option<Transaction>> {
+    ) -> Result<Option<Transaction>, StorageError> {
         let key = format!("instance/{}/tx/{}", instance_id, tx_id);
 
         let tx = self
             .store
-            .get::<&str, Transaction>(&key)
-            .context("Failed to retrieve instance txs to send")?;
+            .get::<&str, Transaction>(&key)?;
 
         Ok(tx)
     }
@@ -617,12 +585,11 @@ impl StepHandlerApi for BitvmxStore {
         instance_id: InstanceId,
         tx_id: Txid,
         tx: Transaction,
-    ) -> Result<()> {
+    ) -> Result<(), StorageError> {
         let key = format!("instance/{}/tx/{}", instance_id, tx_id);
 
         self.store
-            .set::<&str, Transaction>(&key, tx)
-            .context("Failed to save instance tx to answer")?;
+            .set::<&str, Transaction>(&key, tx)?;
 
         Ok(())
     }
@@ -632,14 +599,14 @@ impl StepHandlerApi for BitvmxStore {
         instance_id: InstanceId,
         tx_id: &Txid,
         status: TransactionStatus,
-    ) -> Result<()> {
+    ) -> Result<(), StorageError> {
         self.update_instance_tx_status(instance_id, tx_id, status)
     }
 
     fn get_txs_info(
         &self,
         status: TransactionStatus,
-    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>> {
+    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>, StorageError> {
         self.get_txs_info(status)
     }
 }

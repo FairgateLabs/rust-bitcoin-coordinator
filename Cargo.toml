@@ -25,10 +25,11 @@ log = "0.4"
 mockall = "0.13.0"
 
 # BitVMX dependencies
-rust-bitvmx-storage-backend = { path = "storage" }
+rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
 bitvmx-transaction-dispatcher = { path = "dispatcher" }
 bitvmx-transaction-monitor = { path = "monitor" }
-bitvmx-key-manager = { path = "key_manager" }
+bitvmx-key-manager = { path = "../rust-bitvmx-key-manager" }
+bitcoin-indexer = { git = "https://github.com/FairgateLabs/rust-bitcoin-indexer", branch = "main" }
 
 [dependencies.bitcoin]
 version = "0.32.2"

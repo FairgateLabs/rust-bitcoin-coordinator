@@ -10,9 +10,9 @@ use crate::errors::ConfigError;
 static DEFAULT_ENV: &str = "development";
 static CONFIG_PATH: &str = "config";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)] // enforce strict field compliance
-pub struct Config {
+pub struct BlockchainConfig {
     pub database: DatabaseConfig,
     pub rpc: RpcConfig,
     pub monitor: MonitorConfig,
@@ -20,12 +20,12 @@ pub struct Config {
     pub key_manager: KeyManagerConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
     pub path: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct RpcConfig {
     pub network: String,
     pub url: String,
@@ -34,13 +34,13 @@ pub struct RpcConfig {
     pub wallet: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct MonitorConfig {
     pub checkpoint_height: Option<BlockHeight>,
     pub confirmation_threshold: u32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct DispatcherConfig {
     // amount in sats of the output used to bump the fee of the DRP transaction
     pub cpfp_amount: u64,
@@ -48,7 +48,7 @@ pub struct DispatcherConfig {
     pub cpfp_fee: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct KeyManagerConfig {
     pub key_derivation_seed: String,
     pub key_derivation_path: String,
@@ -56,16 +56,16 @@ pub struct KeyManagerConfig {
     pub storage: StorageConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct StorageConfig {
     pub password: String,
     pub path: String,
 }
 
-impl Config {
-    pub fn load() -> Result<Config, ConfigError> {
-        let env = Config::get_env();
-        Config::parse_config(env)
+impl BlockchainConfig {
+    pub fn load() -> Result<BlockchainConfig, ConfigError> {
+        let env = BlockchainConfig::get_env();
+        BlockchainConfig::parse_config(env)
     }
 
     fn get_env() -> String {
@@ -79,7 +79,7 @@ impl Config {
         })
     }
 
-    fn parse_config(env: String) -> Result<Config, ConfigError> {
+    fn parse_config(env: String) -> Result<BlockchainConfig, ConfigError> {
         let config_path = format!("{}/{}.yaml", CONFIG_PATH, env);
 
         let settings = settings::Config::builder()
@@ -88,7 +88,7 @@ impl Config {
             .map_err(ConfigError::ConfigFileError)?;
 
         settings
-            .try_deserialize::<Config>()
+            .try_deserialize::<BlockchainConfig>()
             .map_err(ConfigError::ConfigFileError)
     }
 }

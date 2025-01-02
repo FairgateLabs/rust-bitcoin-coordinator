@@ -5,8 +5,8 @@ use bitvmx_transaction_monitor::monitor::Monitor;
 use bitvmx_unstable::orchestrator::OrchestratorApi;
 use bitvmx_unstable::step_handler::StepHandlerTrait;
 use bitvmx_unstable::storage::{BitvmxStore, StepHandlerApi};
-use bitvmx_unstable::tx_builder_helper::{create_instance, create_key_manager, send_transaction};
-use bitvmx_unstable::{config::Config, orchestrator::Orchestrator, step_handler::StepHandler};
+use bitvmx_unstable::tx_builder_helper::{create_instance, send_transaction, create_key_manager};
+use bitvmx_unstable::{config::BlockchainConfig, orchestrator::Orchestrator, step_handler::StepHandler};
 use console::style;
 use log::info;
 use std::str::FromStr;
@@ -21,7 +21,7 @@ fn main() -> Result<()> {
         style("Hi!").cyan()
     );
 
-    let config = Config::load()?;
+    let config = BlockchainConfig::load()?;
     let network = Network::from_str(config.rpc.network.as_str())?;
     let client = Client::new(
         config.rpc.url.as_str(),
@@ -45,8 +45,7 @@ fn main() -> Result<()> {
     )?;
 
     let store = BitvmxStore::new_with_path(&config.database.path)?;
-    let orchestrator = Orchestrator::new(monitor, &store, dispatcher, account.clone())
-        .context("Failed to create Orchestrator instance")?;
+    let orchestrator = Orchestrator::new(monitor, &store, dispatcher, account.clone());
 
     // Step 1: Create an instance with 2 transactions for different operators
     println!(
@@ -74,7 +73,7 @@ fn main() -> Result<()> {
         style("Step 3").cyan(),
         style(instance.txs[0].tx.compute_txid()).red(),
     );
-    send_transaction(instance.txs[0].tx.clone(), &Config::load()?, network)?;
+    send_transaction(instance.txs[0].tx.clone(), &BlockchainConfig::load()?, network)?;
 
     store.set_tx_to_answer(
         instance.instance_id,
@@ -82,7 +81,7 @@ fn main() -> Result<()> {
         instance.txs[1].tx.clone(),
     )?;
 
-    let mut step_handler = StepHandler::new(orchestrator, &store)?;
+    let mut step_handler = StepHandler::new(orchestrator, &store);
 
     let rx = handle_contro_c();
 

@@ -64,8 +64,8 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     mock_monitor
         .expect_get_instance_tx_status()
         .times(2)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status.clone())));
+        .with( eq(tx_id))
+        .returning(move |_| Ok(Some(tx_status.clone())));
 
     mock_monitor
         .expect_get_address_news()
@@ -92,8 +92,8 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     mock_monitor
         .expect_get_instance_tx_status()
         .times(1)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status_confirmed.clone())));
+        .with(eq(tx_id))
+        .returning(move |_| Ok(Some(tx_status_confirmed.clone())));
 
     // Simulate transaction reaching a finalized state after multiple confirmations.
     let tx_status_finalized = TxStatusResponse {
@@ -112,8 +112,8 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     mock_monitor
         .expect_get_instance_tx_status()
         .times(1)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status_finalized.clone())));
+        .with( eq(tx_id))
+        .returning(move |_| Ok(Some(tx_status_finalized.clone())));
 
     // Mock the dispatcher to check if the transaction needs to be sped up. It should decide "yes."
     mock_dispatcher
@@ -212,7 +212,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .returning(|_, _| Ok(()));
 
     // Initialize the orchestrator with mocks and begin monitoring the instance.
-    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
+    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
     orchestrator.monitor_instance(&instance.clone())?;
 
     // Dispatch the transaction through the orchestrator.
@@ -309,8 +309,8 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     mock_monitor
         .expect_get_instance_tx_status()
         .times(1)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status_first_time.clone())));
+        .with(eq(tx_id))
+        .returning(move |_| Ok(Some(tx_status_first_time.clone())));
 
     let tx_status_second_time = TxStatusResponse {
         tx_id,
@@ -329,8 +329,8 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     mock_monitor
         .expect_get_instance_tx_status()
         .times(1)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status_second_time.clone())));
+        .with(eq(tx_id))
+        .returning(move |_| Ok(Some(tx_status_second_time.clone())));
 
     let tx_status_third_time = TxStatusResponse {
         tx_id,
@@ -349,8 +349,8 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     mock_monitor
         .expect_get_instance_tx_status()
         .times(2)
-        .with(eq(instance_id), eq(tx_id))
-        .returning(move |_, _| Ok(Some(tx_status_third_time.clone())));
+        .with(eq(tx_id))
+        .returning(move |_| Ok(Some(tx_status_third_time.clone())));
 
     // Speed up tx status initially shows it as seen.
     let tx_speed_up_status = TxStatusResponse {
@@ -370,8 +370,8 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     mock_monitor
         .expect_get_instance_tx_status()
         .times(1)
-        .with(eq(instance_id), eq(tx_speed_up.clone().compute_txid()))
-        .returning(move |_, _| Ok(Some(tx_speed_up_status.clone())));
+        .with(eq(tx_speed_up.clone().compute_txid()))
+        .returning(move |_| Ok(Some(tx_speed_up_status.clone())));
 
     //Speed up tx status then should be reorg
     let tx_status = TxStatusResponse {
@@ -391,8 +391,8 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
     mock_monitor
         .expect_get_instance_tx_status()
         .times(1)
-        .with(eq(instance_id), eq(tx_speed_up.compute_txid()))
-        .returning(move |_, _| Ok(Some(tx_status.clone())));
+        .with(eq(tx_speed_up.compute_txid()))
+        .returning(move |_| Ok(Some(tx_status.clone())));
 
     mock_monitor
         .expect_get_confirmation_threshold()
@@ -466,7 +466,7 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
         .returning(|_, _| Ok(()));
 
     // Initialize the orchestrator with mocks and begin monitoring the instance.
-    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
+    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
     orchestrator.monitor_instance(&instance.clone())?;
 
     // Dispatch the transaction through the orchestrator.

@@ -1,11 +1,14 @@
-use anyhow::{Ok, Result};
 use bitcoin::Network;
 use bitcoin::{
     absolute, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction, Amount,
     EcdsaSighashType, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness,
 };
+use bitcoin_indexer::bitcoin_client::BitcoinClient;
+use bitcoin_indexer::indexer::Indexer;
+use bitcoin_indexer::store::Store;
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 
+use bitvmx_transaction_monitor::{monitor::Monitor, bitvmx_store::MonitorStorage};
 use console::style;
 use std::str::FromStr;
 use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
@@ -14,8 +17,10 @@ use transaction_dispatcher::signer::AccountApi;
 use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
-use crate::config::{Config, DispatcherConfig, KeyManagerConfig, RpcConfig};
-use crate::errors::BitVMXError;
+use crate::config::{BlockchainConfig, DispatcherConfig, KeyManagerConfig, RpcConfig};
+use crate::errors::TxBuilderHelperError;
+use crate::orchestrator::Orchestrator;
+use crate::storage::BitvmxStore;
 use crate::types::{BitvmxInstance, FundingTx, TransactionFullInfo};
 
 pub fn create_instance(
@@ -23,7 +28,7 @@ pub fn create_instance(
     rpc_config: &RpcConfig,
     network: Network,
     dispatcher: &DispatcherConfig,
-) -> Result<BitvmxInstance<TransactionFullInfo>> {
+) -> Result<BitvmxInstance<TransactionFullInfo>, TxBuilderHelperError> {
     let instance_id = 1; // Example instance ID
 
     //hardcoded transaction.
@@ -75,7 +80,7 @@ pub fn generate_tx(
     rpc_config: &RpcConfig,
     network: Network,
     dispatcher: &DispatcherConfig,
-) -> Result<Transaction> {
+) -> Result<Transaction, TxBuilderHelperError> {
     // build and send a mock transaction that we can spend in our drp transaction
     let tx_info = make_mock_output(rpc_config, user, network)?;
     let spent_amount = tx_info.amount.unsigned_abs();
@@ -122,14 +127,14 @@ pub fn make_mock_output(
     rpc_config: &RpcConfig,
     user: &Account,
     network: Network,
-) -> Result<GetTransactionResult> {
+) -> Result<GetTransactionResult, TxBuilderHelperError> {
     let client = Client::new(
         rpc_config.url.as_str(),
         Auth::UserPass(
             rpc_config.username.as_str().to_string(),
             rpc_config.password.as_str().to_string(),
         ),
-    )?;
+    ).map_err(|e| TxBuilderHelperError::Unexpected(e.to_string()))?;
 
     // fund the user address
     let txid = client.send_to_address(
@@ -141,13 +146,14 @@ pub fn make_mock_output(
         None,
         None,
         None,
-    )?;
+    ).map_err(|e| TxBuilderHelperError::Unexpected(e.to_string()))?;
 
     // get transaction details
-    Ok(client.get_transaction(&txid, Some(true))?)
+    Ok(client.get_transaction(&txid, Some(true))
+        .map_err(|e| TxBuilderHelperError::Unexpected(e.to_string()))?)
 }
 
-pub fn send_transaction(tx: Transaction, config: &Config, network: Network) -> Result<()> {
+pub fn send_transaction(tx: Transaction, config: &BlockchainConfig, network: Network) -> Result<(), TxBuilderHelperError> {
     let rpc = Client::new(
         config.rpc.url.as_str(),
         Auth::UserPass(
@@ -168,7 +174,7 @@ pub fn send_transaction(tx: Transaction, config: &Config, network: Network) -> R
 pub fn create_key_manager(
     key_manager: &KeyManagerConfig,
     network: Network,
-) -> Result<KeyManager<FileKeyStore>> {
+) -> Result<KeyManager<FileKeyStore>, TxBuilderHelperError> {
     let key_derivation_seed = get_key_derivation_seed(key_manager.key_derivation_seed.clone())?;
     let key_derivation_path = &key_manager.key_derivation_path;
     let winternitz_seed = get_winternitz_seed(key_manager.winternitz_seed.clone())?;
@@ -185,30 +191,34 @@ pub fn create_key_manager(
     Ok(key_manager)
 }
 
-pub fn get_winternitz_seed(wintenitz_seed: String) -> Result<[u8; 32]> {
-    let winternitz_seed = hex::decode(wintenitz_seed.clone())?;
+pub fn get_winternitz_seed(wintenitz_seed: String) -> Result<[u8; 32], TxBuilderHelperError> {
+    let winternitz_seed = hex::decode(wintenitz_seed.clone())
+        .map_err(|e| TxBuilderHelperError::Unexpected(format!("Winternitz Secret: {}", e.to_string())))?;
 
     if winternitz_seed.len() > 32 {
-        return Err(BitVMXError::Unexpected(
+        return Err(TxBuilderHelperError::Unexpected(
             "Winternitz secret length must be 32 bytes".to_string(),
         )
         .into());
     }
 
-    Ok(winternitz_seed.as_slice().try_into()?)
+    Ok(winternitz_seed.as_slice().try_into()
+        .map_err(|_| TxBuilderHelperError::Unexpected(format!("Winternitz Secret: TrySliceError")))?)
 }
 
-pub fn get_key_derivation_seed(key_derivation_seed: String) -> Result<[u8; 32]> {
-    let key_derivation_seed = hex::decode(key_derivation_seed.clone())?;
+pub fn get_key_derivation_seed(key_derivation_seed: String) -> Result<[u8; 32], TxBuilderHelperError> {
+    let key_derivation_seed = hex::decode(key_derivation_seed.clone())
+        .map_err(|e| TxBuilderHelperError::Unexpected(format!("Key derivation seed: {}", e.to_string())))?;
 
     if key_derivation_seed.len() > 32 {
-        return Err(BitVMXError::Unexpected(
+        return Err(TxBuilderHelperError::Unexpected(
             "Key derivation seed length must be 32 bytes".to_string(),
         )
         .into());
     }
 
-    Ok(key_derivation_seed.as_slice().try_into()?)
+    Ok(key_derivation_seed.as_slice().try_into()
+        .map_err(|_| TxBuilderHelperError::Unexpected(format!("Key derivation seed: TrySliceError")))?)
 }
 
 /// Builds a transaction with a single input and multiple outputs.
@@ -217,7 +227,7 @@ pub fn build_transaction(
     outputs: Vec<TxOut>,
     account: Account,
     spent_amount: Amount,
-) -> Result<Transaction> {
+) -> Result<Transaction, TxBuilderHelperError> {
     // TODO support multiple inputs and accounts (we only support one input, for now)
     // The transaction we want to sign and broadcast.
     let mut unsigned_tx = Transaction {
@@ -237,8 +247,8 @@ pub fn build_transaction(
             &ScriptBuf::new_p2wpkh(&account.wpkh),
             spent_amount,
             sighash_type,
-        )
-        .expect("failed to create sighash");
+        )?;
+        //.expect("failed to create sighash");
 
     // Sign the sighash using the secp256k1 library (exported by rust-bitcoin).
     let msg = Message::from(sighash);
@@ -255,4 +265,33 @@ pub fn build_transaction(
 
     // Get the signed transaction.
     Ok(sighasher.into_transaction().to_owned())
+}
+
+pub fn new_orchestrator<'b>(config: BlockchainConfig, store: &'b BitvmxStore) -> 
+Result<
+    Orchestrator<'b, Monitor<Indexer<BitcoinClient,Store>, MonitorStorage>, 
+    TransactionDispatcher<FileKeyStore>, BitvmxStore>, 
+    TxBuilderHelperError>{
+    let network = Network::from_str(config.rpc.network.as_str())?;
+    let client = Client::new(
+        config.rpc.url.as_str(),
+        Auth::UserPass(
+            config.rpc.username.as_str().to_string(),
+            config.rpc.password.as_str().to_string(),
+        ),
+    ).map_err(|e| TxBuilderHelperError::OrchestratorError(e.to_string()))?;
+
+    let account = Account::new(network);
+    let key_manager = create_key_manager(&config.key_manager, network)?;
+    let dispatcher = TransactionDispatcher::new(client, key_manager);
+    let monitor = Monitor::new_with_paths(
+        &config.rpc.url,
+        &config.database.path,
+        config.monitor.checkpoint_height,
+        config.monitor.confirmation_threshold,
+    ).map_err(|e| TxBuilderHelperError::OrchestratorError(e.to_string()))?;
+
+    let orchestrator = Orchestrator::new(monitor, store, dispatcher, account.clone());
+
+    Ok(orchestrator)
 }
