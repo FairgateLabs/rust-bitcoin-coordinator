@@ -25,10 +25,10 @@ log = "0.4"
 mockall = "0.13.0"
 
 # BitVMX dependencies
-rust-bitvmx-storage-backend = { path = "storage" }
-bitvmx-transaction-dispatcher = { path = "dispatcher" }
-bitvmx-transaction-monitor = { path = "monitor" }
-bitvmx-key-manager = { path = "key_manager" }
+rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
+bitvmx-transaction-dispatcher = { path = "../rust-bitvmx-transaction-dispatcher" }
+bitvmx-transaction-monitor = { path = "../rust-bitvmx-transaction-monitor" }
+bitvmx-key-manager = { path = "../rust-bitvmx-key-manager" }
 
 [dependencies.bitcoin]
 version = "0.32.2"

@@ -8,3 +8,5 @@ config/*
 # databases
 data
 test_output
+
+Cargo.lock
