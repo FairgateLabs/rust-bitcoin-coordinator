@@ -133,7 +133,7 @@ impl BitvmxStore {
         txs[tx_index].state = tx_state;
 
         let instance_key = self.get_key(StoreKey::Instance(instance_id));
-        self.store.set(instance_key, txs)?;
+        self.store.set(instance_key, txs, None)?;
 
         Ok(())
     }
@@ -217,7 +217,7 @@ impl BitvmxStoreApi for BitvmxStore {
         // Map BitvmxInstance
         // 1. Store the instance under its ID
         self.store
-            .set(&instance_key, txs_to_insert)
+            .set(&instance_key, txs_to_insert, None)
             .context(format!(
                 "Failed to store instance under key {}",
                 instance_key
@@ -235,7 +235,7 @@ impl BitvmxStoreApi for BitvmxStore {
         if !all_instances.contains(&instance.instance_id) {
             all_instances.push(instance.instance_id);
             self.store
-                .set(&instances_key, &all_instances)
+                .set(&instances_key, &all_instances, None)
                 .context("Failed to update instances list")?;
         }
 
@@ -260,7 +260,7 @@ impl BitvmxStoreApi for BitvmxStore {
             .unwrap_or_default();
 
         all_instance_ids.retain(|&id| id != instance_id);
-        self.store.set(&instances_key, &all_instance_ids)?;
+        self.store.set(&instances_key, &all_instance_ids, None)?;
 
         let speed_up_tx_key = self.get_key(StoreKey::InstanceSpeedUpList(instance_id));
 
@@ -306,7 +306,7 @@ impl BitvmxStoreApi for BitvmxStore {
             if tx_instance.tx_id == tx_id {
                 tx_instance.tx = Some(tx.clone());
                 let key = self.get_key(StoreKey::Instance(instance_id));
-                self.store.set(key, txs)?;
+                self.store.set(key, txs, None)?;
                 break;
             }
         }
@@ -336,7 +336,7 @@ impl BitvmxStoreApi for BitvmxStore {
             tx.state = TransactionState::Sent;
         }
 
-        self.store.set(key, txs)?;
+        self.store.set(key, txs, None)?;
 
         Ok(())
     }
@@ -354,7 +354,7 @@ impl BitvmxStoreApi for BitvmxStore {
             .expect("Transaction not found in instance");
         txs[tx_index].tx_hex = Some(tx_hex);
         let instance_key = self.get_key(StoreKey::Instance(instance_id));
-        self.store.set(instance_key, txs)?;
+        self.store.set(instance_key, txs, None)?;
         Ok(())
     }
 
@@ -385,7 +385,7 @@ impl BitvmxStoreApi for BitvmxStore {
         funding_txs.push(funding_tx.clone());
 
         self.store
-            .set(&funding_tx_key, &funding_txs)
+            .set(&funding_tx_key, &funding_txs, None)
             .context("Failed to save funding transaction")?;
 
         Ok(())
@@ -444,7 +444,7 @@ impl BitvmxStoreApi for BitvmxStore {
         speed_up_txs.push(speed_up_tx.clone());
 
         // Save the updated list of speed up transactions back to storage.
-        self.store.set(&speed_up_tx_key, &speed_up_txs)?;
+        self.store.set(&speed_up_tx_key, &speed_up_txs, None)?;
 
         Ok(())
     }
@@ -477,7 +477,7 @@ impl BitvmxStoreApi for BitvmxStore {
         funding_txs.retain(|t| t.tx_id != *funding_tx_id);
 
         // Save the updated list of funding transactions back to storage.
-        self.store.set(&funding_tx_key, &funding_txs)?;
+        self.store.set(&funding_tx_key, &funding_txs, None)?;
 
         Ok(())
     }
@@ -491,7 +491,7 @@ impl BitvmxStoreApi for BitvmxStore {
             .unwrap_or_default();
 
         funding_requests.push(instance_id);
-        self.store.set(&funding_request_key, &funding_requests)?;
+        self.store.set(&funding_request_key, &funding_requests, None)?;
         Ok(())
     }
 
@@ -504,7 +504,7 @@ impl BitvmxStoreApi for BitvmxStore {
             .unwrap_or_default();
 
         funding_requests.retain(|&id| id != instance_id);
-        self.store.set(&funding_request_key, &funding_requests)?;
+        self.store.set(&funding_request_key, &funding_requests, None)?;
         Ok(())
     }
 
@@ -539,7 +539,7 @@ impl BitvmxStoreApi for BitvmxStore {
             instance_txs.1.push(tx_id);
         }
 
-        self.store.set(&instance_tx_news_key, &instance_tx_news)?;
+        self.store.set(&instance_tx_news_key, &instance_tx_news, None)?;
         Ok(())
     }
 
@@ -572,7 +572,7 @@ impl BitvmxStoreApi for BitvmxStore {
         // Remove any empty instance entries
         instance_tx_news.retain(|(_, txs)| !txs.is_empty());
 
-        self.store.set(&instance_tx_news_key, &instance_tx_news)?;
+        self.store.set(&instance_tx_news_key, &instance_tx_news, None)?;
         Ok(())
     }
 }
@@ -622,7 +622,7 @@ impl StepHandlerApi for BitvmxStore {
         let key = format!("instance/{}/tx/{}", instance_id, tx_id);
 
         self.store
-            .set::<&str, Transaction>(&key, tx)
+            .set::<&str, Transaction>(&key, tx, None)
             .context("Failed to save instance tx to answer")?;
 
         Ok(())
