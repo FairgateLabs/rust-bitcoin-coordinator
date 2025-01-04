@@ -1,39 +1,20 @@
 # BitVMX unstable
-Rust implementation of BitVMX. Unstable package for the actively developed version.
+BitVMX unstable is a Rust-based project that serves as a core component for Bitvmx client for transaction management and monitoring. This project integrates several key components:
+
+- **Transaction Dispatcher**: Uses `bitvmx-transaction-dispatcher` for sending and speeding up Bitcoin transactions.
+- **Transaction Monitor**: Uses `bitvmx-transaction-monitor` for monitoring Bitvmx instances and Bitcoin transactions
+- **Storage**: Integrates with `rust-bitvmx-storage-backend` for persistent data storage.
+- **Key Management**: Employs `bitvmx-key-manager` for cryptographic key operations.
 
 ## Installation
 Clone the repository and initialize the submodules:
 ```bash
-$ git clone --recurse-submodules git@github.com:FairgateLabs/bitvmx-unstable.git
-```
-
-OR manually initialize the submodules (if you already cloned the repo without the `--recurse-submodules` option):
- 
-```bash
 $ git clone git@github.com:FairgateLabs/bitvmx-unstable.git
-$ git submodule init
-$ git submodule update --remote --checkout
 ```
 
-## Usage
-For now, this is just one big test. To execute it, run:
+### Tests
+If you make some changes please run tests to verify everything still working as expected.
 
-```bash
-# start a bitcoin node
-$ docker run --rm --name bitcoin-server -it \
-  -p 18443:18443 \
-  -p 18444:18444 \
-  ruimarinho/bitcoin-core:24.0.1 \
-  -printtoconsole \
-  -regtest=1 \
-  -rpcallowip=172.17.0.0/16 \
-  -rpcbind=0.0.0.0 \
-  -rpcauth='foo:337f951003371b21ba0a964464a1d34a$591adbcccece2e5bc1fdd8426c3aa9441a8a6c5cf0fa9a3ed6f7f53029e76130' \
-  -fallbackfee=0.0001 \
-  -minrelaytxfee=0.00001 \
-  -maxtxfee=10000000 \
-  -txindex
-
-# run the test
-$ BITVMX_ENV=development cargo run
+```
+cargo test
 ```
