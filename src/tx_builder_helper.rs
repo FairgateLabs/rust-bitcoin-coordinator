@@ -1,4 +1,3 @@
-use anyhow::{Ok, Result};
 use bitcoin::Network;
 use bitcoin::{
     absolute, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction, Amount,
@@ -15,7 +14,7 @@ use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
 use crate::config::{Config, DispatcherConfig, KeyManagerConfig, RpcConfig};
-use crate::errors::BitVMXError;
+use crate::errors::TxBuilderHelperError;
 use crate::types::{BitvmxInstance, FundingTx, TransactionFullInfo};
 
 pub fn create_instance(
@@ -23,7 +22,7 @@ pub fn create_instance(
     rpc_config: &RpcConfig,
     network: Network,
     dispatcher: &DispatcherConfig,
-) -> Result<BitvmxInstance<TransactionFullInfo>> {
+) -> Result<BitvmxInstance<TransactionFullInfo>, TxBuilderHelperError> {
     let instance_id = 1; // Example instance ID
 
     //hardcoded transaction.
@@ -75,7 +74,7 @@ pub fn generate_tx(
     rpc_config: &RpcConfig,
     network: Network,
     dispatcher: &DispatcherConfig,
-) -> Result<Transaction> {
+) -> Result<Transaction, TxBuilderHelperError> {
     // build and send a mock transaction that we can spend in our drp transaction
     let tx_info = make_mock_output(rpc_config, user, network)?;
     let spent_amount = tx_info.amount.unsigned_abs();
@@ -122,7 +121,7 @@ pub fn make_mock_output(
     rpc_config: &RpcConfig,
     user: &Account,
     network: Network,
-) -> Result<GetTransactionResult> {
+) -> Result<GetTransactionResult, TxBuilderHelperError> {
     let client = Client::new(
         rpc_config.url.as_str(),
         Auth::UserPass(
@@ -147,7 +146,7 @@ pub fn make_mock_output(
     Ok(client.get_transaction(&txid, Some(true))?)
 }
 
-pub fn send_transaction(tx: Transaction, config: &Config, network: Network) -> Result<()> {
+pub fn send_transaction(tx: Transaction, config: &Config, network: Network) -> Result<(), TxBuilderHelperError> {
     let rpc = Client::new(
         config.rpc.url.as_str(),
         Auth::UserPass(
@@ -168,7 +167,7 @@ pub fn send_transaction(tx: Transaction, config: &Config, network: Network) -> R
 pub fn create_key_manager(
     key_manager: &KeyManagerConfig,
     network: Network,
-) -> Result<KeyManager<FileKeyStore>> {
+) -> Result<KeyManager<FileKeyStore>, TxBuilderHelperError> {
     let key_derivation_seed = get_key_derivation_seed(key_manager.key_derivation_seed.clone())?;
     let key_derivation_path = &key_manager.key_derivation_path;
     let winternitz_seed = get_winternitz_seed(key_manager.winternitz_seed.clone())?;
@@ -185,27 +184,27 @@ pub fn create_key_manager(
     Ok(key_manager)
 }
 
-pub fn get_winternitz_seed(wintenitz_seed: String) -> Result<[u8; 32]> {
+pub fn get_winternitz_seed(wintenitz_seed: String) -> Result<[u8; 32], TxBuilderHelperError> {
     let winternitz_seed = hex::decode(wintenitz_seed.clone())?;
 
     if winternitz_seed.len() > 32 {
-        return Err(BitVMXError::Unexpected(
-            "Winternitz secret length must be 32 bytes".to_string(),
-        )
-        .into());
+        return Err(TxBuilderHelperError::LengthError(
+            "Winternitz seed".to_string(),
+            32,
+        ));
     }
 
     Ok(winternitz_seed.as_slice().try_into()?)
 }
 
-pub fn get_key_derivation_seed(key_derivation_seed: String) -> Result<[u8; 32]> {
+pub fn get_key_derivation_seed(key_derivation_seed: String) -> Result<[u8; 32], TxBuilderHelperError> {
     let key_derivation_seed = hex::decode(key_derivation_seed.clone())?;
 
     if key_derivation_seed.len() > 32 {
-        return Err(BitVMXError::Unexpected(
-            "Key derivation seed length must be 32 bytes".to_string(),
-        )
-        .into());
+        return Err(TxBuilderHelperError::LengthError(
+            "Key derivation seed".to_string(),
+            32,
+        ));
     }
 
     Ok(key_derivation_seed.as_slice().try_into()?)
@@ -217,7 +216,7 @@ pub fn build_transaction(
     outputs: Vec<TxOut>,
     account: Account,
     spent_amount: Amount,
-) -> Result<Transaction> {
+) -> Result<Transaction, TxBuilderHelperError> {
     // TODO support multiple inputs and accounts (we only support one input, for now)
     // The transaction we want to sign and broadcast.
     let mut unsigned_tx = Transaction {

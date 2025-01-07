@@ -3,7 +3,7 @@ use bitcoin::{Network, Transaction};
 use bitcoincore_rpc::{Auth, Client};
 use bitvmx_transaction_monitor::monitor::Monitor;
 use bitvmx_unstable::orchestrator::OrchestratorApi;
-use bitvmx_unstable::storage::{BitvmxStore, StepHandlerApi};
+use bitvmx_unstable::storage::{OrchestratorStore, StepHandlerApi};
 use bitvmx_unstable::tx_builder_helper::{create_instance, create_key_manager, send_transaction};
 use bitvmx_unstable::types::TransactionState;
 use bitvmx_unstable::{config::Config, orchestrator::Orchestrator};
@@ -44,9 +44,8 @@ fn main() -> Result<()> {
         config.monitor.confirmation_threshold,
     )?;
 
-    let store = BitvmxStore::new_with_path(&config.database.path)?;
-    let mut orchestrator = Orchestrator::new(monitor, &store, dispatcher, account.clone())
-        .context("Failed to create Orchestrator instance")?;
+    let store = OrchestratorStore::new_with_path(&config.database.path)?;
+    let mut orchestrator = Orchestrator::new(monitor, &store, dispatcher, account.clone());
 
     // Step 1: Create an instance with 2 transactions for different operators
     println!(

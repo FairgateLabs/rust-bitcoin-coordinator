@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
 use bitvmx_unstable::{
-    storage::{BitvmxStore, BitvmxStoreApi},
+    storage::{OrchestratorStore, OrchestratorStoreApi},
     types::{
         BitvmxInstance, FundingTx, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
         TransactionState,
@@ -18,7 +18,7 @@ fn instances_store() -> Result<(), anyhow::Error> {
         Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
             .unwrap();
 
-    let bitvmx_store = BitvmxStore::new_with_path("test_output/test1")?;
+    let bitvmx_store = OrchestratorStore::new_with_path("test_output/test1")?;
 
     let tx1_summary = TransactionPartialInfo { tx_id: tx_id };
 
@@ -64,7 +64,7 @@ fn instances_store() -> Result<(), anyhow::Error> {
 
 #[test]
 fn in_progress_tx_store() -> Result<(), anyhow::Error> {
-    let store = BitvmxStore::new_with_path("test_output/in_progress_tx_store")?;
+    let store = OrchestratorStore::new_with_path("test_output/in_progress_tx_store")?;
 
     let instance_id = 1;
     let tx_1 = Transaction {
@@ -123,7 +123,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
 
 #[test]
 fn speed_up_txs_test() -> Result<(), anyhow::Error> {
-    let bitvmx_store = BitvmxStore::new_with_path("test_output/speed_up_txs_test")?;
+    let bitvmx_store = OrchestratorStore::new_with_path("test_output/speed_up_txs_test")?;
 
     // Remove the instance 1, as a mather of cleaning the database.
     let _ = bitvmx_store.remove_instance(1);
@@ -200,7 +200,7 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
 
 #[test]
 fn update_status() -> Result<(), anyhow::Error> {
-    let bitvmx_store = BitvmxStore::new_with_path("test_output/update_status")?;
+    let bitvmx_store = OrchestratorStore::new_with_path("test_output/update_status")?;
 
     // Remove the instance 1, as a mather of cleaning the database.
     let _ = bitvmx_store.remove_instance(1);
@@ -297,7 +297,7 @@ fn update_status() -> Result<(), anyhow::Error> {
 
 #[test]
 fn funding_tests() -> Result<(), anyhow::Error> {
-    let bitvmx_store = BitvmxStore::new_with_path("test_output/funding_tests")?;
+    let bitvmx_store = OrchestratorStore::new_with_path("test_output/funding_tests")?;
 
     // Remove the instance 1, as a mather of cleaning the database.
     let _ = bitvmx_store.remove_instance(1);
