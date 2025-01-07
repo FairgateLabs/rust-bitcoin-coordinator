@@ -1,12 +1,11 @@
 use crate::{
-    storage::BitvmxStoreApi,
-    types::{
+    errors::OrchestratorError, storage::OrchestratorStoreApi, types::{
         AddressNew, BitvmxInstance, FundingTx, InstanceId, News, ProcessedNews, SpeedUpTx,
         TransactionBlockchainStatus, TransactionInfo, TransactionNew, TransactionPartialInfo,
         TransactionState,
-    },
+    }
 };
-use anyhow::{Context, Ok, Result};
+
 use bitcoin::{Address, PublicKey, Transaction, TxOut, Txid};
 use bitvmx_transaction_monitor::{
     monitor::MonitorApi,
@@ -22,7 +21,7 @@ pub struct Orchestrator<'b, M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,
-    B: BitvmxStoreApi,
+    B: OrchestratorStoreApi,
 {
     monitor: M,
     dispatcher: D,
@@ -32,46 +31,46 @@ where
 }
 
 pub trait OrchestratorApi {
-    fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()>;
+    fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<(), OrchestratorError>;
 
     // Add a non-existent transaction for an existing instance.
     // This will be use in the final step.
-    fn add_tx_to_instance(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
+    fn add_tx_to_instance(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), OrchestratorError>;
 
     // The protocol requires delivering an existing transaction for an instance.
     // This is achieved by passing the full transaction.
-    fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()>;
+    fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<(), OrchestratorError>;
 
-    fn is_ready(&mut self) -> Result<bool>;
+    fn is_ready(&mut self) -> Result<bool, OrchestratorError>;
 
-    fn tick(&mut self) -> Result<()>;
+    fn tick(&mut self) -> Result<(), OrchestratorError>;
 
-    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<()>;
+    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<(), OrchestratorError>;
 
-    fn monitor_address(&self, address: Address) -> Result<()>;
+    fn monitor_address(&self, address: Address) -> Result<(), OrchestratorError>;
 
-    fn get_news(&self) -> Result<News>;
+    fn get_news(&self) -> Result<News, OrchestratorError>;
 
-    fn acknowledge_news(&self, processed_news: ProcessedNews) -> Result<()>;
+    fn acknowledge_news(&self, processed_news: ProcessedNews) -> Result<(), OrchestratorError>;
 }
 
 impl<'b, M, D, B> Orchestrator<'b, M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,
-    B: BitvmxStoreApi,
+    B: OrchestratorStoreApi,
 {
-    pub fn new(monitor: M, store: &'b B, dispatcher: D, account: Account) -> Result<Self> {
-        Ok(Self {
+    pub fn new(monitor: M, store: &'b B, dispatcher: D, account: Account) -> Self {
+        Self {
             monitor,
             dispatcher,
             store,
             current_height: 0,
             account: account.clone(),
-        })
+        }
     }
 
-    fn process_pending_txs(&mut self) -> Result<()> {
+    fn process_pending_txs(&mut self) -> Result<(), OrchestratorError> {
         // Get pending instance transactions to be send to the blockchain
         let pending_txs = self.store.get_txs_info(TransactionState::ReadyToSend)?;
 
@@ -90,8 +89,7 @@ where
                 );
 
                 self.dispatcher
-                    .send(tx_info.tx.unwrap())
-                    .context("Error dispatching transaction")?;
+                    .send(tx_info.tx.unwrap())?;
 
                 // TODO: check atomics transactions. to perform add and remove.
 
@@ -113,7 +111,7 @@ where
         funding_txid: Txid,
         tx_public_key: PublicKey,
         funding_utxo: (u32, TxOut, PublicKey),
-    ) -> Result<()> {
+    ) -> Result<(), OrchestratorError> {
         let dispatch_result =
             self.dispatcher
                 .speed_up(tx, tx_public_key, funding_txid, funding_utxo.clone());
@@ -149,7 +147,7 @@ where
         Ok(())
     }
 
-    fn process_in_progress_txs(&mut self) -> Result<()> {
+    fn process_in_progress_txs(&mut self) -> Result<(), OrchestratorError> {
         //TODO: THIS COULD BE IMPROVED.
         // If transaction still in sent means it should be speed up, and is not confirmed.
         // otherwise it should be moved as confirmed in the previous validations for news.
@@ -167,8 +165,7 @@ where
                 // Get the latest transaction status from monitor for this transaction
                 let tx_status = self
                     .monitor
-                    .get_instance_tx_status(&tx_info.tx_id)
-                    .context("Failed to get instance transaction status from monitor")?;
+                    .get_instance_tx_status(&tx_info.tx_id)?;
 
                 self.process_instance_tx_change(instance_id, &tx_status.unwrap())?;
             }
@@ -177,7 +174,7 @@ where
         Ok(())
     }
 
-    fn process_instance_news(&mut self) -> Result<()> {
+    fn process_instance_news(&mut self) -> Result<(), OrchestratorError> {
         // Get any news in each instance that are being monitored.
         // Get instances news also returns the speed ups txs added for each instance.
         let news = self.monitor.get_instance_news()?;
@@ -215,7 +212,7 @@ where
         &mut self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
-    ) -> Result<()> {
+    ) -> Result<(), OrchestratorError> {
         // This indicates that this is a speed-up transaction that has been mined with 1 confirmation,
         // which means it should be treated as the new funding transaction.
         if tx_status.is_confirmed() {
@@ -244,7 +241,7 @@ where
         &mut self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
-    ) -> Result<()> {
+    ) -> Result<(), OrchestratorError> {
         let is_confirmed = tx_status.is_confirmed();
 
         if is_confirmed {
@@ -304,7 +301,7 @@ where
         &mut self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
-    ) -> Result<()> {
+    ) -> Result<(), OrchestratorError> {
         // Update the transaction to completed given that transaction has more than the threshold confirmations
         self.store.update_instance_tx_status(
             instance_id,
@@ -322,7 +319,7 @@ where
         &mut self,
         instance_id: InstanceId,
         speed_up_tx_id: &Txid,
-    ) -> Result<()> {
+    ) -> Result<(), OrchestratorError> {
         let speed_up_tx = self
             .store
             .get_speed_up_tx(instance_id, speed_up_tx_id)?
@@ -347,7 +344,7 @@ where
         &mut self,
         instance_id: InstanceId,
         speed_up_tx_id: &Txid,
-    ) -> Result<()> {
+    ) -> Result<(), OrchestratorError> {
         //Speed up previouly was mined, now is orphan then, we have to remove it as a funding tx.
         self.store.remove_funding_tx(instance_id, speed_up_tx_id)?;
 
@@ -358,7 +355,7 @@ where
         &mut self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
-    ) -> Result<()> {
+    ) -> Result<(), OrchestratorError> {
         // Transaction was mined and has sufficient confirmations to mark it as complete.
 
         // Update the transaction to completed given that transaction has more than the threshold confirmations
@@ -378,7 +375,7 @@ where
         &mut self,
         instance_id: InstanceId,
         tx_data: &TransactionInfo,
-    ) -> Result<()> {
+    ) -> Result<(), OrchestratorError> {
         // We get all the existing speed up transaction for tx_id. Then we figure out if we should speed it up again.
         let speed_up_txs = self
             .store
@@ -403,8 +400,8 @@ where
         let funding_tx = self
             .store
             .get_funding_tx(instance_id)?
-            .ok_or(anyhow::anyhow!(
-                "No funding transaction available for speed up"
+            .ok_or(OrchestratorError::OrchestratorError(
+                "No funding transaction available for speed up".to_string()
             ))?;
 
         self.speed_up(
@@ -427,9 +424,9 @@ impl<'b, M, D, B> OrchestratorApi for Orchestrator<'b, M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,
-    B: BitvmxStoreApi,
+    B: OrchestratorStoreApi,
 {
-    fn tick(&mut self) -> Result<()> {
+    fn tick(&mut self) -> Result<(), OrchestratorError> {
         //TODO Question: Should we handle the scenario where there are more than one instance per operator running?
         // This scenario raises concerns that the protocol should be aware of a transaction that belongs to it but was not sent by itself (was seen in the blockchain)
 
@@ -439,7 +436,7 @@ where
         if !self.monitor.is_ready()? {
             info!("Monitor is not ready yet, continuing to index blockchain.");
 
-            self.monitor.tick().context("Error detecting instances")?;
+            self.monitor.tick()?;
 
             return Ok(());
         }
@@ -448,8 +445,7 @@ where
         //  has a pending tx be dispatch. Otherwise we could add some warning..
 
         // Send pending transactions that were queued.
-        self.process_pending_txs()
-            .context("Error sending pending transactions")?;
+        self.process_pending_txs()?;
 
         let last_block_height: u32 = self.current_height;
         self.current_height = self.monitor.get_current_height();
@@ -460,19 +456,19 @@ where
         }
 
         // Handle any updates related to instances, including new information about transactions that have not been reviewed yet.
-        self.process_instance_news()
-            .context("Failed to process instance updates")?;
+        self.process_instance_news()?;
 
         // Handle any updates related to instances, including new information about transactions that have not been reviewed yet.
-        self.process_in_progress_txs()
-            .context("Failed to process instance updates")?;
+        self.process_in_progress_txs()?;
 
         Ok(())
     }
 
-    fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<()> {
+    fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<(), OrchestratorError> {
         if instance.txs.is_empty() {
-            return Err(anyhow::anyhow!("Instance txs array is empty"));
+            return Err(OrchestratorError::OrchestratorError
+                ("Instance txs array is empty".to_string()
+            ));
         }
 
         //TODO: we could add some validation to check instance and txs existence in the storage
@@ -495,13 +491,14 @@ where
         Ok(())
     }
 
-    fn is_ready(&mut self) -> Result<bool> {
+    fn is_ready(&mut self) -> Result<bool, OrchestratorError> {
         //TODO: The orchestrator is currently considered ready when the monitor is ready.
         // However, we may decide to take into consideration pending and in progress transactions in the future.
-        self.monitor.is_ready()
+        let result = self.monitor.is_ready()?;
+        Ok(result)
     }
 
-    fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<()> {
+    fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<(), OrchestratorError> {
         // This section of code is responsible for adding a transaction to an instance and marking it as pending.
         // First, it adds the transaction to the instance using `add_tx_to_instance`. This method updates the instance
         // to include the new transaction, ensuring it is associated with the correct instance.
@@ -525,7 +522,7 @@ where
         Ok(())
     }
 
-    fn add_tx_to_instance(&self, _instance_id: InstanceId, _tx: &Txid) -> Result<()> {
+    fn add_tx_to_instance(&self, _instance_id: InstanceId, _tx: &Txid) -> Result<(), OrchestratorError> {
         // Add a non-existent transaction to an existing instance.
         // The instance should exist in the storage.
         // The transaction id should not exist in the storage.
@@ -533,15 +530,17 @@ where
         Ok(())
     }
 
-    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<()> {
-        self.store.add_funding_tx(instance_id, funding_tx)
+    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<(), OrchestratorError> {
+        self.store.add_funding_tx(instance_id, funding_tx)?;
+        Ok(())
     }
 
-    fn monitor_address(&self, address: Address) -> Result<()> {
-        self.monitor.save_address_for_tracking(address)
+    fn monitor_address(&self, address: Address) -> Result<(), OrchestratorError> {
+        self.monitor.save_address_for_tracking(address)?;
+        Ok(())
     }
 
-    fn get_news(&self) -> Result<News> {
+    fn get_news(&self) -> Result<News, OrchestratorError> {
         let instance_tx_news = self.store.get_instance_tx_news()?;
         let mut txs_by_id: Vec<(InstanceId, Vec<TransactionNew>)> = Vec::new();
 
@@ -584,8 +583,7 @@ where
 
         let address_news = self
             .monitor
-            .get_address_news()
-            .context("Failed to get address news from monitor")?;
+            .get_address_news()?;
 
         let mut txs_by_address = Vec::new();
 
@@ -619,8 +617,7 @@ where
 
         let funds_requests = self
             .store
-            .get_funding_requests()
-            .context("Failed to get funding requests from store")?;
+            .get_funding_requests()?;
 
         Ok(News {
             txs_by_id,
@@ -629,28 +626,25 @@ where
         })
     }
 
-    fn acknowledge_news(&self, processed_news: ProcessedNews) -> Result<()> {
+    fn acknowledge_news(&self, processed_news: ProcessedNews) -> Result<(), OrchestratorError> {
         // Acknowledge transaction news for each instance
         for (instance_id, tx_ids) in processed_news.txs_by_id {
             for tx_id in tx_ids {
                 self.store
-                    .acknowledge_instance_tx_news(instance_id, tx_id)
-                    .context("Failed to acknowledge instance tx news")?;
+                    .acknowledge_instance_tx_news(instance_id, tx_id)?;
             }
         }
 
         // Acknowledge address news
         for address in processed_news.txs_by_address {
             self.monitor
-                .acknowledge_address_news(address)
-                .context("Failed to acknowledge address news")?;
+                .acknowledge_address_news(address)?;
         }
 
         // Acknowledge funding requests
         for instance_id in processed_news.funds_requests {
             self.store
-                .acknowledge_funding_request(instance_id)
-                .context("Failed to acknowledge funding request")?;
+                .acknowledge_funding_request(instance_id)?;
         }
 
         Ok(())

@@ -7,10 +7,62 @@ pub enum BitVMXError {
     #[error("Unexpected error: {0}")]
     Unexpected(String),
 }
+
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("Bad configuration: {0}")]
     BadConfig(String),
     #[error("while trying to build configuration")]
     ConfigFileError(#[from] settings::ConfigError),
+}
+
+#[derive(Error, Debug)]
+pub enum OrchestratorStoreError{
+    #[error("Error with Storage Backend: {0}")]
+    StorageBackendError(#[from] storage_backend::error::StorageError),
+
+    #[error("Error: {0}, {1}")]
+    OrchestratorStoreError(String, storage_backend::error::StorageError),
+}
+
+#[derive(Error, Debug)]
+pub enum OrchestratorError{
+    #[error("Error with Orchestrator Store: {0}")]
+    OrchestratorStoreError(#[from] OrchestratorStoreError),
+
+    #[error("Error with Monitor: {0}")]
+    MonitorError(#[from] bitvmx_transaction_monitor::errors::MonitorError),
+
+    #[error("Error with Dispatcher: {0}")]
+    DispatcherError(#[from] transaction_dispatcher::errors::DispatcherError),
+
+    #[error("Error with Orchestrator: {0}")]
+    OrchestratorError(String),
+}
+
+#[derive(Error, Debug)]
+pub enum TxBuilderHelperError{
+    #[error("Hex Decoding error: {0}")]
+    HexDecodingError(#[from] hex::FromHexError),
+
+    #[error("{0} length must be {1} bytes")]
+    LengthError(String, usize),
+
+    #[error("Error while converting slice to array: {0}")]
+    ConversionError(#[from] std::array::TryFromSliceError),
+
+    #[error("Error while building KeyStore: {0}")]
+    KeyStoreError(#[from] key_manager::errors::KeyStoreError),
+
+    #[error("Error while building Dispatcher: {0}")]
+    DispatcherError(#[from] transaction_dispatcher::errors::DispatcherError),
+
+    #[error("Error while building BitcoinClient: {0}")]
+    BitcoinClientError(#[from] bitcoincore_rpc::Error),
+
+    #[error("Error while building parsing: {0}")]
+    ParsingError(#[from] bitcoin::address::ParseError),
+
+    #[error("Error while building KeyManager: {0}")]
+    KeyManagerError(#[from] key_manager::errors::KeyManagerError),
 }

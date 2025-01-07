@@ -5,7 +5,7 @@ use bitcoin::{
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use bitvmx_transaction_monitor::types::{BlockInfo, InstanceData, TransactionStatus};
 use bitvmx_unstable::orchestrator::{Orchestrator, OrchestratorApi};
-use bitvmx_unstable::storage::BitvmxStore;
+use bitvmx_unstable::storage::OrchestratorStore;
 use bitvmx_unstable::types::{BitvmxInstance, FundingTx, TransactionPartialInfo};
 use mockall::predicate::eq;
 use std::str::FromStr;
@@ -204,7 +204,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .returning(|_, _| Ok(()));
 
     // Initialize the orchestrator with mocks and begin monitoring the instance.
-    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
+    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
     orchestrator.monitor_instance(&instance.clone())?;
 
     // Dispatch the transaction through the orchestrator.
@@ -459,7 +459,7 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
         .returning(|_, _| Ok(()));
 
     // Initialize the orchestrator with mocks and begin monitoring the instance.
-    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account)?;
+    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
     orchestrator.monitor_instance(&instance.clone())?;
 
     // Dispatch the transaction through the orchestrator.
@@ -476,13 +476,13 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
 
 fn get_mocks() -> (
     MockMonitorApi,
-    BitvmxStore,
+    OrchestratorStore,
     Account,
     MockTransactionDispatcherApi,
 ) {
     let mock_monitor = MockMonitorApi::new();
     let store =
-        BitvmxStore::new_with_path(&format!("data/tests/{}", generate_random_string())).unwrap();
+        OrchestratorStore::new_with_path(&format!("data/tests/{}", generate_random_string())).unwrap();
     let network = Network::from_str("regtest").unwrap();
     let account = Account::new(network);
     let mock_dispatcher = MockTransactionDispatcherApi::new();
