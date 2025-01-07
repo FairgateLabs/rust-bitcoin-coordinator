@@ -1,5 +1,5 @@
 [package]
-name = "bitvmx-unstable"
+name = "bitvmx-orchestrator"
 version = "0.1.0"
 edition = "2021"
 

@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
-use bitvmx_unstable::{
+use bitvmx_orchestrator::{
     storage::{OrchestratorStore, OrchestratorStoreApi},
     types::{
         BitvmxInstance, FundingTx, SpeedUpTx, TransactionInfo, TransactionPartialInfo,

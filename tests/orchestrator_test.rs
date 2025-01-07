@@ -1,9 +1,9 @@
 use bitcoin::{absolute, transaction, Amount, Network, ScriptBuf, Transaction, TxOut};
+use bitvmx_orchestrator::orchestrator::{Orchestrator, OrchestratorApi};
+use bitvmx_orchestrator::storage::OrchestratorStore;
+use bitvmx_orchestrator::types::{BitvmxInstance, FundingTx, TransactionPartialInfo};
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use bitvmx_transaction_monitor::types::InstanceData;
-use bitvmx_unstable::orchestrator::{Orchestrator, OrchestratorApi};
-use bitvmx_unstable::storage::OrchestratorStore;
-use bitvmx_unstable::types::{BitvmxInstance, FundingTx, TransactionPartialInfo};
 use mockall::predicate::eq;
 use std::str::FromStr;
 use transaction_dispatcher::dispatcher::MockTransactionDispatcherApi;
@@ -86,7 +86,8 @@ fn get_mocks() -> (
 ) {
     let mock_monitor = MockMonitorApi::new();
     let store =
-        OrchestratorStore::new_with_path(&format!("data/tests/{}", generate_random_string())).unwrap();
+        OrchestratorStore::new_with_path(&format!("data/tests/{}", generate_random_string()))
+            .unwrap();
     let network = Network::from_str("regtest").unwrap();
     let account = Account::new(network);
     let mock_dispatcher = MockTransactionDispatcherApi::new();

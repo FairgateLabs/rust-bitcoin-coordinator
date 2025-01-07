@@ -12,7 +12,7 @@ use serde_json::json;
 use storage_backend::storage::{KeyValueStore, Storage};
 use tracing::{error, Level};
 
-use bitvmx_unstable::{
+use bitvmx_orchestrator::{
     config::Config,
     errors::BitVMXError,
     model::{DispatcherTask, DispatcherTaskKind, DispatcherTaskStatus},
