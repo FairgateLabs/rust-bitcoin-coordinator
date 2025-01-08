@@ -9,9 +9,7 @@ pub enum TransactionDispatcherModel {
     DispatcherTask,
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DispatcherTask {
     pub transaction_id: Txid,
     pub child_tx: Option<Txid>,
@@ -21,18 +19,13 @@ pub struct DispatcherTask {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DispatcherTaskKind {
     Send,
     Speedup,
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
-#[derive(PartialEq)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DispatcherTaskStatus {
     None,
     Sent,
@@ -42,9 +35,13 @@ pub enum DispatcherTaskStatus {
 
 impl fmt::Display for DispatcherTaskKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", match self {
-            DispatcherTaskKind::Send => "Send",
-            DispatcherTaskKind::Speedup => "Speed Up",
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                DispatcherTaskKind::Send => "Send",
+                DispatcherTaskKind::Speedup => "Speed Up",
+            }
+        )
     }
 }

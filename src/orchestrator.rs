@@ -1,9 +1,11 @@
 use crate::{
-    errors::OrchestratorError, storage::OrchestratorStoreApi, types::{
+    errors::OrchestratorError,
+    storage::OrchestratorStoreApi,
+    types::{
         AddressNew, BitvmxInstance, FundingTx, InstanceId, News, ProcessedNews, SpeedUpTx,
         TransactionBlockchainStatus, TransactionInfo, TransactionNew, TransactionPartialInfo,
         TransactionState,
-    }
+    },
 };
 
 use bitcoin::{Address, PublicKey, Transaction, TxOut, Txid};
@@ -31,21 +33,36 @@ where
 }
 
 pub trait OrchestratorApi {
-    fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<(), OrchestratorError>;
+    fn monitor_instance(
+        &self,
+        instance: &BitvmxInstance<TransactionPartialInfo>,
+    ) -> Result<(), OrchestratorError>;
 
     // Add a non-existent transaction for an existing instance.
     // This will be use in the final step.
-    fn add_tx_to_instance(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), OrchestratorError>;
+    fn add_tx_to_instance(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+    ) -> Result<(), OrchestratorError>;
 
     // The protocol requires delivering an existing transaction for an instance.
     // This is achieved by passing the full transaction.
-    fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<(), OrchestratorError>;
+    fn send_tx_instance(
+        &self,
+        instance_id: InstanceId,
+        tx: &Transaction,
+    ) -> Result<(), OrchestratorError>;
 
     fn is_ready(&mut self) -> Result<bool, OrchestratorError>;
 
     fn tick(&mut self) -> Result<(), OrchestratorError>;
 
-    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<(), OrchestratorError>;
+    fn add_funding_tx(
+        &self,
+        instance_id: InstanceId,
+        funding_tx: &FundingTx,
+    ) -> Result<(), OrchestratorError>;
 
     fn monitor_address(&self, address: Address) -> Result<(), OrchestratorError>;
 
@@ -88,8 +105,7 @@ where
                     style(tx_info.tx_id).blue()
                 );
 
-                self.dispatcher
-                    .send(tx_info.tx.unwrap())?;
+                self.dispatcher.send(tx_info.tx.unwrap())?;
 
                 // TODO: check atomics transactions. to perform add and remove.
 
@@ -163,9 +179,7 @@ where
                 );
 
                 // Get the latest transaction status from monitor for this transaction
-                let tx_status = self
-                    .monitor
-                    .get_instance_tx_status(&tx_info.tx_id)?;
+                let tx_status = self.monitor.get_instance_tx_status(&tx_info.tx_id)?;
 
                 self.process_instance_tx_change(instance_id, &tx_status.unwrap())?;
             }
@@ -397,12 +411,12 @@ where
         //TODO: It is possible to speed up just one transaction at a time. Same tx could be speed up.
 
         //We are gonna have a funding transaction for each Bitvmx instance.
-        let funding_tx = self
-            .store
-            .get_funding_tx(instance_id)?
-            .ok_or(OrchestratorError::OrchestratorError(
-                "No funding transaction available for speed up".to_string()
-            ))?;
+        let funding_tx =
+            self.store
+                .get_funding_tx(instance_id)?
+                .ok_or(OrchestratorError::OrchestratorError(
+                    "No funding transaction available for speed up".to_string(),
+                ))?;
 
         self.speed_up(
             instance_id,
@@ -464,10 +478,13 @@ where
         Ok(())
     }
 
-    fn monitor_instance(&self, instance: &BitvmxInstance<TransactionPartialInfo>) -> Result<(), OrchestratorError> {
+    fn monitor_instance(
+        &self,
+        instance: &BitvmxInstance<TransactionPartialInfo>,
+    ) -> Result<(), OrchestratorError> {
         if instance.txs.is_empty() {
-            return Err(OrchestratorError::OrchestratorError
-                ("Instance txs array is empty".to_string()
+            return Err(OrchestratorError::OrchestratorError(
+                "Instance txs array is empty".to_string(),
             ));
         }
 
@@ -498,7 +515,11 @@ where
         Ok(result)
     }
 
-    fn send_tx_instance(&self, instance_id: InstanceId, tx: &Transaction) -> Result<(), OrchestratorError> {
+    fn send_tx_instance(
+        &self,
+        instance_id: InstanceId,
+        tx: &Transaction,
+    ) -> Result<(), OrchestratorError> {
         // This section of code is responsible for adding a transaction to an instance and marking it as pending.
         // First, it adds the transaction to the instance using `add_tx_to_instance`. This method updates the instance
         // to include the new transaction, ensuring it is associated with the correct instance.
@@ -522,7 +543,11 @@ where
         Ok(())
     }
 
-    fn add_tx_to_instance(&self, _instance_id: InstanceId, _tx: &Txid) -> Result<(), OrchestratorError> {
+    fn add_tx_to_instance(
+        &self,
+        _instance_id: InstanceId,
+        _tx: &Txid,
+    ) -> Result<(), OrchestratorError> {
         // Add a non-existent transaction to an existing instance.
         // The instance should exist in the storage.
         // The transaction id should not exist in the storage.
@@ -530,7 +555,11 @@ where
         Ok(())
     }
 
-    fn add_funding_tx(&self, instance_id: InstanceId, funding_tx: &FundingTx) -> Result<(), OrchestratorError> {
+    fn add_funding_tx(
+        &self,
+        instance_id: InstanceId,
+        funding_tx: &FundingTx,
+    ) -> Result<(), OrchestratorError> {
         self.store.add_funding_tx(instance_id, funding_tx)?;
         Ok(())
     }
@@ -581,9 +610,7 @@ where
             txs_by_id.push((instance_id, instance_txs));
         }
 
-        let address_news = self
-            .monitor
-            .get_address_news()?;
+        let address_news = self.monitor.get_address_news()?;
 
         let mut txs_by_address = Vec::new();
 
@@ -615,9 +642,7 @@ where
             }
         }
 
-        let funds_requests = self
-            .store
-            .get_funding_requests()?;
+        let funds_requests = self.store.get_funding_requests()?;
 
         Ok(News {
             txs_by_id,
@@ -637,14 +662,12 @@ where
 
         // Acknowledge address news
         for address in processed_news.txs_by_address {
-            self.monitor
-                .acknowledge_address_news(address)?;
+            self.monitor.acknowledge_address_news(address)?;
         }
 
         // Acknowledge funding requests
         for instance_id in processed_news.funds_requests {
-            self.store
-                .acknowledge_funding_request(instance_id)?;
+            self.store.acknowledge_funding_request(instance_id)?;
         }
 
         Ok(())

@@ -1,6 +1,5 @@
-use thiserror::Error;
 use config as settings;
-
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum BitVMXError {
@@ -17,7 +16,7 @@ pub enum ConfigError {
 }
 
 #[derive(Error, Debug)]
-pub enum OrchestratorStoreError{
+pub enum OrchestratorStoreError {
     #[error("Error with Storage Backend: {0}")]
     StorageBackendError(#[from] storage_backend::error::StorageError),
 
@@ -26,7 +25,7 @@ pub enum OrchestratorStoreError{
 }
 
 #[derive(Error, Debug)]
-pub enum OrchestratorError{
+pub enum OrchestratorError {
     #[error("Error with Orchestrator Store: {0}")]
     OrchestratorStoreError(#[from] OrchestratorStoreError),
 
@@ -41,7 +40,7 @@ pub enum OrchestratorError{
 }
 
 #[derive(Error, Debug)]
-pub enum TxBuilderHelperError{
+pub enum TxBuilderHelperError {
     #[error("Hex Decoding error: {0}")]
     HexDecodingError(#[from] hex::FromHexError),
 

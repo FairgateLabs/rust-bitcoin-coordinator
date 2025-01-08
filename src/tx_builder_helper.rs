@@ -146,7 +146,11 @@ pub fn make_mock_output(
     Ok(client.get_transaction(&txid, Some(true))?)
 }
 
-pub fn send_transaction(tx: Transaction, config: &Config, network: Network) -> Result<(), TxBuilderHelperError> {
+pub fn send_transaction(
+    tx: Transaction,
+    config: &Config,
+    network: Network,
+) -> Result<(), TxBuilderHelperError> {
     let rpc = Client::new(
         config.rpc.url.as_str(),
         Auth::UserPass(
@@ -197,7 +201,9 @@ pub fn get_winternitz_seed(wintenitz_seed: String) -> Result<[u8; 32], TxBuilder
     Ok(winternitz_seed.as_slice().try_into()?)
 }
 
-pub fn get_key_derivation_seed(key_derivation_seed: String) -> Result<[u8; 32], TxBuilderHelperError> {
+pub fn get_key_derivation_seed(
+    key_derivation_seed: String,
+) -> Result<[u8; 32], TxBuilderHelperError> {
     let key_derivation_seed = hex::decode(key_derivation_seed.clone())?;
 
     if key_derivation_seed.len() > 32 {
