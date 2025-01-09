@@ -8,6 +8,9 @@ use bitvmx_orchestrator::types::{BitvmxInstance, FundingTx, TransactionPartialIn
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use bitvmx_transaction_monitor::types::{BlockInfo, InstanceData, TransactionStatus};
 use mockall::predicate::eq;
+use storage_backend::storage::Storage;
+use std::path::PathBuf;
+use std::rc::Rc;
 use std::str::FromStr;
 use transaction_dispatcher::dispatcher::MockTransactionDispatcherApi;
 use transaction_dispatcher::signer::Account;
@@ -204,7 +207,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .returning(|_, _| Ok(()));
 
     // Initialize the orchestrator with mocks and begin monitoring the instance.
-    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
+    let mut orchestrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
     orchestrator.monitor_instance(&instance.clone())?;
 
     // Dispatch the transaction through the orchestrator.
@@ -459,7 +462,7 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
         .returning(|_, _| Ok(()));
 
     // Initialize the orchestrator with mocks and begin monitoring the instance.
-    let mut orchestrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
+    let mut orchestrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
     orchestrator.monitor_instance(&instance.clone())?;
 
     // Dispatch the transaction through the orchestrator.
@@ -481,13 +484,13 @@ fn get_mocks() -> (
     MockTransactionDispatcherApi,
 ) {
     let mock_monitor = MockMonitorApi::new();
-    let store =
-        OrchestratorStore::new_with_path(&format!("data/tests/{}", generate_random_string()))
-            .unwrap();
+    let path = format!("data/tests/{}", generate_random_string());
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(&path)).unwrap());
+    let orchestrator_store = OrchestratorStore::new(storage).unwrap();
     let network = Network::from_str("regtest").unwrap();
     let account = Account::new(network);
     let mock_dispatcher = MockTransactionDispatcherApi::new();
-    (mock_monitor, store, account, mock_dispatcher)
+    (mock_monitor, orchestrator_store, account, mock_dispatcher)
 }
 
 fn generate_random_string() -> String {

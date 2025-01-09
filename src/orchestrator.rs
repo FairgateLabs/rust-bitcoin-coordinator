@@ -19,7 +19,7 @@ use transaction_dispatcher::{
     dispatcher::TransactionDispatcherApi, errors::DispatcherError, signer::Account,
 };
 
-pub struct Orchestrator<'b, M, D, B>
+pub struct Orchestrator<M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,
@@ -27,7 +27,7 @@ where
 {
     monitor: M,
     dispatcher: D,
-    store: &'b B,
+    store: B,
     current_height: BlockHeight,
     account: Account,
 }
@@ -71,13 +71,13 @@ pub trait OrchestratorApi {
     fn acknowledge_news(&self, processed_news: ProcessedNews) -> Result<(), OrchestratorError>;
 }
 
-impl<'b, M, D, B> Orchestrator<'b, M, D, B>
+impl<M, D, B> Orchestrator<M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,
     B: OrchestratorStoreApi,
 {
-    pub fn new(monitor: M, store: &'b B, dispatcher: D, account: Account) -> Self {
+    pub fn new(monitor: M, store: B, dispatcher: D, account: Account) -> Self {
         Self {
             monitor,
             dispatcher,
@@ -434,7 +434,7 @@ where
     }
 }
 
-impl<'b, M, D, B> OrchestratorApi for Orchestrator<'b, M, D, B>
+impl<M, D, B> OrchestratorApi for Orchestrator<M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,

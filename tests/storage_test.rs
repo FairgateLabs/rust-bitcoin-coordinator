@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{path::PathBuf, rc::Rc, str::FromStr};
 
 use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
 use bitvmx_orchestrator::{
@@ -8,6 +8,7 @@ use bitvmx_orchestrator::{
         TransactionState,
     },
 };
+use storage_backend::storage::Storage;
 
 #[test]
 fn instances_store() -> Result<(), anyhow::Error> {
@@ -18,7 +19,9 @@ fn instances_store() -> Result<(), anyhow::Error> {
         Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
             .unwrap();
 
-    let bitvmx_store = OrchestratorStore::new_with_path("test_output/test1")?;
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/test1"))?);
+
+    let bitvmx_store = OrchestratorStore::new(storage)?;
 
     let tx1_summary = TransactionPartialInfo { tx_id: tx_id };
 
@@ -64,7 +67,8 @@ fn instances_store() -> Result<(), anyhow::Error> {
 
 #[test]
 fn in_progress_tx_store() -> Result<(), anyhow::Error> {
-    let store = OrchestratorStore::new_with_path("test_output/in_progress_tx_store")?;
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/in_progress_tx_store"))?);
+    let store = OrchestratorStore::new(storage)?;
 
     let instance_id = 1;
     let tx_1 = Transaction {
@@ -123,7 +127,8 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
 
 #[test]
 fn speed_up_txs_test() -> Result<(), anyhow::Error> {
-    let bitvmx_store = OrchestratorStore::new_with_path("test_output/speed_up_txs_test")?;
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/speed_up_txs_test"))?);
+    let bitvmx_store = OrchestratorStore::new(storage)?;
 
     // Remove the instance 1, as a mather of cleaning the database.
     let _ = bitvmx_store.remove_instance(1);
@@ -200,7 +205,8 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
 
 #[test]
 fn update_status() -> Result<(), anyhow::Error> {
-    let bitvmx_store = OrchestratorStore::new_with_path("test_output/update_status")?;
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/update_status"))?);
+    let bitvmx_store = OrchestratorStore::new(storage)?;
 
     // Remove the instance 1, as a mather of cleaning the database.
     let _ = bitvmx_store.remove_instance(1);
@@ -297,7 +303,8 @@ fn update_status() -> Result<(), anyhow::Error> {
 
 #[test]
 fn funding_tests() -> Result<(), anyhow::Error> {
-    let bitvmx_store = OrchestratorStore::new_with_path("test_output/funding_tests")?;
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/funding_tests"))?);
+    let bitvmx_store = OrchestratorStore::new(storage)?;
 
     // Remove the instance 1, as a mather of cleaning the database.
     let _ = bitvmx_store.remove_instance(1);

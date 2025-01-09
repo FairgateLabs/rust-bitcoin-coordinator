@@ -5,6 +5,9 @@ use bitvmx_orchestrator::types::{BitvmxInstance, FundingTx, TransactionPartialIn
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use bitvmx_transaction_monitor::types::InstanceData;
 use mockall::predicate::eq;
+use storage_backend::storage::Storage;
+use std::path::PathBuf;
+use std::rc::Rc;
 use std::str::FromStr;
 use transaction_dispatcher::dispatcher::MockTransactionDispatcherApi;
 use transaction_dispatcher::signer::Account;
@@ -23,7 +26,7 @@ fn orchastrator_is_ready_method_test() -> Result<(), anyhow::Error> {
         .times(1)
         .returning(|| Ok(true));
 
-    let mut orchastrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
+    let mut orchastrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
 
     let is_ready = orchastrator.is_ready()?;
 
@@ -48,7 +51,7 @@ fn tick_method_is_not_ready() -> Result<(), anyhow::Error> {
 
     mock_monitor.expect_tick().times(1).returning(|| Ok(()));
 
-    let mut orchastrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
+    let mut orchastrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
 
     orchastrator.tick()?;
 
@@ -71,7 +74,7 @@ fn monitor_instance_test() -> Result<(), anyhow::Error> {
         .with(eq(vec![instance_data]))
         .returning(|_| Ok(()));
 
-    let orchastrator = Orchestrator::new(mock_monitor, &store, mock_dispatcher, account);
+    let orchastrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
 
     orchastrator.monitor_instance(&instance)?;
 
@@ -85,9 +88,9 @@ fn get_mocks() -> (
     MockTransactionDispatcherApi,
 ) {
     let mock_monitor = MockMonitorApi::new();
-    let store =
-        OrchestratorStore::new_with_path(&format!("data/tests/{}", generate_random_string()))
-            .unwrap();
+    let path = format!("data/tests/{}", generate_random_string());
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(&path)).unwrap());
+    let store = OrchestratorStore::new(storage).unwrap();
     let network = Network::from_str("regtest").unwrap();
     let account = Account::new(network);
     let mock_dispatcher = MockTransactionDispatcherApi::new();

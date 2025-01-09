@@ -9,10 +9,10 @@ use crate::{
 use bitcoin::{Transaction, Txid};
 use bitvmx_transaction_monitor::types::BlockHeight;
 use mockall::automock;
-use std::path::PathBuf;
+use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
 pub struct OrchestratorStore {
-    store: Storage,
+    store: Rc<Storage>,
 }
 
 enum StoreKey {
@@ -146,8 +146,7 @@ pub trait OrchestratorStoreApi {
 }
 
 impl OrchestratorStore {
-    pub fn new_with_path(store_path: &str) -> Result<Self, OrchestratorStoreError> {
-        let store = Storage::new_with_path(&PathBuf::from(store_path.to_string()))?;
+    pub fn new(store: Rc<Storage>) -> Result<Self, OrchestratorStoreError> {
         Ok(Self { store })
     }
 
@@ -279,7 +278,7 @@ impl OrchestratorStoreApi for OrchestratorStore {
 
         // Map BitvmxInstance
         // 1. Store the instance under its ID
-        self.store.set(&instance_key, txs_to_insert, None)?;
+        self.store.set(instance_key, txs_to_insert, None)?;
 
         // 2. Maintain the list of all instances (instance/list)
         let instances_key = self.get_key(StoreKey::InstanceList);
@@ -730,75 +729,5 @@ impl OrchestratorStoreApi for OrchestratorStore {
         self.store
             .set(&instance_tx_news_key, &instance_tx_news, None)?;
         Ok(())
-    }
-}
-#[automock]
-pub trait StepHandlerApi {
-    fn get_tx_to_answer(
-        &self,
-        instance_id: InstanceId,
-        tx_id: Txid,
-    ) -> Result<Option<Transaction>, OrchestratorStoreError>;
-
-    fn set_tx_to_answer(
-        &self,
-        instance_id: InstanceId,
-        tx_id: Txid,
-        tx: Transaction,
-    ) -> Result<(), OrchestratorStoreError>;
-
-    fn update_instance_tx_status(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-        status: TransactionState,
-    ) -> Result<(), OrchestratorStoreError>;
-
-    fn get_txs_info(
-        &self,
-        status: TransactionState,
-    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>, OrchestratorStoreError>;
-}
-
-impl StepHandlerApi for OrchestratorStore {
-    fn get_tx_to_answer(
-        &self,
-        instance_id: InstanceId,
-        tx_id: Txid,
-    ) -> Result<Option<Transaction>, OrchestratorStoreError> {
-        let key = format!("instance/{}/tx/{}", instance_id, tx_id);
-
-        let tx = self.store.get::<&str, Transaction>(&key)?;
-
-        Ok(tx)
-    }
-
-    fn set_tx_to_answer(
-        &self,
-        instance_id: InstanceId,
-        tx_id: Txid,
-        tx: Transaction,
-    ) -> Result<(), OrchestratorStoreError> {
-        let key = format!("instance/{}/tx/{}", instance_id, tx_id);
-
-        self.store.set::<&str, Transaction>(&key, tx, None)?;
-
-        Ok(())
-    }
-
-    fn update_instance_tx_status(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-        status: TransactionState,
-    ) -> Result<(), OrchestratorStoreError> {
-        self.update_instance_tx_status(instance_id, tx_id, status)
-    }
-
-    fn get_txs_info(
-        &self,
-        status: TransactionState,
-    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>, OrchestratorStoreError> {
-        self.get_txs_info(status)
     }
 }
