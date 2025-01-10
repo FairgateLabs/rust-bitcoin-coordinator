@@ -151,17 +151,18 @@ impl OrchestratorStore {
     }
 
     fn get_key(&self, key: StoreKey) -> String {
+        let prefix = "orchestrator";
         match key {
-            StoreKey::InstanceList => "instance/list".to_string(),
-            StoreKey::Instance(instance_id) => format!("instance/{}", instance_id),
+            StoreKey::InstanceList => format!("{prefix}/instance/list"),
+            StoreKey::Instance(instance_id) => format!("{prefix}/instance/{instance_id}"),
             StoreKey::InstanceFundingList(instance_id) => {
-                format!("instance/{}/funding/list", instance_id)
+                format!("{prefix}/instance/{instance_id}/funding/list")
             }
             StoreKey::InstanceSpeedUpList(instance_id) => {
-                format!("instance/{}/list", instance_id)
+                format!("{prefix}/instance/{instance_id}/list")
             }
-            StoreKey::FundingRequestList => "funding/request/list".to_string(),
-            StoreKey::InstanceTxNews => "instance/news".to_string(),
+            StoreKey::FundingRequestList => format!("{prefix}/funding/request/list"),
+            StoreKey::InstanceTxNews => format!("{prefix}/instance/news"),
         }
     }
 
