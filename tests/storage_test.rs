@@ -9,6 +9,7 @@ use bitvmx_orchestrator::{
     },
 };
 use storage_backend::storage::Storage;
+use uuid::Uuid;
 
 #[test]
 fn instances_store() -> Result<(), anyhow::Error> {
@@ -28,7 +29,7 @@ fn instances_store() -> Result<(), anyhow::Error> {
     let tx2_summary = TransactionPartialInfo { tx_id: tx_id_2 };
 
     let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id: 1,
+        instance_id: Uuid::from_u128(1),
         txs: vec![tx1_summary, tx2_summary],
         funding_tx: FundingTx {
             tx_id,
@@ -50,16 +51,16 @@ fn instances_store() -> Result<(), anyhow::Error> {
     assert_eq!(instace_txs.len(), 2);
 
     //get instance by id
-    let instance = bitvmx_store.get_instance(1)?;
+    let instance = bitvmx_store.get_instance(Uuid::from_u128(1))?;
     assert_eq!(instance.len(), 2);
 
     //remove instance
-    bitvmx_store.remove_instance(1)?;
+    bitvmx_store.remove_instance(Uuid::from_u128(1))?;
     let instances = bitvmx_store.get_instances()?;
     assert_eq!(instances.len(), 0);
 
     // get instance by id
-    let instance_txs = bitvmx_store.get_instance(1)?;
+    let instance_txs = bitvmx_store.get_instance(Uuid::from_u128(1))?;
     assert_eq!(instance_txs.len(), 0);
 
     Ok(())
@@ -70,7 +71,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/in_progress_tx_store"))?);
     let store = OrchestratorStore::new(storage)?;
 
-    let instance_id = 1;
+    let instance_id = Uuid::from_u128(1);
     let tx_1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
         lock_time: LockTime::from_time(1653195600).unwrap(),
@@ -119,7 +120,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     let instance_txs = store.get_txs_info(TransactionState::Sent)?;
     assert_eq!(instance_txs.len(), 1);
     let (instance_id, txs) = &instance_txs[0];
-    assert_eq!(instance_id, &1);
+    assert_eq!(instance_id, &Uuid::from_u128(1));
     assert_eq!(txs.len(), 2);
 
     Ok(())
@@ -129,13 +130,13 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
 fn speed_up_txs_test() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/speed_up_txs_test"))?);
     let bitvmx_store = OrchestratorStore::new(storage)?;
-
+   
+    let instance_id = Uuid::from_u128(1);
     // Remove the instance 1, as a mather of cleaning the database.
-    let _ = bitvmx_store.remove_instance(1);
+    let _ = bitvmx_store.remove_instance(instance_id);
 
     let block_height = 2;
     let fee_rate = Amount::from_sat(1000);
-    let instance_id = 1;
 
     let tx_1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -208,10 +209,10 @@ fn update_status() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/update_status"))?);
     let bitvmx_store = OrchestratorStore::new(storage)?;
 
+    let instance_id = Uuid::from_u128(1);
     // Remove the instance 1, as a mather of cleaning the database.
-    let _ = bitvmx_store.remove_instance(1);
+    let _ = bitvmx_store.remove_instance(instance_id);
 
-    let instance_id = 1;
 
     let tx_1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -306,10 +307,9 @@ fn funding_tests() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/funding_tests"))?);
     let bitvmx_store = OrchestratorStore::new(storage)?;
 
+    let instance_id = Uuid::from_u128(1);
     // Remove the instance 1, as a mather of cleaning the database.
-    let _ = bitvmx_store.remove_instance(1);
-
-    let instance_id = 1;
+    let _ = bitvmx_store.remove_instance(instance_id);
 
     let tx_1 = Transaction {
         version: bitcoin::transaction::Version::TWO,

@@ -6,7 +6,7 @@ use bitvmx_orchestrator::storage::OrchestratorStore;
 use bitvmx_orchestrator::tx_builder_helper::{
     create_instance, create_key_manager, send_transaction,
 };
-use bitvmx_orchestrator::types::ProcessedNews;
+use bitvmx_orchestrator::types::{InstanceId, ProcessedNews};
 use bitvmx_orchestrator::{config::Config, orchestrator::Orchestrator};
 use bitvmx_transaction_monitor::monitor::Monitor;
 use console::style;
@@ -74,7 +74,7 @@ fn main() -> Result<()> {
     );
     send_transaction(instance.txs[0].tx.clone(), &Config::load()?, network)?;
 
-    let mut tx_to_answer: (u32, bitcoin::Txid, Option<Transaction>) = (
+    let mut tx_to_answer: (InstanceId, bitcoin::Txid, Option<Transaction>) = (
         instance.instance_id,
         instance.txs[0].tx.compute_txid(),
         Some(instance.txs[1].tx.clone()),

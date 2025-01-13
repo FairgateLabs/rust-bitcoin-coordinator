@@ -4,11 +4,12 @@ use bitcoin::{
 };
 use bitvmx_orchestrator::orchestrator::{Orchestrator, OrchestratorApi};
 use bitvmx_orchestrator::storage::OrchestratorStore;
-use bitvmx_orchestrator::types::{BitvmxInstance, FundingTx, TransactionPartialInfo};
+use bitvmx_orchestrator::types::{BitvmxInstance, FundingTx, InstanceId, TransactionPartialInfo};
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use bitvmx_transaction_monitor::types::{BlockInfo, InstanceData, TransactionStatus};
 use mockall::predicate::eq;
 use storage_backend::storage::Storage;
+use uuid::Uuid;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
@@ -499,7 +500,7 @@ fn generate_random_string() -> String {
     (0..10).map(|_| rng.gen_range('a'..='z')).collect()
 }
 
-fn get_mock_data() -> (u32, BitvmxInstance<TransactionPartialInfo>, Transaction) {
+fn get_mock_data() -> (InstanceId, BitvmxInstance<TransactionPartialInfo>, Transaction) {
     let tx = Transaction {
         version: transaction::Version::TWO,
         lock_time: absolute::LockTime::ZERO,
@@ -511,7 +512,7 @@ fn get_mock_data() -> (u32, BitvmxInstance<TransactionPartialInfo>, Transaction)
         tx_id: tx.compute_txid(),
     };
 
-    let instance_id = 1;
+    let instance_id = Uuid::from_u128(1);
 
     let instance = BitvmxInstance::<TransactionPartialInfo> {
         instance_id,

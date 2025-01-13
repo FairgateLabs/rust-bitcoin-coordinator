@@ -1,11 +1,16 @@
 use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
 use bitvmx_transaction_monitor::types::{BlockHeight, BlockInfo, MonitorType};
 use serde::{Deserialize, Serialize};
+<<<<<<< Updated upstream
 use transaction_dispatcher::DispatcherType;
 
 use crate::{orchestrator::Orchestrator, storage::OrchestratorStore};
+=======
+use uuid::Uuid;
 
-pub type InstanceId = u32;
+pub type InstanceId = Uuid;
+>>>>>>> Stashed changes
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct FundingTx {
     pub tx_id: Txid,

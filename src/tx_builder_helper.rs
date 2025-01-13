@@ -6,6 +6,7 @@ use bitcoin::{
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 
 use console::style;
+use uuid::Uuid;
 use std::str::FromStr;
 use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
 use transaction_dispatcher::signer::AccountApi;
@@ -23,7 +24,7 @@ pub fn create_instance(
     network: Network,
     dispatcher: &DispatcherConfig,
 ) -> Result<BitvmxInstance<TransactionFullInfo>, TxBuilderHelperError> {
-    let instance_id = 1; // Example instance ID
+    let instance_id = Uuid::from_u128(1); 
 
     //hardcoded transaction.
     let funding_tx_id =

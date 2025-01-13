@@ -100,7 +100,7 @@ pub trait OrchestratorStoreApi {
 
     fn is_speed_up_tx(
         &self,
-        instance_id: u32,
+        instance_id: InstanceId,
         tx_id: &Txid,
     ) -> Result<bool, OrchestratorStoreError>;
 
@@ -227,7 +227,7 @@ impl OrchestratorStoreApi for OrchestratorStore {
 
         let all_instance_ids = self
             .store
-            .get::<&str, Vec<u32>>(&instances_list_key)
+            .get::<&str, Vec<InstanceId>>(&instances_list_key)
             .map_err(|e| {
                 OrchestratorStoreError::OrchestratorStoreError(
                     "Failed to retrieve instances".to_string(),
@@ -286,7 +286,7 @@ impl OrchestratorStoreApi for OrchestratorStore {
 
         let mut all_instances = self
             .store
-            .get::<_, Vec<u32>>(&instances_key)?
+            .get::<_, Vec<InstanceId>>(&instances_key)?
             .unwrap_or_default();
 
         // Add the new instance ID to the list if it's not already present
@@ -310,7 +310,7 @@ impl OrchestratorStoreApi for OrchestratorStore {
 
         let mut all_instance_ids = self
             .store
-            .get::<_, Vec<u32>>(&instances_key)?
+            .get::<_, Vec<InstanceId>>(&instances_key)?
             .unwrap_or_default();
 
         all_instance_ids.retain(|&id| id != instance_id);
@@ -549,7 +549,7 @@ impl OrchestratorStoreApi for OrchestratorStore {
 
     fn is_speed_up_tx(
         &self,
-        instance_id: u32,
+        instance_id: InstanceId,
         tx_id: &Txid,
     ) -> Result<bool, OrchestratorStoreError> {
         let speed_up_tx = self.get_speed_up_tx(instance_id, tx_id)?;
