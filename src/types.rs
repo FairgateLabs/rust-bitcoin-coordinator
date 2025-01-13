@@ -1,6 +1,9 @@
 use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
-use bitvmx_transaction_monitor::types::{BlockHeight, BlockInfo};
+use bitvmx_transaction_monitor::types::{BlockHeight, BlockInfo, MonitorType};
 use serde::{Deserialize, Serialize};
+use transaction_dispatcher::DispatcherType;
+
+use crate::{orchestrator::Orchestrator, storage::OrchestratorStore};
 
 pub type InstanceId = u32;
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -139,3 +142,5 @@ pub struct ProcessedNews {
     pub txs_by_address: Vec<Address>,
     pub funds_requests: Vec<InstanceId>,
 }
+
+pub type OrchestratorType = Orchestrator<MonitorType, DispatcherType, OrchestratorStore>;

@@ -34,7 +34,7 @@ pub struct RpcConfig {
     pub wallet: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct MonitorConfig {
     pub checkpoint_height: Option<BlockHeight>,
     pub confirmation_threshold: u32,

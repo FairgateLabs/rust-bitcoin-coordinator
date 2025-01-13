@@ -1,6 +1,8 @@
+use std::rc::Rc;
+
 use crate::{
     errors::OrchestratorError,
-    storage::OrchestratorStoreApi,
+    storage::{OrchestratorStore, OrchestratorStoreApi},
     types::{
         AddressNew, BitvmxInstance, FundingTx, InstanceId, News, ProcessedNews, SpeedUpTx,
         TransactionBlockchainStatus, TransactionInfo, TransactionNew, TransactionPartialInfo,
@@ -8,15 +10,18 @@ use crate::{
     },
 };
 
-use bitcoin::{Address, PublicKey, Transaction, TxOut, Txid};
+use bitcoin::{Address, Network, PublicKey, Transaction, TxOut, Txid};
+use bitcoincore_rpc::Client;
 use bitvmx_transaction_monitor::{
-    monitor::MonitorApi,
-    types::{BlockHeight, InstanceData, TransactionStatus},
+    monitor::{Monitor, MonitorApi},
+    types::{BlockHeight, InstanceData, MonitorType, TransactionStatus},
 };
 use console::style;
+use key_manager::{ key_manager::KeyManager, keystorage::database::DatabaseKeyStore };
 use log::info;
+use storage_backend::storage::Storage;
 use transaction_dispatcher::{
-    dispatcher::TransactionDispatcherApi, errors::DispatcherError, signer::Account,
+    dispatcher::{TransactionDispatcher, TransactionDispatcherApi}, errors::DispatcherError, signer::Account, DispatcherType,
 };
 
 pub struct Orchestrator<M, D, B>
@@ -69,6 +74,35 @@ pub trait OrchestratorApi {
     fn get_news(&self) -> Result<News, OrchestratorError>;
 
     fn acknowledge_news(&self, processed_news: ProcessedNews) -> Result<(), OrchestratorError>;
+}
+
+impl Orchestrator<MonitorType, DispatcherType, OrchestratorStore> {
+    pub fn new_with_paths(
+        node_rpc_url: &str,
+        client: Client,
+        storage: Rc<Storage>,
+        checkpoint: Option<BlockHeight>,
+        confirmation_threshold: u32,
+        key_manager: KeyManager<DatabaseKeyStore>,
+        network: Network,
+    ) -> Result<Self, OrchestratorError> {
+
+        // We should pass node_rpc_url and that is all. Client should be removed. 
+        // The only one that connects with the blockchain is the dispatcher and the indexer.
+        // So here should be initialized the BitcoinClient
+        let monitor = Monitor::new_with_paths(
+            node_rpc_url,
+            storage.clone(),
+            checkpoint,
+            confirmation_threshold,
+        )?;
+        let store = OrchestratorStore::new(storage)?;
+        let account = Account::new(network);
+        let dispatcher =  TransactionDispatcher::new(client, key_manager);
+        let orchestrator = Orchestrator::new(monitor, store, dispatcher, account);
+
+        Ok(orchestrator)
+    }
 }
 
 impl<M, D, B> Orchestrator<M, D, B>
