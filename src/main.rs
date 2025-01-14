@@ -41,7 +41,7 @@ fn main() -> Result<()> {
 
     let account = Account::new(network);
     let key_manager = create_key_manager(&config.key_manager, network)?;
-    let dispatcher = TransactionDispatcher::new(client, key_manager);
+    let dispatcher = TransactionDispatcher::new(client, Rc::new(key_manager));
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
         &config.database.path,
     ))?);

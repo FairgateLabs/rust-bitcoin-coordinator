@@ -4,9 +4,7 @@ use crate::{
     errors::OrchestratorError,
     storage::{OrchestratorStore, OrchestratorStoreApi},
     types::{
-        AddressNew, BitvmxInstance, FundingTx, InstanceId, News, ProcessedNews, SpeedUpTx,
-        TransactionBlockchainStatus, TransactionInfo, TransactionNew, TransactionPartialInfo,
-        TransactionState,
+        AddressNew, BitvmxInstance, FundingTx, InstanceId, News, OrchestratorType, ProcessedNews, SpeedUpTx, TransactionBlockchainStatus, TransactionInfo, TransactionNew, TransactionPartialInfo, TransactionState
     },
 };
 
@@ -14,14 +12,14 @@ use bitcoin::{Address, Network, PublicKey, Transaction, TxOut, Txid};
 use bitcoincore_rpc::Client;
 use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
-    types::{BlockHeight, InstanceData, MonitorType, TransactionStatus},
+    types::{BlockHeight, InstanceData, TransactionStatus},
 };
 use console::style;
 use key_manager::{ key_manager::KeyManager, keystorage::database::DatabaseKeyStore };
 use log::info;
 use storage_backend::storage::Storage;
 use transaction_dispatcher::{
-    dispatcher::{TransactionDispatcher, TransactionDispatcherApi}, errors::DispatcherError, signer::Account, DispatcherType,
+    dispatcher::{TransactionDispatcher, TransactionDispatcherApi}, errors::DispatcherError, signer::Account,
 };
 
 pub struct Orchestrator<M, D, B>
@@ -76,14 +74,14 @@ pub trait OrchestratorApi {
     fn acknowledge_news(&self, processed_news: ProcessedNews) -> Result<(), OrchestratorError>;
 }
 
-impl Orchestrator<MonitorType, DispatcherType, OrchestratorStore> {
+impl OrchestratorType {
     pub fn new_with_paths(
         node_rpc_url: &str,
         client: Client,
         storage: Rc<Storage>,
+        key_manager: Rc<KeyManager<DatabaseKeyStore>>,
         checkpoint: Option<BlockHeight>,
         confirmation_threshold: u32,
-        key_manager: KeyManager<DatabaseKeyStore>,
         network: Network,
     ) -> Result<Self, OrchestratorError> {
 

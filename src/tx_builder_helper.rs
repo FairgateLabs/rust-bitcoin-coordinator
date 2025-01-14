@@ -7,6 +7,7 @@ use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 
 use console::style;
 use uuid::Uuid;
+use std::rc::Rc;
 use std::str::FromStr;
 use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
 use transaction_dispatcher::signer::AccountApi;
@@ -162,7 +163,7 @@ pub fn send_transaction(
     .unwrap();
 
     let key_manager = create_key_manager(&config.key_manager, network)?;
-    let dispatcher = TransactionDispatcher::new(rpc, key_manager);
+    let dispatcher = TransactionDispatcher::new(rpc, Rc::new(key_manager));
 
     dispatcher.send(tx)?;
 
