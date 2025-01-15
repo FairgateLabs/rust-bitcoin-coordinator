@@ -4,7 +4,9 @@ use crate::{
     errors::OrchestratorError,
     storage::{OrchestratorStore, OrchestratorStoreApi},
     types::{
-        AddressNew, BitvmxInstance, FundingTx, InstanceId, News, OrchestratorType, ProcessedNews, SpeedUpTx, TransactionBlockchainStatus, TransactionInfo, TransactionNew, TransactionPartialInfo, TransactionState
+        AddressNew, BitvmxInstance, FundingTx, InstanceId, News, OrchestratorType, ProcessedNews,
+        SpeedUpTx, TransactionBlockchainStatus, TransactionInfo, TransactionNew,
+        TransactionPartialInfo, TransactionState,
     },
 };
 
@@ -15,11 +17,13 @@ use bitvmx_transaction_monitor::{
     types::{BlockHeight, InstanceData, TransactionStatus},
 };
 use console::style;
-use key_manager::{ key_manager::KeyManager, keystorage::database::DatabaseKeyStore };
+use key_manager::{key_manager::KeyManager, keystorage::database::DatabaseKeyStore};
 use log::info;
 use storage_backend::storage::Storage;
 use transaction_dispatcher::{
-    dispatcher::{TransactionDispatcher, TransactionDispatcherApi}, errors::DispatcherError, signer::Account,
+    dispatcher::{TransactionDispatcher, TransactionDispatcherApi},
+    errors::DispatcherError,
+    signer::Account,
 };
 
 pub struct Orchestrator<M, D, B>
@@ -76,7 +80,9 @@ pub trait OrchestratorApi {
 
 impl OrchestratorType {
     pub fn new_with_paths(
-        node_rpc_url: &str,
+        rpc_url: &str,
+        rpc_user: &str,
+        rpc_pass: &str,
         client: Client,
         storage: Rc<Storage>,
         key_manager: Rc<KeyManager<DatabaseKeyStore>>,
@@ -84,19 +90,20 @@ impl OrchestratorType {
         confirmation_threshold: u32,
         network: Network,
     ) -> Result<Self, OrchestratorError> {
-
-        // We should pass node_rpc_url and that is all. Client should be removed. 
+        // We should pass node_rpc_url and that is all. Client should be removed.
         // The only one that connects with the blockchain is the dispatcher and the indexer.
         // So here should be initialized the BitcoinClient
-        let monitor = Monitor::new_with_paths(
-            node_rpc_url,
+        let monitor = Monitor::new_with_paths_and_rpc_details(
+            rpc_url,
+            rpc_user,
+            rpc_pass,
             storage.clone(),
             checkpoint,
             confirmation_threshold,
         )?;
         let store = OrchestratorStore::new(storage)?;
         let account = Account::new(network);
-        let dispatcher =  TransactionDispatcher::new(client, key_manager);
+        let dispatcher = TransactionDispatcher::new(client, key_manager);
         let orchestrator = Orchestrator::new(monitor, store, dispatcher, account);
 
         Ok(orchestrator)
