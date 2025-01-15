@@ -6,16 +6,18 @@ use bitcoin::{
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 
 use console::style;
-use uuid::Uuid;
+use key_manager::errors::KeyManagerError;
+use key_manager::{create_file_key_store_from_config, create_key_manager_from_config};
 use std::rc::Rc;
 use std::str::FromStr;
 use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
 use transaction_dispatcher::signer::AccountApi;
+use uuid::Uuid;
 
 use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
-use crate::config::{Config, DispatcherConfig, KeyManagerConfig, RpcConfig};
+use crate::config::{Config, DispatcherConfig, RpcConfig};
 use crate::errors::TxBuilderHelperError;
 use crate::types::{BitvmxInstance, FundingTx, TransactionFullInfo};
 
@@ -25,7 +27,7 @@ pub fn create_instance(
     network: Network,
     dispatcher: &DispatcherConfig,
 ) -> Result<BitvmxInstance<TransactionFullInfo>, TxBuilderHelperError> {
-    let instance_id = Uuid::from_u128(1); 
+    let instance_id = Uuid::from_u128(1);
 
     //hardcoded transaction.
     let funding_tx_id =
@@ -148,11 +150,7 @@ pub fn make_mock_output(
     Ok(client.get_transaction(&txid, Some(true))?)
 }
 
-pub fn send_transaction(
-    tx: Transaction,
-    config: &Config,
-    network: Network,
-) -> Result<(), TxBuilderHelperError> {
+pub fn send_transaction(tx: Transaction, config: &Config) -> Result<(), TxBuilderHelperError> {
     let rpc = Client::new(
         config.rpc.url.as_str(),
         Auth::UserPass(
@@ -162,7 +160,7 @@ pub fn send_transaction(
     )
     .unwrap();
 
-    let key_manager = create_key_manager(&config.key_manager, network)?;
+    let key_manager = create_key_manager(&config)?;
     let dispatcher = TransactionDispatcher::new(rpc, Rc::new(key_manager));
 
     dispatcher.send(tx)?;
@@ -170,52 +168,10 @@ pub fn send_transaction(
     Ok(())
 }
 
-pub fn create_key_manager(
-    key_manager: &KeyManagerConfig,
-    network: Network,
-) -> Result<KeyManager<FileKeyStore>, TxBuilderHelperError> {
-    let key_derivation_seed = get_key_derivation_seed(key_manager.key_derivation_seed.clone())?;
-    let key_derivation_path = &key_manager.key_derivation_path;
-    let winternitz_seed = get_winternitz_seed(key_manager.winternitz_seed.clone())?;
-    let path = key_manager.storage.path.as_str();
-    let password = key_manager.storage.password.as_bytes().to_vec();
-    let key_store = FileKeyStore::new(path, password, network)?;
-    let key_manager = KeyManager::new(
-        network,
-        key_derivation_path,
-        key_derivation_seed,
-        winternitz_seed,
-        key_store,
-    )?;
-    Ok(key_manager)
-}
-
-pub fn get_winternitz_seed(wintenitz_seed: String) -> Result<[u8; 32], TxBuilderHelperError> {
-    let winternitz_seed = hex::decode(wintenitz_seed.clone())?;
-
-    if winternitz_seed.len() > 32 {
-        return Err(TxBuilderHelperError::LengthError(
-            "Winternitz seed".to_string(),
-            32,
-        ));
-    }
-
-    Ok(winternitz_seed.as_slice().try_into()?)
-}
-
-pub fn get_key_derivation_seed(
-    key_derivation_seed: String,
-) -> Result<[u8; 32], TxBuilderHelperError> {
-    let key_derivation_seed = hex::decode(key_derivation_seed.clone())?;
-
-    if key_derivation_seed.len() > 32 {
-        return Err(TxBuilderHelperError::LengthError(
-            "Key derivation seed".to_string(),
-            32,
-        ));
-    }
-
-    Ok(key_derivation_seed.as_slice().try_into()?)
+pub fn create_key_manager(config: &Config) -> Result<KeyManager<FileKeyStore>, KeyManagerError> {
+    let key_storage =
+        create_file_key_store_from_config(&config.key_storage, &config.key_manager.network)?;
+    create_key_manager_from_config(&config.key_manager, key_storage)
 }
 
 /// Builds a transaction with a single input and multiple outputs.

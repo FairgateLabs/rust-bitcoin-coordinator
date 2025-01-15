@@ -40,7 +40,7 @@ fn main() -> Result<()> {
     // info!("{} {:?}", style("Wallet list").green(), list);
 
     let account = Account::new(network);
-    let key_manager = create_key_manager(&config.key_manager, network)?;
+    let key_manager = create_key_manager(&config)?;
     let dispatcher = TransactionDispatcher::new(client, Rc::new(key_manager));
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
         &config.database.path,
@@ -72,7 +72,7 @@ fn main() -> Result<()> {
         style("Step 3").cyan(),
         style(instance.txs[0].tx.compute_txid()).red(),
     );
-    send_transaction(instance.txs[0].tx.clone(), &Config::load()?, network)?;
+    send_transaction(instance.txs[0].tx.clone(), &Config::load()?)?;
 
     let mut tx_to_answer: (InstanceId, bitcoin::Txid, Option<Transaction>) = (
         instance.instance_id,

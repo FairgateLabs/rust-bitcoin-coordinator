@@ -2,6 +2,7 @@ use std::env;
 
 use bitvmx_transaction_monitor::types::BlockHeight;
 use config as settings;
+use key_manager::config::{KeyManagerConfig, KeyStorageConfig};
 use serde::Deserialize;
 use tracing::warn;
 
@@ -18,6 +19,7 @@ pub struct Config {
     pub monitor: MonitorConfig,
     pub dispatcher: DispatcherConfig,
     pub key_manager: KeyManagerConfig,
+    pub key_storage: KeyStorageConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,20 +48,6 @@ pub struct DispatcherConfig {
     pub cpfp_amount: u64,
     // fee in sats for the DRP transaction
     pub cpfp_fee: u64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct KeyManagerConfig {
-    pub key_derivation_seed: String,
-    pub key_derivation_path: String,
-    pub winternitz_seed: String,
-    pub storage: StorageConfig,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct StorageConfig {
-    pub password: String,
-    pub path: String,
 }
 
 impl Config {
