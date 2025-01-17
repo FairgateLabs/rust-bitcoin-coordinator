@@ -7,7 +7,7 @@ use crate::{
 };
 
 use bitcoin::{Transaction, Txid};
-use bitvmx_transaction_monitor::types::BlockHeight;
+use bitvmx_bitcoin_rpc::types::BlockHeight;
 use mockall::automock;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};

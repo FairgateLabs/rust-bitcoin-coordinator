@@ -1,6 +1,6 @@
 use std::env;
 
-use bitvmx_transaction_monitor::types::BlockHeight;
+use bitvmx_bitcoin_rpc::types::BlockHeight;
 use config as settings;
 use key_manager::config::{KeyManagerConfig, KeyStorageConfig};
 use serde::Deserialize;

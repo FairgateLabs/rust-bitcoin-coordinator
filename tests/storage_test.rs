@@ -68,7 +68,9 @@ fn instances_store() -> Result<(), anyhow::Error> {
 
 #[test]
 fn in_progress_tx_store() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/in_progress_tx_store"))?);
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
+        "test_output/in_progress_tx_store",
+    ))?);
     let store = OrchestratorStore::new(storage)?;
 
     let instance_id = Uuid::from_u128(1);
@@ -128,9 +130,11 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
 
 #[test]
 fn speed_up_txs_test() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/speed_up_txs_test"))?);
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
+        "test_output/speed_up_txs_test",
+    ))?);
     let bitvmx_store = OrchestratorStore::new(storage)?;
-   
+
     let instance_id = Uuid::from_u128(1);
     // Remove the instance 1, as a mather of cleaning the database.
     let _ = bitvmx_store.remove_instance(instance_id);
@@ -206,13 +210,14 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
 
 #[test]
 fn update_status() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/update_status"))?);
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
+        "test_output/update_status",
+    ))?);
     let bitvmx_store = OrchestratorStore::new(storage)?;
 
     let instance_id = Uuid::from_u128(1);
     // Remove the instance 1, as a mather of cleaning the database.
     let _ = bitvmx_store.remove_instance(instance_id);
-
 
     let tx_1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -304,7 +309,9 @@ fn update_status() -> Result<(), anyhow::Error> {
 
 #[test]
 fn funding_tests() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/funding_tests"))?);
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
+        "test_output/funding_tests",
+    ))?);
     let bitvmx_store = OrchestratorStore::new(storage)?;
 
     let instance_id = Uuid::from_u128(1);

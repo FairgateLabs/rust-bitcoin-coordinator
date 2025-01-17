@@ -5,12 +5,13 @@ use bitcoin::{
 };
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 
+use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use console::style;
 use key_manager::errors::KeyManagerError;
 use key_manager::{create_file_key_store_from_config, create_key_manager_from_config};
+use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
 use std::rc::Rc;
 use std::str::FromStr;
-use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
 use transaction_dispatcher::signer::AccountApi;
 use uuid::Uuid;
 
@@ -151,17 +152,14 @@ pub fn make_mock_output(
 }
 
 pub fn send_transaction(tx: Transaction, config: &Config) -> Result<(), TxBuilderHelperError> {
-    let rpc = Client::new(
-        config.rpc.url.as_str(),
-        Auth::UserPass(
-            config.rpc.username.as_str().to_string(),
-            config.rpc.password.as_str().to_string(),
-        ),
-    )
-    .unwrap();
+    let rpc = BitcoinClient::new(
+        &config.rpc.url,
+        &config.rpc.username,
+        &config.rpc.password,
+    )?;
 
-    let key_manager = create_key_manager(&config)?;
-    let dispatcher = TransactionDispatcher::new(rpc, Rc::new(key_manager));
+    let key_manager = create_key_manager(config)?;
+    let dispatcher = TransactionDispatcher::new_with_path(&config.rpc.url, &config.rpc.username, &config.rpc.password, Rc::new(key_manager))?;
 
     dispatcher.send(tx)?;
 

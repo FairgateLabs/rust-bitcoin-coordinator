@@ -11,10 +11,10 @@ use crate::{
 };
 
 use bitcoin::{Address, Network, PublicKey, Transaction, TxOut, Txid};
-use bitcoincore_rpc::Client;
+use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
-    types::{BlockHeight, InstanceData, TransactionStatus},
+    types::{InstanceData, TransactionStatus},
 };
 use console::style;
 use key_manager::{key_manager::KeyManager, keystorage::database::DatabaseKeyStore};
@@ -79,11 +79,11 @@ pub trait OrchestratorApi {
 }
 
 impl OrchestratorType {
+    //#[warn(clippy::too_many_arguments)]
     pub fn new_with_paths(
         rpc_url: &str,
         rpc_user: &str,
         rpc_pass: &str,
-        client: Client,
         storage: Rc<Storage>,
         key_manager: Rc<KeyManager<DatabaseKeyStore>>,
         checkpoint: Option<BlockHeight>,
@@ -93,7 +93,7 @@ impl OrchestratorType {
         // We should pass node_rpc_url and that is all. Client should be removed.
         // The only one that connects with the blockchain is the dispatcher and the indexer.
         // So here should be initialized the BitcoinClient
-        let monitor = Monitor::new_with_paths_and_rpc_details(
+        let monitor = Monitor::new_with_paths(
             rpc_url,
             rpc_user,
             rpc_pass,
@@ -101,9 +101,10 @@ impl OrchestratorType {
             checkpoint,
             confirmation_threshold,
         )?;
+
         let store = OrchestratorStore::new(storage)?;
         let account = Account::new(network);
-        let dispatcher = TransactionDispatcher::new(client, key_manager);
+        let dispatcher = TransactionDispatcher::new_with_path(rpc_url, rpc_user, rpc_pass, key_manager)?;
         let orchestrator = Orchestrator::new(monitor, store, dispatcher, account);
 
         Ok(orchestrator)
