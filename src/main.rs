@@ -1,6 +1,5 @@
 use anyhow::{Context, Ok, Result};
 use bitcoin::{Network, Transaction};
-use bitcoincore_rpc::{Auth, Client};
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_orchestrator::orchestrator::OrchestratorApi;
 use bitvmx_orchestrator::storage::OrchestratorStore;
@@ -29,11 +28,7 @@ fn main() -> Result<()> {
 
     let config = Config::load()?;
     let network = Network::from_str(config.rpc.network.as_str())?;
-    let client = BitcoinClient::new(
-        &config.rpc.url,
-        &config.rpc.username,
-        &config.rpc.password,
-    )?;
+    let client = BitcoinClient::new(&config.rpc.url, &config.rpc.username, &config.rpc.password)?;
 
     // let list = client.list_wallets()?;
     // info!("{} {:?}", style("Wallet list").green(), list);

@@ -5,7 +5,6 @@ use bitcoin::{
 };
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 
-use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use console::style;
 use key_manager::errors::KeyManagerError;
 use key_manager::{create_file_key_store_from_config, create_key_manager_from_config};
