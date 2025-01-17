@@ -9,9 +9,9 @@ use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use console::style;
 use key_manager::errors::KeyManagerError;
 use key_manager::{create_file_key_store_from_config, create_key_manager_from_config};
-use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
 use std::rc::Rc;
 use std::str::FromStr;
+use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
 use transaction_dispatcher::signer::AccountApi;
 use uuid::Uuid;
 
@@ -152,14 +152,13 @@ pub fn make_mock_output(
 }
 
 pub fn send_transaction(tx: Transaction, config: &Config) -> Result<(), TxBuilderHelperError> {
-    let rpc = BitcoinClient::new(
+    let key_manager = create_key_manager(config)?;
+    let dispatcher = TransactionDispatcher::new_with_path(
         &config.rpc.url,
         &config.rpc.username,
         &config.rpc.password,
+        Rc::new(key_manager),
     )?;
-
-    let key_manager = create_key_manager(config)?;
-    let dispatcher = TransactionDispatcher::new_with_path(&config.rpc.url, &config.rpc.username, &config.rpc.password, Rc::new(key_manager))?;
 
     dispatcher.send(tx)?;
 
