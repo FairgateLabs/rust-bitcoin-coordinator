@@ -1,6 +1,6 @@
 use anyhow::{Context, Ok, Result};
 use bitcoin::{Network, Transaction};
-use bitcoincore_rpc::{Auth, Client};
+use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_orchestrator::orchestrator::OrchestratorApi;
 use bitvmx_orchestrator::storage::OrchestratorStore;
 use bitvmx_orchestrator::tx_builder_helper::{
@@ -28,13 +28,7 @@ fn main() -> Result<()> {
 
     let config = Config::load()?;
     let network = Network::from_str(config.rpc.network.as_str())?;
-    let client = Client::new(
-        config.rpc.url.as_str(),
-        Auth::UserPass(
-            config.rpc.username.as_str().to_string(),
-            config.rpc.password.as_str().to_string(),
-        ),
-    )?;
+    let client = BitcoinClient::new(&config.rpc.url, &config.rpc.username, &config.rpc.password)?;
 
     // let list = client.list_wallets()?;
     // info!("{} {:?}", style("Wallet list").green(), list);
@@ -47,6 +41,8 @@ fn main() -> Result<()> {
     ))?);
     let monitor = Monitor::new_with_paths(
         &config.rpc.url,
+        &config.rpc.username,
+        &config.rpc.password,
         storage,
         config.monitor.checkpoint_height,
         config.monitor.confirmation_threshold,

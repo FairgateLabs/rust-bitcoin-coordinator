@@ -8,13 +8,13 @@ use bitvmx_orchestrator::types::{BitvmxInstance, FundingTx, InstanceId, Transact
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use bitvmx_transaction_monitor::types::{BlockInfo, InstanceData, TransactionStatus};
 use mockall::predicate::eq;
-use storage_backend::storage::Storage;
-use uuid::Uuid;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
+use storage_backend::storage::Storage;
 use transaction_dispatcher::dispatcher::MockTransactionDispatcherApi;
 use transaction_dispatcher::signer::Account;
+use uuid::Uuid;
 
 /*
     Test Summary: speed_up_tx
@@ -500,7 +500,11 @@ fn generate_random_string() -> String {
     (0..10).map(|_| rng.gen_range('a'..='z')).collect()
 }
 
-fn get_mock_data() -> (InstanceId, BitvmxInstance<TransactionPartialInfo>, Transaction) {
+fn get_mock_data() -> (
+    InstanceId,
+    BitvmxInstance<TransactionPartialInfo>,
+    Transaction,
+) {
     let tx = Transaction {
         version: transaction::Version::TWO,
         lock_time: absolute::LockTime::ZERO,

@@ -1,5 +1,6 @@
 use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
-use bitvmx_transaction_monitor::types::{BlockHeight, BlockInfo, MonitorType};
+use bitvmx_bitcoin_rpc::types::BlockHeight;
+use bitvmx_transaction_monitor::types::{BlockInfo, MonitorType};
 use serde::{Deserialize, Serialize};
 use transaction_dispatcher::DispatcherType;
 

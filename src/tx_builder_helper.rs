@@ -151,17 +151,13 @@ pub fn make_mock_output(
 }
 
 pub fn send_transaction(tx: Transaction, config: &Config) -> Result<(), TxBuilderHelperError> {
-    let rpc = Client::new(
-        config.rpc.url.as_str(),
-        Auth::UserPass(
-            config.rpc.username.as_str().to_string(),
-            config.rpc.password.as_str().to_string(),
-        ),
-    )
-    .unwrap();
-
-    let key_manager = create_key_manager(&config)?;
-    let dispatcher = TransactionDispatcher::new(rpc, Rc::new(key_manager));
+    let key_manager = create_key_manager(config)?;
+    let dispatcher = TransactionDispatcher::new_with_path(
+        &config.rpc.url,
+        &config.rpc.username,
+        &config.rpc.password,
+        Rc::new(key_manager),
+    )?;
 
     dispatcher.send(tx)?;
 

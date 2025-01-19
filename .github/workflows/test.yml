@@ -49,6 +49,14 @@ jobs:
       run: |
         cd ..
         git clone https://github.com/FairgateLabs/rust-bitcoin-indexer.git
+    
+    - name: Clone Settings
+      run: |        
+        git clone https://github.com/FairgateLabs/rust-bitvmx-settings.git ../rust-bitvmx-settings
+    
+    - name: Clone Bitcoin RPC
+      run: |        
+        git clone https://github.com/FairgateLabs/rust-bitvmx-bitcoin-rpc.git ../rust-bitvmx-bitcoin-rpc
 
     - name: Build project
       run: cargo build --verbose
