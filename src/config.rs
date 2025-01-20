@@ -1,6 +1,6 @@
 use std::env;
 
-use bitvmx_bitcoin_rpc::types::BlockHeight;
+use bitvmx_bitcoin_rpc::{rpc_config::RpcConfig, types::BlockHeight};
 use config as settings;
 use key_manager::config::{KeyManagerConfig, KeyStorageConfig};
 use serde::Deserialize;
@@ -25,15 +25,6 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 pub struct DatabaseConfig {
     pub path: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RpcConfig {
-    pub network: String,
-    pub url: String,
-    pub username: String,
-    pub password: String,
-    pub wallet: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

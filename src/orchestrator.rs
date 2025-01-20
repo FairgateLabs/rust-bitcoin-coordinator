@@ -11,6 +11,7 @@ use crate::{
 };
 
 use bitcoin::{Address, Network, PublicKey, Transaction, TxOut, Txid};
+use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
@@ -81,9 +82,7 @@ pub trait OrchestratorApi {
 impl OrchestratorType {
     //#[warn(clippy::too_many_arguments)]
     pub fn new_with_paths(
-        rpc_url: &str,
-        rpc_user: &str,
-        rpc_pass: &str,
+        rpc_config: &RpcConfig,
         storage: Rc<Storage>,
         key_manager: Rc<KeyManager<DatabaseKeyStore>>,
         checkpoint: Option<BlockHeight>,
@@ -94,9 +93,7 @@ impl OrchestratorType {
         // The only one that connects with the blockchain is the dispatcher and the indexer.
         // So here should be initialized the BitcoinClient
         let monitor = Monitor::new_with_paths(
-            rpc_url,
-            rpc_user,
-            rpc_pass,
+            rpc_config,
             storage.clone(),
             checkpoint,
             confirmation_threshold,
@@ -104,7 +101,7 @@ impl OrchestratorType {
 
         let store = OrchestratorStore::new(storage)?;
         let account = Account::new(network);
-        let dispatcher = TransactionDispatcher::new_with_path(rpc_url, rpc_user, rpc_pass, key_manager)?;
+        let dispatcher = TransactionDispatcher::new_with_path(rpc_config, key_manager)?;
         let orchestrator = Orchestrator::new(monitor, store, dispatcher, account);
 
         Ok(orchestrator)
