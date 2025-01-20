@@ -10,7 +10,7 @@ use bitvmx_orchestrator::types::{InstanceId, ProcessedNews};
 use bitvmx_orchestrator::{config::Config, orchestrator::Orchestrator};
 use bitvmx_transaction_monitor::monitor::Monitor;
 use console::style;
-use log::info;
+use tracing::info;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
@@ -19,19 +19,26 @@ use storage_backend::storage::Storage;
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
 fn main() -> Result<()> {
-    env_logger::init();
+    let config = Config::load()?;
+
+    let log_level = match config.log_level {
+        Some(ref level) => {
+            level.parse().unwrap_or(tracing::Level::INFO)   
+        },
+        None => tracing::Level::INFO,     
+    };
+
+    tracing_subscriber::fmt()
+        .with_max_level(log_level)
+        .init();
+
+    let network = Network::from_str(config.rpc.network.as_str())?;
+    let client = BitcoinClient::new(&config.rpc.url, &config.rpc.username, &config.rpc.password)?;
 
     info!(
         "\n{} I'm here to showcase the interaction between the different BitVMX modules.\n",
         style("Hi!").cyan()
     );
-
-    let config = Config::load()?;
-    let network = Network::from_str(config.rpc.network.as_str())?;
-    let client = BitcoinClient::new(&config.rpc.url, &config.rpc.username, &config.rpc.password)?;
-
-    // let list = client.list_wallets()?;
-    // info!("{} {:?}", style("Wallet list").green(), list);
 
     let account = Account::new(network);
     let key_manager = create_key_manager(&config)?;

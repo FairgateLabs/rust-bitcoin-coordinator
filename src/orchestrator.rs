@@ -18,7 +18,7 @@ use bitvmx_transaction_monitor::{
 };
 use console::style;
 use key_manager::{key_manager::KeyManager, keystorage::database::DatabaseKeyStore};
-use log::info;
+use tracing::info;
 use storage_backend::storage::Storage;
 use transaction_dispatcher::{
     dispatcher::{TransactionDispatcher, TransactionDispatcherApi},
