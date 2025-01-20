@@ -1,5 +1,5 @@
 use anyhow::{Context, Ok, Result};
-use bitcoin::{Network, Transaction};
+use bitcoin::Transaction;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_orchestrator::orchestrator::OrchestratorApi;
 use bitvmx_orchestrator::storage::OrchestratorStore;
@@ -13,7 +13,6 @@ use console::style;
 use log::info;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::str::FromStr;
 use std::sync::mpsc::{channel, Receiver};
 use storage_backend::storage::Storage;
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
@@ -27,22 +26,19 @@ fn main() -> Result<()> {
     );
 
     let config = Config::load()?;
-    let network = Network::from_str(config.rpc.network.as_str())?;
-    let client = BitcoinClient::new(&config.rpc.url, &config.rpc.username, &config.rpc.password)?;
+    let client = BitcoinClient::new_from_config(&config.rpc)?;
 
     // let list = client.list_wallets()?;
     // info!("{} {:?}", style("Wallet list").green(), list);
 
-    let account = Account::new(network);
+    let account = Account::new(config.rpc.network);
     let key_manager = create_key_manager(&config)?;
     let dispatcher = TransactionDispatcher::new(client, Rc::new(key_manager));
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
         &config.database.path,
     ))?);
     let monitor = Monitor::new_with_paths(
-        &config.rpc.url,
-        &config.rpc.username,
-        &config.rpc.password,
+        &config.rpc,
         storage,
         config.monitor.checkpoint_height,
         config.monitor.confirmation_threshold,
@@ -60,7 +56,12 @@ fn main() -> Result<()> {
         style("Step 1").blue()
     );
 
-    let instance = create_instance(&account, &config.rpc, network, &config.dispatcher)?;
+    let instance = create_instance(
+        &account,
+        &config.rpc,
+        config.rpc.network,
+        &config.dispatcher,
+    )?;
 
     // Step 2: Send the first transaction for operator one
     println!(

@@ -5,6 +5,7 @@ use bitcoin::{
 };
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 
+use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use console::style;
 use key_manager::errors::KeyManagerError;
 use key_manager::{create_file_key_store_from_config, create_key_manager_from_config};
@@ -17,7 +18,7 @@ use uuid::Uuid;
 use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
-use crate::config::{Config, DispatcherConfig, RpcConfig};
+use crate::config::{Config, DispatcherConfig};
 use crate::errors::TxBuilderHelperError;
 use crate::types::{BitvmxInstance, FundingTx, TransactionFullInfo};
 
@@ -152,12 +153,7 @@ pub fn make_mock_output(
 
 pub fn send_transaction(tx: Transaction, config: &Config) -> Result<(), TxBuilderHelperError> {
     let key_manager = create_key_manager(config)?;
-    let dispatcher = TransactionDispatcher::new_with_path(
-        &config.rpc.url,
-        &config.rpc.username,
-        &config.rpc.password,
-        Rc::new(key_manager),
-    )?;
+    let dispatcher = TransactionDispatcher::new_with_path(&config.rpc, Rc::new(key_manager))?;
 
     dispatcher.send(tx)?;
 
