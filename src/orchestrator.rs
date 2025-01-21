@@ -217,6 +217,9 @@ where
 
                 // Get the latest transaction status from monitor for this transaction
                 let tx_status = self.monitor.get_instance_tx_status(&tx_info.tx_id)?;
+                if tx_status.is_none() {
+                    continue;
+                }
 
                 self.process_instance_tx_change(instance_id, &tx_status.unwrap())?;
             }
@@ -484,13 +487,15 @@ where
         // The monitor is considered ready when it has fully indexed the blockchain and is up to date with the latest block.
         // Note that if there is a significant gap in the indexing process, it may take multiple ticks for the monitor to become ready.
 
-        if !self.monitor.is_ready()? {
+        info!("Orchestrator tick.");
+        if !(self.monitor.is_ready()?) {
             info!("Monitor is not ready yet, continuing to index blockchain.");
 
             self.monitor.tick()?;
 
             return Ok(());
         }
+        info!("Monitor is ready.");
 
         //TODO QUESTION?: I think we could not recieve a tx to be send for an instance that
         //  has a pending tx be dispatch. Otherwise we could add some warning..

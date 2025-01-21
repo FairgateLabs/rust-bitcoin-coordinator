@@ -8,6 +8,7 @@ use crate::{
 
 use bitcoin::{Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
+use log::info;
 use mockall::automock;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
@@ -194,6 +195,7 @@ impl OrchestratorStore {
     ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>, OrchestratorStoreError> {
         let instances_ids = self.get_instances()?;
         let mut ret_instance_txs: Vec<(InstanceId, Vec<TransactionInfo>)> = Vec::new();
+        info!("Instances: {:?}", instances_ids);
 
         for instance_id in instances_ids {
             let mut txs: Vec<TransactionInfo> = Vec::new();

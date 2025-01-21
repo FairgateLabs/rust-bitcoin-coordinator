@@ -1,4 +1,6 @@
-use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
+use std::str::FromStr;
+
+use bitcoin::{Address, Amount, ScriptBuf, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::types::{BlockInfo, MonitorType};
 use serde::{Deserialize, Serialize};
@@ -13,6 +15,24 @@ pub struct FundingTx {
     pub tx_id: Txid,
     pub utxo_index: u32,
     pub utxo_output: TxOut,
+}
+
+impl FundingTx {
+    pub fn empty() -> Self {
+        let funding_tx_id =
+            Txid::from_str("3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
+                .unwrap();
+
+        let funding_tx = FundingTx {
+            tx_id: funding_tx_id,
+            utxo_index: 0,
+            utxo_output: TxOut {
+                value: Amount::default(),
+                script_pubkey: ScriptBuf::default(),
+            },
+        };
+        funding_tx
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -94,6 +114,18 @@ pub struct TransactionPartialInfo {
     pub tx_id: Txid,
 }
 
+impl Into<TransactionPartialInfo> for Txid {
+    fn into(self) -> TransactionPartialInfo {
+        TransactionPartialInfo { tx_id: self }
+    }
+}
+
+impl TransactionPartialInfo {
+    pub fn new(tx_id: Txid) -> Self {
+        Self { tx_id }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TransactionFullInfo {
     pub tx: Transaction,
@@ -109,6 +141,16 @@ pub struct BitvmxInstance<T> {
     // On the other hand, if the transaction to be mined is sent, it is necessary to dispatch
     // this transaction and wait for it to be mined in order to start sending speed up transactions.
     pub funding_tx: FundingTx,
+}
+
+impl<T> BitvmxInstance<T> {
+    pub fn new(instance_id: InstanceId, txs: Vec<T>, funding_tx: FundingTx) -> Self {
+        Self {
+            instance_id,
+            txs,
+            funding_tx,
+        }
+    }
 }
 
 impl BitvmxInstance<TransactionFullInfo> {
@@ -139,6 +181,7 @@ pub struct News {
     pub txs_by_address: Vec<(Address, Vec<AddressNew>)>,
     pub funds_requests: Vec<InstanceId>,
 }
+#[derive(Debug)]
 pub struct ProcessedNews {
     pub txs_by_id: Vec<(InstanceId, Vec<Txid>)>,
     pub txs_by_address: Vec<Address>,
