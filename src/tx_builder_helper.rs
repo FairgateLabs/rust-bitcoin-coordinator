@@ -5,6 +5,7 @@ use bitcoin::{
 };
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 
+use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use console::style;
 use key_manager::errors::KeyManagerError;
 use key_manager::{create_file_key_store_from_config, create_key_manager_from_config};
@@ -17,14 +18,13 @@ use uuid::Uuid;
 use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
-use crate::config::{Config, DispatcherConfig, RpcConfig};
+use crate::config::{Config, DispatcherConfig};
 use crate::errors::TxBuilderHelperError;
 use crate::types::{BitvmxInstance, FundingTx, TransactionFullInfo};
 
 pub fn create_instance(
     user: &Account,
     rpc_config: &RpcConfig,
-    network: Network,
     dispatcher: &DispatcherConfig,
 ) -> Result<BitvmxInstance<TransactionFullInfo>, TxBuilderHelperError> {
     let instance_id = Uuid::from_u128(1);
@@ -42,8 +42,8 @@ pub fn create_instance(
         },
     };
 
-    let tx_1: Transaction = generate_tx(user, rpc_config, network, dispatcher)?;
-    let tx_2: Transaction = generate_tx(user, rpc_config, network, dispatcher)?;
+    let tx_1: Transaction = generate_tx(user, rpc_config, dispatcher)?;
+    let tx_2: Transaction = generate_tx(user, rpc_config, dispatcher)?;
 
     let txs = vec![
         TransactionFullInfo { tx: tx_1.clone() },
@@ -76,11 +76,10 @@ pub fn create_instance(
 pub fn generate_tx(
     user: &Account,
     rpc_config: &RpcConfig,
-    network: Network,
     dispatcher: &DispatcherConfig,
 ) -> Result<Transaction, TxBuilderHelperError> {
     // build and send a mock transaction that we can spend in our drp transaction
-    let tx_info = make_mock_output(rpc_config, user, network)?;
+    let tx_info = make_mock_output(rpc_config, user, rpc_config.network)?;
     let spent_amount = tx_info.amount.unsigned_abs();
     let fee = Amount::from_sat(dispatcher.cpfp_fee);
     //Child Pays For Parent Amount
@@ -107,7 +106,7 @@ pub fn generate_tx(
     // The drp output. For this example, we just pay back to the user.
     let drp = TxOut {
         value: drp_amount,
-        script_pubkey: user.address_checked(network)?.script_pubkey(),
+        script_pubkey: user.address_checked(rpc_config.network)?.script_pubkey(),
     };
 
     // The cpfp output is locked to a key controlled by the user.
@@ -153,9 +152,7 @@ pub fn make_mock_output(
 pub fn send_transaction(tx: Transaction, config: &Config) -> Result<(), TxBuilderHelperError> {
     let key_manager = create_key_manager(config)?;
     let dispatcher = TransactionDispatcher::new_with_path(
-        &config.rpc.url,
-        &config.rpc.username,
-        &config.rpc.password,
+        &config.rpc,
         Rc::new(key_manager),
     )?;
 
