@@ -8,10 +8,10 @@ use crate::{
 
 use bitcoin::{Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use log::info;
 use mockall::automock;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
+use tracing::info;
 pub struct OrchestratorStore {
     store: Rc<Storage>,
 }
