@@ -140,6 +140,12 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         )
         .returning(move |_, _, _, _| Ok((tx_speed_up_id_1, Amount::default())));
 
+    // Last tick, no news.
+    mock_monitor
+        .expect_get_instance_news()
+        .times(1)
+        .returning(move || Ok(vec![]));
+
     // Second speed-up attempt: Re-attempt speed-up using the original UTXO data as the transaction is still unmined.
     mock_dispatcher
         .expect_speed_up()
@@ -166,27 +172,8 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .with(eq(vec![instance_data]))
         .returning(|_| Ok(()));
 
-    // Simulate blockchain height changes with each tick, representing block progress.
-    mock_monitor
-        .expect_get_current_height()
-        .times(1)
-        .returning(|| 0);
-    mock_monitor
-        .expect_get_current_height()
-        .times(1)
-        .returning(|| 1);
-    mock_monitor
-        .expect_get_current_height()
-        .times(1)
-        .returning(|| 2);
-    mock_monitor
-        .expect_get_current_height()
-        .times(1)
-        .returning(|| 3);
-    mock_monitor
-        .expect_get_current_height()
-        .times(1)
-        .returning(|| 10); // Simulates that more than 6 blocks have been mined since.
+    // Simulate blockchain height, it does not change with each tick, for this.
+    mock_monitor.expect_get_current_height().returning(|| Ok(1));
 
     // Acknowledge transaction updates twice to notify the monitor of our awareness of changes.
     mock_monitor
@@ -208,7 +195,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .returning(|_, _| Ok(()));
 
     // Initialize the orchestrator with mocks and begin monitoring the instance.
-    let mut orchestrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
+    let orchestrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
     orchestrator.monitor_instance(&instance.clone())?;
 
     // Dispatch the transaction through the orchestrator.
@@ -355,6 +342,11 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
             )])
         });
 
+    //Last tick no news
+    mock_monitor
+        .expect_get_instance_news()
+        .returning(move || Ok(vec![]));
+
     // Mock the dispatcher to check if the transaction needs to be sped up. It should decide "no."
     mock_dispatcher
         .expect_should_speed_up()
@@ -391,7 +383,6 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
 
     mock_monitor
         .expect_get_instance_tx_status()
-        .times(1)
         .with(eq(tx_id.clone()))
         .returning(move |_| Ok(Some(tx_status.clone())));
 
@@ -422,24 +413,8 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
         .with(eq(vec![instance_data]))
         .returning(|_| Ok(()));
 
-    // Simulate blockchain height changes with each tick, representing block progress.
-    mock_monitor
-        .expect_get_current_height()
-        .times(1)
-        .returning(|| 0);
-    mock_monitor
-        .expect_get_current_height()
-        .times(1)
-        .returning(|| 1);
-    mock_monitor
-        .expect_get_current_height()
-        .times(1)
-        .returning(|| 2);
-    mock_monitor
-        .expect_get_current_height()
-        .times(1)
-        .returning(|| 3);
-    mock_monitor.expect_get_current_height().returning(|| 4);
+    // Simulate blockchain height, it does not change with each tick, for this test.
+    mock_monitor.expect_get_current_height().returning(|| Ok(1));
 
     // Acknowledge transaction updates twice to notify the monitor of our awareness of changes.
     mock_monitor
@@ -463,13 +438,14 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
         .returning(|_, _| Ok(()));
 
     // Initialize the orchestrator with mocks and begin monitoring the instance.
-    let mut orchestrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
+    let orchestrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
     orchestrator.monitor_instance(&instance.clone())?;
 
     // Dispatch the transaction through the orchestrator.
     orchestrator.send_tx_instance(instance_id, &tx)?;
 
     // Simulate ticks to monitor and adjust transaction status with each blockchain height update.
+
     orchestrator.tick()?; // Dispatch and observe unmined status.
     orchestrator.tick()?; // Speed-up after unconfirmed status persists.
     orchestrator.tick()?; // Transaction should be mined.

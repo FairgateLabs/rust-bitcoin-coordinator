@@ -20,6 +20,7 @@ pub struct Config {
     pub dispatcher: DispatcherConfig,
     pub key_manager: KeyManagerConfig,
     pub key_storage: KeyStorageConfig,
+    pub log_level: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
