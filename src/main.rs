@@ -10,26 +10,22 @@ use bitvmx_orchestrator::types::{InstanceId, ProcessedNews};
 use bitvmx_orchestrator::{config::Config, orchestrator::Orchestrator};
 use bitvmx_transaction_monitor::monitor::Monitor;
 use console::style;
-use tracing::info;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Receiver};
 use storage_backend::storage::Storage;
+use tracing::info;
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
 
 fn main() -> Result<()> {
     let config = Config::load()?;
 
     let log_level = match config.log_level {
-        Some(ref level) => {
-            level.parse().unwrap_or(tracing::Level::INFO)   
-        },
-        None => tracing::Level::INFO,     
+        Some(ref level) => level.parse().unwrap_or(tracing::Level::INFO),
+        None => tracing::Level::INFO,
     };
 
-    tracing_subscriber::fmt()
-        .with_max_level(log_level)
-        .init();
+    tracing_subscriber::fmt().with_max_level(log_level).init();
 
     info!(
         "\n{} I'm here to showcase the interaction between the different BitVMX modules.\n",
@@ -91,7 +87,7 @@ fn main() -> Result<()> {
     );
 
     println!("{:?}", instance.map_partial_info());
-    let mut orchestrator = Orchestrator::new(monitor, store, dispatcher, account.clone());
+    let orchestrator = Orchestrator::new(monitor, store, dispatcher, account.clone());
 
     orchestrator
         .monitor_instance(&instance.map_partial_info())

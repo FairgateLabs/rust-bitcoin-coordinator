@@ -19,8 +19,8 @@ use bitvmx_transaction_monitor::{
 };
 use console::style;
 use key_manager::{key_manager::KeyManager, keystorage::database::DatabaseKeyStore};
-use tracing::info;
 use storage_backend::storage::Storage;
+use tracing::info;
 use transaction_dispatcher::{
     dispatcher::{TransactionDispatcher, TransactionDispatcherApi},
     errors::DispatcherError,
@@ -36,7 +36,6 @@ where
     monitor: M,
     dispatcher: D,
     store: B,
-    current_height: BlockHeight,
     account: Account,
 }
 
@@ -62,9 +61,9 @@ pub trait OrchestratorApi {
         tx: &Transaction,
     ) -> Result<(), OrchestratorError>;
 
-    fn is_ready(&mut self) -> Result<bool, OrchestratorError>;
+    fn is_ready(&self) -> Result<bool, OrchestratorError>;
 
-    fn tick(&mut self) -> Result<(), OrchestratorError>;
+    fn tick(&self) -> Result<(), OrchestratorError>;
 
     fn add_funding_tx(
         &self,
@@ -119,12 +118,11 @@ where
             monitor,
             dispatcher,
             store,
-            current_height: 0,
             account: account.clone(),
         }
     }
 
-    fn process_pending_txs(&mut self) -> Result<(), OrchestratorError> {
+    fn process_pending_txs(&self) -> Result<(), OrchestratorError> {
         // Get pending instance transactions to be send to the blockchain
         let pending_txs = self.store.get_txs_info(TransactionState::ReadyToSend)?;
 
@@ -149,7 +147,7 @@ where
                 self.store.update_instance_tx_as_sent(
                     instance_id,
                     &tx_info.tx_id,
-                    self.current_height,
+                    self.monitor.get_current_height()?,
                 )?;
             }
         }
@@ -181,11 +179,12 @@ where
 
         if dispatch_result.is_ok() {
             let (speed_up_tx_id, deliver_fee_rate) = dispatch_result.unwrap();
+            let deliver_block_height = self.monitor.get_current_height()?;
 
             let speed_up_tx = SpeedUpTx {
                 tx_id: speed_up_tx_id,
                 deliver_fee_rate,
-                deliver_block_height: self.current_height,
+                deliver_block_height,
                 child_tx_id: tx.compute_txid(),
                 utxo_index: funding_utxo.0,
                 utxo_output: funding_utxo.1,
@@ -200,7 +199,7 @@ where
         Ok(())
     }
 
-    fn process_in_progress_txs(&mut self) -> Result<(), OrchestratorError> {
+    fn process_in_progress_txs(&self) -> Result<(), OrchestratorError> {
         //TODO: THIS COULD BE IMPROVED.
         // If transaction still in sent means it should be speed up, and is not confirmed.
         // otherwise it should be moved as confirmed in the previous validations for news.
@@ -225,7 +224,7 @@ where
         Ok(())
     }
 
-    fn process_instance_news(&mut self) -> Result<(), OrchestratorError> {
+    fn process_instance_news(&self) -> Result<(), OrchestratorError> {
         // Get any news in each instance that are being monitored.
         // Get instances news also returns the speed ups txs added for each instance.
         let news = self.monitor.get_instance_news()?;
@@ -260,7 +259,7 @@ where
     }
 
     fn process_speed_up_change(
-        &mut self,
+        &self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
     ) -> Result<(), OrchestratorError> {
@@ -289,7 +288,7 @@ where
     }
 
     fn process_instance_tx_change(
-        &mut self,
+        &self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
     ) -> Result<(), OrchestratorError> {
@@ -349,7 +348,7 @@ where
     }
 
     fn handle_confirmation_transaction(
-        &mut self,
+        &self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
     ) -> Result<(), OrchestratorError> {
@@ -367,7 +366,7 @@ where
     }
 
     fn handle_confirmation_speed_up_transaction(
-        &mut self,
+        &self,
         instance_id: InstanceId,
         speed_up_tx_id: &Txid,
     ) -> Result<(), OrchestratorError> {
@@ -392,7 +391,7 @@ where
     }
 
     fn handle_orphan_speed_up_transaction(
-        &mut self,
+        &self,
         instance_id: InstanceId,
         speed_up_tx_id: &Txid,
     ) -> Result<(), OrchestratorError> {
@@ -403,7 +402,7 @@ where
     }
 
     fn handle_complete_transaction(
-        &mut self,
+        &self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
     ) -> Result<(), OrchestratorError> {
@@ -423,7 +422,7 @@ where
     }
 
     fn handle_unseen_transaction(
-        &mut self,
+        &self,
         instance_id: InstanceId,
         tx_data: &TransactionInfo,
     ) -> Result<(), OrchestratorError> {
@@ -477,7 +476,7 @@ where
     D: TransactionDispatcherApi,
     B: OrchestratorStoreApi,
 {
-    fn tick(&mut self) -> Result<(), OrchestratorError> {
+    fn tick(&self) -> Result<(), OrchestratorError> {
         //TODO Question: Should we handle the scenario where there are more than one instance per operator running?
         // This scenario raises concerns that the protocol should be aware of a transaction that belongs to it but was not sent by itself (was seen in the blockchain)
 
@@ -497,14 +496,6 @@ where
 
         // Send pending transactions that were queued.
         self.process_pending_txs()?;
-
-        let last_block_height: u32 = self.current_height;
-        self.current_height = self.monitor.get_current_height();
-
-        // If the last block height is the same as the current one, there's no need to continue.
-        if last_block_height == self.current_height {
-            return Ok(());
-        }
 
         // Handle any updates related to instances, including new information about transactions that have not been reviewed yet.
         self.process_instance_news()?;
@@ -545,7 +536,7 @@ where
         Ok(())
     }
 
-    fn is_ready(&mut self) -> Result<bool, OrchestratorError> {
+    fn is_ready(&self) -> Result<bool, OrchestratorError> {
         //TODO: The orchestrator is currently considered ready when the monitor is ready.
         // However, we may decide to take into consideration pending and in progress transactions in the future.
         let result = self.monitor.is_ready()?;
