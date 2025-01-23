@@ -18,51 +18,24 @@ jobs:
     if: ${{ !contains(github.event.pull_request.title, '[cov]') }}
     runs-on: ubuntu-latest
     steps:    
-    - name: Set up Git credentials
-      run: |
-        git config --global url."https://${{ secrets.REPO_ACCESS_TOKEN }}:x-oauth-basic@github.com/FairgateLabs/".insteadOf "https://github.com/FairgateLabs/"
-
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Clone rust-bitvmx-key-manager
-      run: |
-        cd ..
-        git clone https://github.com/FairgateLabs/rust-bitvmx-key-manager.git
+      - name: Checkout rust-bitvmx-workspace
+        uses: actions/checkout@v4
+        with:
+          repository: FairgateLabs/rust-bitvmx-workspace
+          token: ${{ secrets.REPO_ACCESS_TOKEN }}
+          ref: main
+          path: rust-bitvmx-workspace # Store in $GITHUB_WORKSPACE/other-repo
+          submodules: true
       
-    - name: Clone rust-bitvmx-storage-backend
-      run: |
-        cd ..
-        git clone https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git
+      - name: Build project
+        run: |
+          cd rust-bitvmx-workspace/rust-bitvmx-orchestrator
+          cargo build --verbose
 
-    - name: Clone rust-bitvmx-transaction-dispatcher
-      run: |
-        cd ..
-        git clone https://github.com/FairgateLabs/rust-bitvmx-transaction-dispatcher.git
-      
-    - name: Clone rust-bitvmx-transaction-monitor
-      run: |
-        cd ..
-        git clone https://github.com/FairgateLabs/rust-bitvmx-transaction-monitor.git
-
-    - name: Clone rust-bitvmx-bitcoin-indexer
-      run: |
-        cd ..
-        git clone https://github.com/FairgateLabs/rust-bitcoin-indexer.git
-    
-    - name: Clone Settings
-      run: |        
-        git clone https://github.com/FairgateLabs/rust-bitvmx-settings.git ../rust-bitvmx-settings
-    
-    - name: Clone Bitcoin RPC
-      run: |        
-        git clone https://github.com/FairgateLabs/rust-bitvmx-bitcoin-rpc.git ../rust-bitvmx-bitcoin-rpc
-
-    - name: Build project
-      run: cargo build --verbose
-
-    - name: Run tests
-      run: cargo test --verbose
+      - name: Run tests
+        run: |
+          cd rust-bitvmx-workspace/rust-bitvmx-orchestrator
+          cargo test --verbose
 
   test-with-coverage:
     if: ${{ contains(github.event.pull_request.title, '[cov]') }}
@@ -74,37 +47,14 @@ jobs:
         repository-projects: write
 
     steps:
-    - name: Set up Git credentials
-      run: |
-        git config --global url."https://${{ secrets.REPO_ACCESS_TOKEN }}:x-oauth-basic@github.com/FairgateLabs/".insteadOf "https://github.com/FairgateLabs/"
-
-    - name: Checkout repository
+    - name: Checkout rust-bitvmx-workspace
       uses: actions/checkout@v4
-
-    - name: Clone rust-bitvmx-key-manager
-      run: |
-        cd ..
-        git clone https://github.com/FairgateLabs/rust-bitvmx-key-manager.git
-      
-    - name: Clone rust-bitvmx-storage-backend
-      run: |
-        cd ..
-        git clone https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git
-
-    - name: Clone rust-bitvmx-transaction-dispatcher
-      run: |
-        cd ..
-        git clone https://github.com/FairgateLabs/rust-bitvmx-transaction-dispatcher.git
-      
-    - name: Clone rust-bitvmx-transaction-monitor
-      run: |
-        cd ..
-        git clone https://github.com/FairgateLabs/rust-bitvmx-transaction-monitor.git
-    
-    - name: Clone rust-bitvmx-bitcoin-indexer
-      run: |
-        cd ..
-        git clone https://github.com/FairgateLabs/rust-bitcoin-indexer.git
+      with:
+        repository: FairgateLabs/rust-bitvmx-workspace
+        token: ${{ secrets.REPO_ACCESS_TOKEN }}
+        ref: main
+        path: rust-bitvmx-workspace # Store in $GITHUB_WORKSPACE/other-repo
+        submodules: true
 
     - name: Run cargo-tarpaulin
       uses: actions-rs/tarpaulin@v0.1
