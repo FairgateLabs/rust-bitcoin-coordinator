@@ -23,15 +23,14 @@ impl FundingTx {
             Txid::from_str("3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
                 .unwrap();
 
-        let funding_tx = FundingTx {
+        FundingTx {
             tx_id: funding_tx_id,
             utxo_index: 0,
             utxo_output: TxOut {
                 value: Amount::default(),
                 script_pubkey: ScriptBuf::default(),
             },
-        };
-        funding_tx
+        }
     }
 }
 
@@ -106,7 +105,7 @@ pub struct SpeedUpTx {
     pub child_tx_id: Txid,
     pub utxo_index: u32,
     pub utxo_output: TxOut,
-    //TODO we need to add status.
+    //TODO: maybe we need to add status.
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -114,9 +113,9 @@ pub struct TransactionPartialInfo {
     pub tx_id: Txid,
 }
 
-impl Into<TransactionPartialInfo> for Txid {
-    fn into(self) -> TransactionPartialInfo {
-        TransactionPartialInfo { tx_id: self }
+impl From<Txid> for TransactionPartialInfo {
+    fn from(tx_id: Txid) -> Self {
+        TransactionPartialInfo { tx_id }
     }
 }
 
@@ -181,7 +180,6 @@ pub struct News {
     pub txs_by_address: Vec<(Address, Vec<AddressNew>)>,
     pub funds_requests: Vec<InstanceId>,
 }
-#[derive(Debug)]
 pub struct ProcessedNews {
     pub txs_by_id: Vec<(InstanceId, Vec<Txid>)>,
     pub txs_by_address: Vec<Address>,
