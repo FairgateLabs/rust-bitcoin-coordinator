@@ -31,14 +31,14 @@ fn instances_store() -> Result<(), anyhow::Error> {
     let instance = BitvmxInstance::<TransactionPartialInfo> {
         instance_id: Uuid::from_u128(1),
         txs: vec![tx1_summary, tx2_summary],
-        funding_tx: FundingTx {
+        funding_tx: Some(FundingTx {
             tx_id,
             utxo_index: 1,
             utxo_output: TxOut {
                 value: Amount::default(),
                 script_pubkey: ScriptBuf::default(),
             },
-        },
+        }),
     };
 
     //add instance
@@ -101,14 +101,14 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     let instance = BitvmxInstance::<TransactionPartialInfo> {
         instance_id,
         txs: vec![tx_instance_summary_1, tx_instance_summary_2],
-        funding_tx: FundingTx {
+        funding_tx: Some(FundingTx {
             tx_id: tx_id_1,
             utxo_index: 1,
             utxo_output: TxOut {
                 value: Amount::default(),
                 script_pubkey: ScriptBuf::default(),
             },
-        },
+        }),
     };
 
     // Add instance for the first time.
@@ -177,14 +177,14 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
     let instance = BitvmxInstance::<TransactionPartialInfo> {
         instance_id,
         txs: vec![tx_instance_summary_1],
-        funding_tx: FundingTx {
+        funding_tx: Some(FundingTx {
             tx_id: tx_id_1,
             utxo_index: 1,
             utxo_output: TxOut {
                 value: Amount::default(),
                 script_pubkey: ScriptBuf::default(),
             },
-        },
+        }),
     };
 
     // Add the instance
@@ -233,14 +233,14 @@ fn update_status() -> Result<(), anyhow::Error> {
     let instance = BitvmxInstance::<TransactionPartialInfo> {
         instance_id,
         txs: vec![tx_instance_summary_1],
-        funding_tx: FundingTx {
+        funding_tx: Some(FundingTx {
             tx_id: tx_id_1,
             utxo_index: 1,
             utxo_output: TxOut {
                 value: Amount::default(),
                 script_pubkey: ScriptBuf::default(),
             },
-        },
+        }),
     };
 
     let instance_txs = bitvmx_store.get_txs_info(TransactionState::New)?;
@@ -359,7 +359,7 @@ fn funding_tests() -> Result<(), anyhow::Error> {
     let instance = BitvmxInstance::<TransactionPartialInfo> {
         instance_id,
         txs: vec![tx_instance_summary_1],
-        funding_tx: funding_tx.clone(),
+        funding_tx: Some(funding_tx.clone()),
     };
 
     //Add instance 1 with funding tx and check if funding tx exists.

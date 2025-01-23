@@ -125,14 +125,14 @@ fn get_mock_data() -> (
     let instance = BitvmxInstance::<TransactionPartialInfo> {
         instance_id,
         txs: vec![tx_info],
-        funding_tx: FundingTx {
+        funding_tx: Some(FundingTx {
             tx_id: tx.compute_txid(),
             utxo_index: 1,
             utxo_output: TxOut {
                 value: Amount::default(),
                 script_pubkey: ScriptBuf::default(),
             },
-        },
+        }),
     };
     (instance_id, instance, tx)
 }

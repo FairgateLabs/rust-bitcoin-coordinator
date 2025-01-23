@@ -1,6 +1,4 @@
-use std::str::FromStr;
-
-use bitcoin::{Address, Amount, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::types::{BlockInfo, MonitorType};
 use serde::{Deserialize, Serialize};
@@ -15,23 +13,6 @@ pub struct FundingTx {
     pub tx_id: Txid,
     pub utxo_index: u32,
     pub utxo_output: TxOut,
-}
-
-impl FundingTx {
-    pub fn empty() -> Self {
-        let funding_tx_id =
-            Txid::from_str("3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
-                .unwrap();
-
-        FundingTx {
-            tx_id: funding_tx_id,
-            utxo_index: 0,
-            utxo_output: TxOut {
-                value: Amount::default(),
-                script_pubkey: ScriptBuf::default(),
-            },
-        }
-    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -139,11 +120,11 @@ pub struct BitvmxInstance<T> {
     // If the txid is sent, it is necessary to check that this transaction is mined.
     // On the other hand, if the transaction to be mined is sent, it is necessary to dispatch
     // this transaction and wait for it to be mined in order to start sending speed up transactions.
-    pub funding_tx: FundingTx,
+    pub funding_tx: Option<FundingTx>,
 }
 
 impl<T> BitvmxInstance<T> {
-    pub fn new(instance_id: InstanceId, txs: Vec<T>, funding_tx: FundingTx) -> Self {
+    pub fn new(instance_id: InstanceId, txs: Vec<T>, funding_tx: Option<FundingTx>) -> Self {
         Self {
             instance_id,
             txs,

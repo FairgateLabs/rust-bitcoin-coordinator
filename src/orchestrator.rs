@@ -222,7 +222,7 @@ where
                 } else {
                     return Err(OrchestratorError::OrchestratorError(
                         "Transaction status not found in monitor".to_string(),
-                    ))
+                    ));
                 }
             }
         }
@@ -453,12 +453,14 @@ where
         //TODO: It is possible to speed up just one transaction at a time. Same tx could be speed up.
 
         //We are gonna have a funding transaction for each Bitvmx instance.
-        let funding_tx =
-            self.store
-                .get_funding_tx(instance_id)?
-                .ok_or(OrchestratorError::OrchestratorError(
-                    "No funding transaction available for speed up".to_string(),
-                ))?;
+        let funding_tx = self.store.get_funding_tx(instance_id)?;
+
+        if funding_tx.is_none() {
+            //In case there is no funding transaction, we can't speed up the transaction.
+            return Ok(());
+        }
+
+        let funding_tx = funding_tx.unwrap();
 
         self.speed_up(
             instance_id,

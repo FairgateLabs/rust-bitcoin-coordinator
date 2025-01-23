@@ -295,7 +295,9 @@ impl OrchestratorStoreApi for OrchestratorStore {
             self.store.set(&instances_key, &all_instances, None)?;
         }
 
-        self.add_funding_tx(instance.instance_id, &instance.funding_tx)?;
+        if instance.funding_tx.is_some() {
+            self.add_funding_tx(instance.instance_id, instance.funding_tx.as_ref().unwrap())?;
+        }
 
         Ok(())
     }
