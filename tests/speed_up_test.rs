@@ -131,10 +131,10 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .with(
             eq(tx.clone()),
             eq(account.pk),
-            eq(instance.funding_tx.tx_id),
+            eq(instance.funding_tx.as_ref().unwrap().tx_id),
             eq((
-                instance.funding_tx.utxo_index,
-                instance.funding_tx.utxo_output.clone(),
+                instance.funding_tx.as_ref().unwrap().utxo_index,
+                instance.funding_tx.as_ref().unwrap().utxo_output.clone(),
                 account.pk,
             )),
         )
@@ -153,10 +153,10 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .with(
             eq(tx.clone()),
             eq(account.pk),
-            eq(instance.funding_tx.tx_id),
+            eq(instance.funding_tx.as_ref().unwrap().tx_id),
             eq((
-                instance.funding_tx.utxo_index,
-                instance.funding_tx.utxo_output.clone(),
+                instance.funding_tx.as_ref().unwrap().utxo_index,
+                instance.funding_tx.as_ref().unwrap().utxo_output.clone(),
                 account.pk,
             )),
         )
@@ -393,10 +393,10 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
         .with(
             eq(tx.clone()),
             eq(account.pk),
-            eq(instance.funding_tx.tx_id),
+            eq(instance.funding_tx.as_ref().unwrap().tx_id),
             eq((
-                instance.funding_tx.utxo_index,
-                instance.funding_tx.utxo_output.clone(),
+                instance.funding_tx.as_ref().unwrap().utxo_index,
+                instance.funding_tx.as_ref().unwrap().utxo_output.clone(),
                 account.pk,
             )),
         )
@@ -497,14 +497,14 @@ fn get_mock_data() -> (
     let instance = BitvmxInstance::<TransactionPartialInfo> {
         instance_id,
         txs: vec![tx_info],
-        funding_tx: FundingTx {
+        funding_tx: Some(FundingTx {
             tx_id: tx.compute_txid(),
             utxo_index: 1,
             utxo_output: TxOut {
                 value: Amount::default(),
                 script_pubkey: ScriptBuf::default(),
             },
-        },
+        }),
     };
     (instance_id, instance, tx)
 }

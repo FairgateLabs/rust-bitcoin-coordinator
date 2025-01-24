@@ -86,12 +86,24 @@ pub struct SpeedUpTx {
     pub child_tx_id: Txid,
     pub utxo_index: u32,
     pub utxo_output: TxOut,
-    //TODO we need to add status.
+    //TODO: maybe we need to add status.
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TransactionPartialInfo {
     pub tx_id: Txid,
+}
+
+impl From<Txid> for TransactionPartialInfo {
+    fn from(tx_id: Txid) -> Self {
+        TransactionPartialInfo { tx_id }
+    }
+}
+
+impl TransactionPartialInfo {
+    pub fn new(tx_id: Txid) -> Self {
+        Self { tx_id }
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -108,7 +120,17 @@ pub struct BitvmxInstance<T> {
     // If the txid is sent, it is necessary to check that this transaction is mined.
     // On the other hand, if the transaction to be mined is sent, it is necessary to dispatch
     // this transaction and wait for it to be mined in order to start sending speed up transactions.
-    pub funding_tx: FundingTx,
+    pub funding_tx: Option<FundingTx>,
+}
+
+impl<T> BitvmxInstance<T> {
+    pub fn new(instance_id: InstanceId, txs: Vec<T>, funding_tx: Option<FundingTx>) -> Self {
+        Self {
+            instance_id,
+            txs,
+            funding_tx,
+        }
+    }
 }
 
 impl BitvmxInstance<TransactionFullInfo> {

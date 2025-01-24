@@ -34,14 +34,14 @@ pub fn create_instance(
     let funding_tx_id =
         Txid::from_str("3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f").unwrap();
 
-    let funding_tx = FundingTx {
+    let funding_tx = Some(FundingTx {
         tx_id: funding_tx_id,
         utxo_index: 0,
         utxo_output: TxOut {
             value: Amount::default(),
             script_pubkey: ScriptBuf::default(),
         },
-    };
+    });
 
     let tx_1: Transaction = generate_tx(user, rpc_config, network, dispatcher)?;
     let tx_2: Transaction = generate_tx(user, rpc_config, network, dispatcher)?;
