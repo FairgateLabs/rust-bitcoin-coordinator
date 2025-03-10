@@ -1,0 +1,27 @@
+name: 'Test action'
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}' 
+  cancel-in-progress: true
+
+jobs:
+  local_test:
+    uses: FairgateLabs/rust-bitvmx-workspace/.github/workflows/local_test_template.yml@main
+    with:
+      fetch-depth: 0
+      repo: 'FairgateLabs/rust-bitvmx-orchestrator'
+      submodule_path: 'rust-bitvmx-orchestrator'
+      cargo_lock_path: 'rust-bitvmx-orchestrator/Cargo.lock'
+      target_path: 'rust-bitcoin-indexer/target'
+      docker_required: true
+      dockerfile_path: src/tests/Dockerfile
+      docker_compose_path: src/tests/docker-compose.yml
+    secrets: inherit
