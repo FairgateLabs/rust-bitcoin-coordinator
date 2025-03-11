@@ -17,9 +17,9 @@ jobs:
     uses: FairgateLabs/rust-bitvmx-workspace/.github/workflows/local_test_template.yml@main
     with:
       fetch-depth: 0
-      repo: 'FairgateLabs/rust-bitvmx-orchestrator'
-      submodule_path: 'rust-bitvmx-orchestrator'
-      cargo_lock_path: 'rust-bitvmx-orchestrator/Cargo.lock'
+      repo: 'FairgateLabs/rust-bitvmx-bitcoin-coordinator'
+      submodule_path: 'rust-bitvmx-bitcoin-coordinator'
+      cargo_lock_path: 'rust-bitvmx-bitcoin-coordinator/Cargo.lock'
       target_path: 'rust-bitcoin-indexer/target'
       docker_required: true
       dockerfile_path: src/tests/Dockerfile

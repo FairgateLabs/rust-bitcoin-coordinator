@@ -18,7 +18,7 @@ jobs:
     uses: FairgateLabs/rust-bitvmx-workspace/.github/workflows/test_template.yml@main
     with:
       repo: 'FairgateLabs/rust-bitvmx-workspace'
-      submodule_path: 'rust-bitvmx-orchestrator'
-      cargo_lock_path: 'rust-bitvmx-orchestrator/Cargo.lock'
-      target_path: 'rust-bitvmx-orchestrator/target'
+      submodule_path: 'rust-bitcoin-coordinator'
+      cargo_lock_path: 'rust-bitcoin-coordinator/Cargo.lock'
+      target_path: 'rust-bitcoin-coordinator/target'
     secrets: inherit

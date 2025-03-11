@@ -1,5 +1,5 @@
 [package]
-name = "bitvmx-orchestrator"
+name = "bitcoin-coordinator"
 version = "0.1.0"
 edition = "2021"
 

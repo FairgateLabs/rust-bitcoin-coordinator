@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
 use crate::{
-    errors::OrchestratorError,
-    storage::{OrchestratorStore, OrchestratorStoreApi},
+    errors::BitcoinCoordinatorError,
+    storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{
-        AddressNew, BitvmxInstance, FundingTx, InstanceId, News, OrchestratorType, ProcessedNews,
-        SpeedUpTx, TransactionBlockchainStatus, TransactionInfo, TransactionNew,
+        AddressNew, BitcoinCoordinatorType, BitvmxInstance, FundingTx, InstanceId, News,
+        ProcessedNews, SpeedUpTx, TransactionBlockchainStatus, TransactionInfo, TransactionNew,
         TransactionPartialInfo, TransactionState,
     },
 };
@@ -27,11 +27,11 @@ use transaction_dispatcher::{
     signer::Account,
 };
 
-pub struct Orchestrator<M, D, B>
+pub struct BitcoinCoordinator<M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,
-    B: OrchestratorStoreApi,
+    B: BitcoinCoordinatorStoreApi,
 {
     monitor: M,
     dispatcher: D,
@@ -39,11 +39,11 @@ where
     account: Account,
 }
 
-pub trait OrchestratorApi {
+pub trait BitcoinCoordinatorApi {
     fn monitor_instance(
         &self,
         instance: &BitvmxInstance<TransactionPartialInfo>,
-    ) -> Result<(), OrchestratorError>;
+    ) -> Result<(), BitcoinCoordinatorError>;
 
     // Add a non-existent transaction for an existing instance.
     // This will be use in the final step.
@@ -51,7 +51,7 @@ pub trait OrchestratorApi {
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
-    ) -> Result<(), OrchestratorError>;
+    ) -> Result<(), BitcoinCoordinatorError>;
 
     // The protocol requires delivering an existing transaction for an instance.
     // This is achieved by passing the full transaction.
@@ -59,26 +59,29 @@ pub trait OrchestratorApi {
         &self,
         instance_id: InstanceId,
         tx: &Transaction,
-    ) -> Result<(), OrchestratorError>;
+    ) -> Result<(), BitcoinCoordinatorError>;
 
-    fn is_ready(&self) -> Result<bool, OrchestratorError>;
+    fn is_ready(&self) -> Result<bool, BitcoinCoordinatorError>;
 
-    fn tick(&self) -> Result<(), OrchestratorError>;
+    fn tick(&self) -> Result<(), BitcoinCoordinatorError>;
 
     fn add_funding_tx(
         &self,
         instance_id: InstanceId,
         funding_tx: &FundingTx,
-    ) -> Result<(), OrchestratorError>;
+    ) -> Result<(), BitcoinCoordinatorError>;
 
-    fn monitor_address(&self, address: Address) -> Result<(), OrchestratorError>;
+    fn monitor_address(&self, address: Address) -> Result<(), BitcoinCoordinatorError>;
 
-    fn get_news(&self) -> Result<News, OrchestratorError>;
+    fn get_news(&self) -> Result<News, BitcoinCoordinatorError>;
 
-    fn acknowledge_news(&self, processed_news: ProcessedNews) -> Result<(), OrchestratorError>;
+    fn acknowledge_news(
+        &self,
+        processed_news: ProcessedNews,
+    ) -> Result<(), BitcoinCoordinatorError>;
 }
 
-impl OrchestratorType {
+impl BitcoinCoordinatorType {
     //#[warn(clippy::too_many_arguments)]
     pub fn new_with_paths(
         rpc_config: &RpcConfig,
@@ -87,7 +90,7 @@ impl OrchestratorType {
         checkpoint: Option<BlockHeight>,
         confirmation_threshold: u32,
         network: Network,
-    ) -> Result<Self, OrchestratorError> {
+    ) -> Result<Self, BitcoinCoordinatorError> {
         // We should pass node_rpc_url and that is all. Client should be removed.
         // The only one that connects with the blockchain is the dispatcher and the indexer.
         // So here should be initialized the BitcoinClient
@@ -98,20 +101,20 @@ impl OrchestratorType {
             confirmation_threshold,
         )?;
 
-        let store = OrchestratorStore::new(storage)?;
+        let store = BitcoinCoordinatorStore::new(storage)?;
         let account = Account::new(network);
         let dispatcher = TransactionDispatcher::new_with_path(rpc_config, key_manager)?;
-        let orchestrator = Orchestrator::new(monitor, store, dispatcher, account);
+        let coordinator = BitcoinCoordinator::new(monitor, store, dispatcher, account);
 
-        Ok(orchestrator)
+        Ok(coordinator)
     }
 }
 
-impl<M, D, B> Orchestrator<M, D, B>
+impl<M, D, B> BitcoinCoordinator<M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,
-    B: OrchestratorStoreApi,
+    B: BitcoinCoordinatorStoreApi,
 {
     pub fn new(monitor: M, store: B, dispatcher: D, account: Account) -> Self {
         Self {
@@ -122,7 +125,7 @@ where
         }
     }
 
-    fn process_pending_txs(&self) -> Result<(), OrchestratorError> {
+    fn process_pending_txs(&self) -> Result<(), BitcoinCoordinatorError> {
         // Get pending instance transactions to be send to the blockchain
         let pending_txs = self.store.get_txs_info(TransactionState::ReadyToSend)?;
 
@@ -162,7 +165,7 @@ where
         funding_txid: Txid,
         tx_public_key: PublicKey,
         funding_utxo: (u32, TxOut, PublicKey),
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         let dispatch_result =
             self.dispatcher
                 .speed_up(tx, tx_public_key, funding_txid, funding_utxo.clone());
@@ -199,7 +202,7 @@ where
         Ok(())
     }
 
-    fn process_in_progress_txs(&self) -> Result<(), OrchestratorError> {
+    fn process_in_progress_txs(&self) -> Result<(), BitcoinCoordinatorError> {
         //TODO: THIS COULD BE IMPROVED.
         // If transaction still in sent means it should be speed up, and is not confirmed.
         // otherwise it should be moved as confirmed in the previous validations for news.
@@ -220,7 +223,7 @@ where
                 if let Some(tx_status) = tx_status {
                     self.process_instance_tx_change(instance_id, &tx_status)?
                 } else {
-                    return Err(OrchestratorError::OrchestratorError(
+                    return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(
                         "Transaction status not found in monitor".to_string(),
                     ));
                 }
@@ -230,7 +233,7 @@ where
         Ok(())
     }
 
-    fn process_instance_news(&self) -> Result<(), OrchestratorError> {
+    fn process_instance_news(&self) -> Result<(), BitcoinCoordinatorError> {
         // Get any news in each instance that are being monitored.
         // Get instances news also returns the speed ups txs added for each instance.
         let news = self.monitor.get_instance_news()?;
@@ -268,7 +271,7 @@ where
         &self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         // This indicates that this is a speed-up transaction that has been mined with 1 confirmation,
         // which means it should be treated as the new funding transaction.
         if tx_status.is_confirmed() {
@@ -297,7 +300,7 @@ where
         &self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         let is_confirmed = tx_status.is_confirmed();
 
         if is_confirmed {
@@ -357,7 +360,7 @@ where
         &self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         // Update the transaction to completed given that transaction has more than the threshold confirmations
         self.store.update_instance_tx_status(
             instance_id,
@@ -375,7 +378,7 @@ where
         &self,
         instance_id: InstanceId,
         speed_up_tx_id: &Txid,
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         let speed_up_tx = self
             .store
             .get_speed_up_tx(instance_id, speed_up_tx_id)?
@@ -400,7 +403,7 @@ where
         &self,
         instance_id: InstanceId,
         speed_up_tx_id: &Txid,
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         //Speed up previouly was mined, now is orphan then, we have to remove it as a funding tx.
         self.store.remove_funding_tx(instance_id, speed_up_tx_id)?;
 
@@ -411,7 +414,7 @@ where
         &self,
         instance_id: InstanceId,
         tx_status: &TransactionStatus,
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         // Transaction was mined and has sufficient confirmations to mark it as complete.
 
         // Update the transaction to completed given that transaction has more than the threshold confirmations
@@ -431,7 +434,7 @@ where
         &self,
         instance_id: InstanceId,
         tx_data: &TransactionInfo,
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         // We get all the existing speed up transaction for tx_id. Then we figure out if we should speed it up again.
         let speed_up_txs = self
             .store
@@ -478,13 +481,13 @@ where
     }
 }
 
-impl<M, D, B> OrchestratorApi for Orchestrator<M, D, B>
+impl<M, D, B> BitcoinCoordinatorApi for BitcoinCoordinator<M, D, B>
 where
     M: MonitorApi,
     D: TransactionDispatcherApi,
-    B: OrchestratorStoreApi,
+    B: BitcoinCoordinatorStoreApi,
 {
-    fn tick(&self) -> Result<(), OrchestratorError> {
+    fn tick(&self) -> Result<(), BitcoinCoordinatorError> {
         //TODO Question: Should we handle the scenario where there are more than one instance per operator running?
         // This scenario raises concerns that the protocol should be aware of a transaction that belongs to it but was not sent by itself (was seen in the blockchain)
 
@@ -514,9 +517,9 @@ where
     fn monitor_instance(
         &self,
         instance: &BitvmxInstance<TransactionPartialInfo>,
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         if instance.txs.is_empty() {
-            return Err(OrchestratorError::OrchestratorError(
+            return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(
                 "Instance txs array is empty".to_string(),
             ));
         }
@@ -541,8 +544,8 @@ where
         Ok(())
     }
 
-    fn is_ready(&self) -> Result<bool, OrchestratorError> {
-        //TODO: The orchestrator is currently considered ready when the monitor is ready.
+    fn is_ready(&self) -> Result<bool, BitcoinCoordinatorError> {
+        //TODO: The coordinator is currently considered ready when the monitor is ready.
         // However, we may decide to take into consideration pending and in progress transactions in the future.
         let result = self.monitor.is_ready()?;
         Ok(result)
@@ -552,7 +555,7 @@ where
         &self,
         instance_id: InstanceId,
         tx: &Transaction,
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         // This section of code is responsible for adding a transaction to an instance and marking it as pending.
         // First, it adds the transaction to the instance using `add_tx_to_instance`. This method updates the instance
         // to include the new transaction, ensuring it is associated with the correct instance.
@@ -569,7 +572,7 @@ where
 
         info!(
             "{} Transaction ID {} for Instance ID {} move to Pending status to be send.",
-            style("Orchestrator").green(),
+            style("Coordinator").green(),
             style(tx.compute_txid()).yellow(),
             style(instance_id).green()
         );
@@ -580,7 +583,7 @@ where
         &self,
         _instance_id: InstanceId,
         _tx: &Txid,
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         // Add a non-existent transaction to an existing instance.
         // The instance should exist in the storage.
         // The transaction id should not exist in the storage.
@@ -592,17 +595,17 @@ where
         &self,
         instance_id: InstanceId,
         funding_tx: &FundingTx,
-    ) -> Result<(), OrchestratorError> {
+    ) -> Result<(), BitcoinCoordinatorError> {
         self.store.add_funding_tx(instance_id, funding_tx)?;
         Ok(())
     }
 
-    fn monitor_address(&self, address: Address) -> Result<(), OrchestratorError> {
+    fn monitor_address(&self, address: Address) -> Result<(), BitcoinCoordinatorError> {
         self.monitor.save_address_for_tracking(address)?;
         Ok(())
     }
 
-    fn get_news(&self) -> Result<News, OrchestratorError> {
+    fn get_news(&self) -> Result<News, BitcoinCoordinatorError> {
         let instance_tx_news = self.store.get_instance_tx_news()?;
         let mut txs_by_id: Vec<(InstanceId, Vec<TransactionNew>)> = Vec::new();
 
@@ -684,7 +687,10 @@ where
         })
     }
 
-    fn acknowledge_news(&self, processed_news: ProcessedNews) -> Result<(), OrchestratorError> {
+    fn acknowledge_news(
+        &self,
+        processed_news: ProcessedNews,
+    ) -> Result<(), BitcoinCoordinatorError> {
         // Acknowledge transaction news for each instance
         for (instance_id, tx_ids) in processed_news.txs_by_id {
             for tx_id in tx_ids {

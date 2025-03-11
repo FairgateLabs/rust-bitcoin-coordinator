@@ -4,7 +4,7 @@ use bitvmx_transaction_monitor::types::{BlockInfo, MonitorType};
 use serde::{Deserialize, Serialize};
 use transaction_dispatcher::DispatcherType;
 
-use crate::{orchestrator::Orchestrator, storage::OrchestratorStore};
+use crate::{coordinator::BitcoinCoordinator, storage::BitcoinCoordinatorStore};
 use uuid::Uuid;
 pub type InstanceId = Uuid;
 
@@ -167,4 +167,5 @@ pub struct ProcessedNews {
     pub funds_requests: Vec<InstanceId>,
 }
 
-pub type OrchestratorType = Orchestrator<MonitorType, DispatcherType, OrchestratorStore>;
+pub type BitcoinCoordinatorType =
+    BitcoinCoordinator<MonitorType, DispatcherType, BitcoinCoordinatorStore>;

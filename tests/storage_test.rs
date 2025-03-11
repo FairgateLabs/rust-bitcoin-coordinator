@@ -1,8 +1,8 @@
 use std::{path::PathBuf, rc::Rc, str::FromStr};
 
 use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
-use bitvmx_orchestrator::{
-    storage::{OrchestratorStore, OrchestratorStoreApi},
+use bitcoin_coordinator::{
+    storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{
         BitvmxInstance, FundingTx, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
         TransactionState,
@@ -22,7 +22,7 @@ fn instances_store() -> Result<(), anyhow::Error> {
 
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/test1"))?);
 
-    let bitvmx_store = OrchestratorStore::new(storage)?;
+    let bitvmx_store = BitcoinCoordinatorStore::new(storage)?;
 
     let tx1_summary = TransactionPartialInfo { tx_id: tx_id };
 
@@ -71,7 +71,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
         "test_output/in_progress_tx_store",
     ))?);
-    let store = OrchestratorStore::new(storage)?;
+    let store = BitcoinCoordinatorStore::new(storage)?;
 
     let instance_id = Uuid::from_u128(1);
     let tx_1 = Transaction {
@@ -133,7 +133,7 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
         "test_output/speed_up_txs_test",
     ))?);
-    let bitvmx_store = OrchestratorStore::new(storage)?;
+    let bitvmx_store = BitcoinCoordinatorStore::new(storage)?;
 
     let instance_id = Uuid::from_u128(1);
     // Remove the instance 1, as a mather of cleaning the database.
@@ -213,7 +213,7 @@ fn update_status() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
         "test_output/update_status",
     ))?);
-    let bitvmx_store = OrchestratorStore::new(storage)?;
+    let bitvmx_store = BitcoinCoordinatorStore::new(storage)?;
 
     let instance_id = Uuid::from_u128(1);
     // Remove the instance 1, as a mather of cleaning the database.
@@ -312,7 +312,7 @@ fn funding_tests() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
         "test_output/funding_tests",
     ))?);
-    let bitvmx_store = OrchestratorStore::new(storage)?;
+    let bitvmx_store = BitcoinCoordinatorStore::new(storage)?;
 
     let instance_id = Uuid::from_u128(1);
     // Remove the instance 1, as a mather of cleaning the database.

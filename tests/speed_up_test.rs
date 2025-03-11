@@ -2,9 +2,9 @@ use bitcoin::absolute::LockTime;
 use bitcoin::{
     absolute, transaction, Amount, BlockHash, Network, ScriptBuf, Transaction, TxOut, Txid,
 };
-use bitvmx_orchestrator::orchestrator::{Orchestrator, OrchestratorApi};
-use bitvmx_orchestrator::storage::OrchestratorStore;
-use bitvmx_orchestrator::types::{BitvmxInstance, FundingTx, InstanceId, TransactionPartialInfo};
+use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
+use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
+use bitcoin_coordinator::types::{BitvmxInstance, FundingTx, InstanceId, TransactionPartialInfo};
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use bitvmx_transaction_monitor::types::{BlockInfo, InstanceData, TransactionStatus};
 use mockall::predicate::eq;
@@ -19,9 +19,9 @@ use uuid::Uuid;
 /*
     Test Summary: speed_up_tx
 
-    This test verifies the orchestrator's ability to monitor a Bitcoin transaction within an instance, dispatch it for
+    This test verifies the bitcoin coordinator's ability to monitor a Bitcoin transaction within an instance, dispatch it for
     mining, and attempt a "speed-up" if the transaction remains unmined. The process involves sequentially dispatching
-    and tracking the transaction status with each tick. If unmined, the orchestrator initiates a speed-up and continues
+    and tracking the transaction status with each tick. If unmined, the bitcoin coordinator initiates a speed-up and continues
     monitoring. On the fourth tick, the transaction is confirmed (mined), and a final tick simulates additional block
     confirmations, marking the transaction as finalized. The test includes acknowledgment of status updates received
     from the monitor at each step.
@@ -194,19 +194,19 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .with(eq(instance_id), eq(tx_speed_up_id_2))
         .returning(|_, _| Ok(()));
 
-    // Initialize the orchestrator with mocks and begin monitoring the instance.
-    let orchestrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
-    orchestrator.monitor_instance(&instance.clone())?;
+    // Initialize the bitcoin coordinator with mocks and begin monitoring the instance.
+    let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
+    coordinator.monitor_instance(&instance.clone())?;
 
-    // Dispatch the transaction through the orchestrator.
-    orchestrator.send_tx_instance(instance_id, &tx)?;
+    // Dispatch the transaction through the bitcoin coordinator.
+    coordinator.send_tx_instance(instance_id, &tx)?;
 
     // Simulate ticks to monitor and adjust transaction status with each blockchain height update.
-    orchestrator.tick()?; // Dispatch and observe unmined status.
-    orchestrator.tick()?; // First speed-up after unconfirmed status persists.
-    orchestrator.tick()?; // Second speed-up due to continued unmined status.
-    orchestrator.tick()?; // Confirmation observed, transaction is now mined.
-    orchestrator.tick()?; // Simulate further blocks, marking the transaction as finalized.
+    coordinator.tick()?; // Dispatch and observe unmined status.
+    coordinator.tick()?; // First speed-up after unconfirmed status persists.
+    coordinator.tick()?; // Second speed-up due to continued unmined status.
+    coordinator.tick()?; // Confirmation observed, transaction is now mined.
+    coordinator.tick()?; // Simulate further blocks, marking the transaction as finalized.
 
     Ok(())
 }
@@ -437,37 +437,37 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
         .with(eq(instance_id), eq(tx_speed_up_id))
         .returning(|_, _| Ok(()));
 
-    // Initialize the orchestrator with mocks and begin monitoring the instance.
-    let orchestrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
-    orchestrator.monitor_instance(&instance.clone())?;
+    // Initialize the bitcoin coordinator with mocks and begin monitoring the instance.
+    let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
+    coordinator.monitor_instance(&instance.clone())?;
 
-    // Dispatch the transaction through the orchestrator.
-    orchestrator.send_tx_instance(instance_id, &tx)?;
+    // Dispatch the transaction through the bitcoin coordinator.
+    coordinator.send_tx_instance(instance_id, &tx)?;
 
     // Simulate ticks to monitor and adjust transaction status with each blockchain height update.
 
-    orchestrator.tick()?; // Dispatch and observe unmined status.
-    orchestrator.tick()?; // Speed-up after unconfirmed status persists.
-    orchestrator.tick()?; // Transaction should be mined.
-    orchestrator.tick()?; // Found a reorg, then Transaction and Speed up are not mined.
+    coordinator.tick()?; // Dispatch and observe unmined status.
+    coordinator.tick()?; // Speed-up after unconfirmed status persists.
+    coordinator.tick()?; // Transaction should be mined.
+    coordinator.tick()?; // Found a reorg, then Transaction and Speed up are not mined.
 
     Ok(())
 }
 
 fn get_mocks() -> (
     MockMonitorApi,
-    OrchestratorStore,
+    BitcoinCoordinatorStore,
     Account,
     MockTransactionDispatcherApi,
 ) {
     let mock_monitor = MockMonitorApi::new();
     let path = format!("data/tests/{}", generate_random_string());
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(&path)).unwrap());
-    let orchestrator_store = OrchestratorStore::new(storage).unwrap();
+    let store = BitcoinCoordinatorStore::new(storage).unwrap();
     let network = Network::from_str("regtest").unwrap();
     let account = Account::new(network);
     let mock_dispatcher = MockTransactionDispatcherApi::new();
-    (mock_monitor, orchestrator_store, account, mock_dispatcher)
+    (mock_monitor, store, account, mock_dispatcher)
 }
 
 fn generate_random_string() -> String {

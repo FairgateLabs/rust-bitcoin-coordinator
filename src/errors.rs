@@ -16,18 +16,18 @@ pub enum ConfigError {
 }
 
 #[derive(Error, Debug)]
-pub enum OrchestratorStoreError {
+pub enum BitcoinCoordinatorStoreError {
     #[error("Error with Storage Backend: {0}")]
     StorageBackendError(#[from] storage_backend::error::StorageError),
 
     #[error("Error: {0}, {1}")]
-    OrchestratorStoreError(String, storage_backend::error::StorageError),
+    BitcoinCoordinatorStoreError(String, storage_backend::error::StorageError),
 }
 
 #[derive(Error, Debug)]
-pub enum OrchestratorError {
-    #[error("Error with Orchestrator Store: {0}")]
-    OrchestratorStoreError(#[from] OrchestratorStoreError),
+pub enum BitcoinCoordinatorError {
+    #[error("Error with Bitcoin Coordinator Store: {0}")]
+    BitcoinCoordinatorStoreError(#[from] BitcoinCoordinatorStoreError),
 
     #[error("Error with Monitor: {0}")]
     MonitorError(#[from] bitvmx_transaction_monitor::errors::MonitorError),
@@ -35,8 +35,8 @@ pub enum OrchestratorError {
     #[error("Error with Dispatcher: {0}")]
     DispatcherError(#[from] transaction_dispatcher::errors::DispatcherError),
 
-    #[error("Error with Orchestrator: {0}")]
-    OrchestratorError(String),
+    #[error("Error with Bitcoin Coordinator: {0}")]
+    BitcoinCoordinatorError(String),
 }
 
 #[derive(Error, Debug)]

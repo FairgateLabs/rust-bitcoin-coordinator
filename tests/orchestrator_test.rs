@@ -1,9 +1,10 @@
 use bitcoin::{absolute, transaction, Amount, Network, ScriptBuf, Transaction, TxOut};
-use bitvmx_orchestrator::orchestrator::{Orchestrator, OrchestratorApi};
-use bitvmx_orchestrator::storage::OrchestratorStore;
-use bitvmx_orchestrator::types::{BitvmxInstance, FundingTx, InstanceId, TransactionPartialInfo};
-use bitvmx_transaction_monitor::monitor::MockMonitorApi;
-use bitvmx_transaction_monitor::types::InstanceData;
+use bitcoin_coordinator::{
+    coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
+    storage::BitcoinCoordinatorStore,
+    types::{BitvmxInstance, FundingTx, InstanceId, TransactionPartialInfo},
+};
+use bitvmx_transaction_monitor::{monitor::MockMonitorApi, types::InstanceData};
 use mockall::predicate::eq;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -27,7 +28,7 @@ fn orchastrator_is_ready_method_test() -> Result<(), anyhow::Error> {
         .times(1)
         .returning(|| Ok(true));
 
-    let orchastrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
+    let orchastrator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
 
     let is_ready = orchastrator.is_ready()?;
 
@@ -52,7 +53,7 @@ fn tick_method_is_not_ready() -> Result<(), anyhow::Error> {
 
     mock_monitor.expect_tick().times(1).returning(|| Ok(()));
 
-    let orchastrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
+    let orchastrator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
 
     orchastrator.tick()?;
 
@@ -75,7 +76,7 @@ fn monitor_instance_test() -> Result<(), anyhow::Error> {
         .with(eq(vec![instance_data]))
         .returning(|_| Ok(()));
 
-    let orchastrator = Orchestrator::new(mock_monitor, store, mock_dispatcher, account);
+    let orchastrator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
 
     orchastrator.monitor_instance(&instance)?;
 
@@ -84,14 +85,14 @@ fn monitor_instance_test() -> Result<(), anyhow::Error> {
 
 fn get_mocks() -> (
     MockMonitorApi,
-    OrchestratorStore,
+    BitcoinCoordinatorStore,
     Account,
     MockTransactionDispatcherApi,
 ) {
     let mock_monitor = MockMonitorApi::new();
     let path = format!("data/tests/{}", generate_random_string());
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(&path)).unwrap());
-    let store = OrchestratorStore::new(storage).unwrap();
+    let store = BitcoinCoordinatorStore::new(storage).unwrap();
     let network = Network::from_str("regtest").unwrap();
     let account = Account::new(network);
     let mock_dispatcher = MockTransactionDispatcherApi::new();

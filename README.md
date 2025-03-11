@@ -1,5 +1,5 @@
-# BitVMX Orchestrator
-BitVMX Orchestrator is a Rust-based project that serves as a core component for Bitvmx client for transaction management and monitoring. This project integrates several key components:
+# Bitcoin Coordinator
+Bitcoin Coordinator is a Rust-based project that serves as a core component for Bitvmx client for transaction management and monitoring. This project integrates several key components:
 
 - **Transaction Dispatcher**: Uses `bitvmx-transaction-dispatcher` for sending and speeding up Bitcoin transactions.
 - **Transaction Monitor**: Uses `bitvmx-transaction-monitor` for monitoring Bitvmx instances and Bitcoin transactions
@@ -9,7 +9,7 @@ BitVMX Orchestrator is a Rust-based project that serves as a core component for 
 ## Installation
 Clone the repository and initialize the submodules:
 ```bash
-$ git clone git@github.com:FairgateLabs/rust-bitvmx-orchestrator.git
+$ git clone git@github.com:FairgateLabs/rust-bitcoin-coordinator.git
 ```
 
 ### Tests

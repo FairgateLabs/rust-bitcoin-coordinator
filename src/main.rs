@@ -1,13 +1,13 @@
 use anyhow::{Context, Ok, Result};
 use bitcoin::Transaction;
-use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
-use bitvmx_orchestrator::orchestrator::OrchestratorApi;
-use bitvmx_orchestrator::storage::OrchestratorStore;
-use bitvmx_orchestrator::tx_builder_helper::{
+use bitcoin_coordinator::config::Config;
+use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
+use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
+use bitcoin_coordinator::tx_builder_helper::{
     create_instance, create_key_manager, send_transaction,
 };
-use bitvmx_orchestrator::types::{InstanceId, ProcessedNews};
-use bitvmx_orchestrator::{config::Config, orchestrator::Orchestrator};
+use bitcoin_coordinator::types::{InstanceId, ProcessedNews};
+use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_transaction_monitor::monitor::Monitor;
 use console::style;
 use std::path::PathBuf;
@@ -51,7 +51,7 @@ fn main() -> Result<()> {
         &config.database.path,
     ))?);
     // This is the storage for the protocol, for this porpouse will be a different storage
-    let store = OrchestratorStore::new(storage)?;
+    let store = BitcoinCoordinatorStore::new(storage)?;
 
     // Step 1: Create an instance with 2 transactions for different operators
     println!(
@@ -80,16 +80,16 @@ fn main() -> Result<()> {
         Some(instance.txs[1].tx.clone()),
     );
 
-    // Step 2: Make the orchestrator monitor the instance
+    // Step 2: Make the Bitcoin Coordinator monitor the instance
     println!(
-        "\n{} Step 2: Orchestrator monitor the instance...\n",
-        style("Orchestrator").cyan()
+        "\n{} Step 2: Bitcoin Coordinator monitor the instance...\n",
+        style("Bitcoin Coordinator").cyan()
     );
 
     println!("{:?}", instance.map_partial_info());
-    let orchestrator = Orchestrator::new(monitor, store, dispatcher, account.clone());
+    let coordinator = BitcoinCoordinator::new(monitor, store, dispatcher, account.clone());
 
-    orchestrator
+    coordinator
         .monitor_instance(&instance.map_partial_info())
         .context("Error monitoring instance")?;
 
@@ -101,17 +101,19 @@ fn main() -> Result<()> {
             break;
         }
 
-        info!("New tick for for Orchestrator");
+        info!("New tick for for Bitcoin Coordinator");
 
-        orchestrator.tick().context("Failed tick orchestrator")?;
+        coordinator
+            .tick()
+            .context("Failed tick Bitcoin Coordinator")?;
 
-        let news = orchestrator.get_news()?;
+        let news = coordinator.get_news()?;
 
         for (instance_id, tx_news) in news.txs_by_id {
             for tx_new in tx_news {
                 info!(
                     "{} Transaction ID {} for Instance ID {} CONFIRMED!!! \n",
-                    style("Orchestrator").green(),
+                    style("Bitcoin Coordinator").green(),
                     style(tx_new.tx.compute_txid()).blue(),
                     style(instance_id).green()
                 );
@@ -131,9 +133,9 @@ fn main() -> Result<()> {
                 }
 
                 let tx: Transaction = tx.unwrap();
-                orchestrator.send_tx_instance(instance_id, &tx)?;
+                coordinator.send_tx_instance(instance_id, &tx)?;
 
-                orchestrator.acknowledge_news(ProcessedNews {
+                coordinator.acknowledge_news(ProcessedNews {
                     txs_by_id: vec![(instance_id, vec![tx.compute_txid()])],
                     txs_by_address: vec![],
                     funds_requests: vec![],
