@@ -109,7 +109,7 @@ fn main() -> Result<()> {
 
         let news = coordinator.get_news()?;
 
-        for (instance_id, tx_news) in news.txs_by_id {
+        for (instance_id, tx_news) in news.instance_txs {
             for tx_new in tx_news {
                 info!(
                     "{} Transaction ID {} for Instance ID {} CONFIRMED!!! \n",
@@ -136,8 +136,8 @@ fn main() -> Result<()> {
                 coordinator.send_tx_instance(instance_id, &tx)?;
 
                 coordinator.acknowledge_news(ProcessedNews {
-                    txs_by_id: vec![(instance_id, vec![tx.compute_txid()])],
-                    txs_by_address: vec![],
+                    instance_txs: vec![(instance_id, vec![tx.compute_txid()])],
+                    single_txs: vec![],
                     funds_requests: vec![],
                 })?;
             }
