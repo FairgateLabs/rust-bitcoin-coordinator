@@ -499,7 +499,7 @@ where
             return Ok(());
         }
 
-        //TODO QUESTION?: I think we could not recieve a tx to be send for an instance that
+        //TODO QUESTION?: I think we could not receive a tx to be send for an instance that
         //  has a pending tx be dispatch. Otherwise we could add some warning..
 
         // Send pending transactions that were queued.

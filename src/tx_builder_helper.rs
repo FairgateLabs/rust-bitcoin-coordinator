@@ -9,6 +9,8 @@ use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use console::style;
 use key_manager::errors::KeyManagerError;
 use key_manager::{create_file_key_store_from_config, create_key_manager_from_config};
+use storage_backend::storage::Storage;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
 use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
@@ -163,7 +165,12 @@ pub fn send_transaction(tx: Transaction, config: &Config) -> Result<(), TxBuilde
 pub fn create_key_manager(config: &Config) -> Result<KeyManager<FileKeyStore>, KeyManagerError> {
     let key_storage =
         create_file_key_store_from_config(&config.key_storage, &config.key_manager.network)?;
-    create_key_manager_from_config(&config.key_manager, key_storage)
+
+    // TODO read from config
+    let path = PathBuf::from(format!("data/development/musig_store"));
+    let store = Rc::new(Storage::new_with_path(&path).unwrap());
+    
+    create_key_manager_from_config(&config.key_manager, key_storage, store)
 }
 
 /// Builds a transaction with a single input and multiple outputs.
