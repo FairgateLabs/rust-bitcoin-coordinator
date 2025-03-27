@@ -1,4 +1,4 @@
-use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
+use bitcoin::{Amount, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::types::{BlockInfo, MonitorType};
 use serde::{Deserialize, Serialize};
@@ -64,14 +64,6 @@ impl TransactionInfo {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TransactionNew {
-    pub tx: Transaction,
-    pub block_info: BlockInfo,
-    pub confirmations: u32,
-    pub status: TransactionBlockchainStatus,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct AddressNew {
     pub tx: Transaction,
     pub block_info: BlockInfo,
     pub confirmations: u32,
@@ -152,18 +144,19 @@ impl BitvmxInstance<TransactionFullInfo> {
 }
 
 /// News represents new events that need to be processed
-/// - txs_by_id: New transactions found for specific instance IDs
-/// - txs_by_address: New transactions found for monitored addresses
+/// - instance_txs: New transactions found for specific instance IDs
+/// - single_txs: Transactions are detected that are monitored by the system (for now pegins)
 /// - funds_requests: Instance IDs that need additional funding
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct News {
-    pub txs_by_id: Vec<(InstanceId, Vec<TransactionNew>)>,
-    pub txs_by_address: Vec<(Address, Vec<AddressNew>)>,
+    pub instance_txs: Vec<(InstanceId, Vec<TransactionNew>)>,
+    pub single_txs: Vec<TransactionNew>,
     pub funds_requests: Vec<InstanceId>,
 }
+
 pub struct ProcessedNews {
-    pub txs_by_id: Vec<(InstanceId, Vec<Txid>)>,
-    pub txs_by_address: Vec<Address>,
+    pub instance_txs: Vec<(InstanceId, Vec<Txid>)>,
+    pub single_txs: Vec<Txid>,
     pub funds_requests: Vec<InstanceId>,
 }
 

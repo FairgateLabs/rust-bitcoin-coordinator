@@ -4,13 +4,13 @@ use crate::{
     errors::BitcoinCoordinatorError,
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{
-        AddressNew, BitcoinCoordinatorType, BitvmxInstance, FundingTx, InstanceId, News,
-        ProcessedNews, SpeedUpTx, TransactionBlockchainStatus, TransactionInfo, TransactionNew,
+        BitcoinCoordinatorType, BitvmxInstance, FundingTx, InstanceId, News, ProcessedNews,
+        SpeedUpTx, TransactionBlockchainStatus, TransactionInfo, TransactionNew,
         TransactionPartialInfo, TransactionState,
     },
 };
 
-use bitcoin::{Address, Network, PublicKey, Transaction, TxOut, Txid};
+use bitcoin::{Network, PublicKey, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::{
@@ -70,8 +70,6 @@ pub trait BitcoinCoordinatorApi {
         instance_id: InstanceId,
         funding_tx: &FundingTx,
     ) -> Result<(), BitcoinCoordinatorError>;
-
-    fn monitor_address(&self, address: Address) -> Result<(), BitcoinCoordinatorError>;
 
     fn get_news(&self) -> Result<News, BitcoinCoordinatorError>;
 
@@ -600,11 +598,6 @@ where
         Ok(())
     }
 
-    fn monitor_address(&self, address: Address) -> Result<(), BitcoinCoordinatorError> {
-        self.monitor.save_address_for_tracking(address)?;
-        Ok(())
-    }
-
     fn get_news(&self) -> Result<News, BitcoinCoordinatorError> {
         let instance_tx_news = self.store.get_instance_tx_news()?;
         let mut txs_by_id: Vec<(InstanceId, Vec<TransactionNew>)> = Vec::new();
@@ -646,43 +639,32 @@ where
             txs_by_id.push((instance_id, instance_txs));
         }
 
-        let address_news = self.monitor.get_address_news()?;
+        let tx_news: Vec<TransactionStatus> = self.monitor.get_single_tx_news()?;
 
-        let mut txs_by_address = Vec::new();
+        let mut single_txs = Vec::new();
 
-        for (address, address_statuses) in address_news {
-            for address_status in address_statuses {
-                let mut txs = Vec::new();
+        for tx_status in tx_news {
+            let state = if tx_status.confirmations > self.monitor.get_confirmation_threshold() {
+                TransactionBlockchainStatus::Finalized
+            } else if tx_status.confirmations == 1 {
+                TransactionBlockchainStatus::Confirmed
+            } else {
+                TransactionBlockchainStatus::Orphan
+            };
 
-                let tx_status = self
-                    .monitor
-                    .get_instance_tx_status(&address_status.tx.unwrap().compute_txid())?
-                    .unwrap();
-
-                let state = if tx_status.confirmations > self.monitor.get_confirmation_threshold() {
-                    TransactionBlockchainStatus::Finalized
-                } else if tx_status.confirmations == 1 {
-                    TransactionBlockchainStatus::Confirmed
-                } else {
-                    TransactionBlockchainStatus::Orphan
-                };
-
-                txs.push(AddressNew {
-                    tx: tx_status.tx.unwrap(),
-                    block_info: tx_status.block_info.unwrap(),
-                    confirmations: tx_status.confirmations,
-                    status: state,
-                });
-
-                txs_by_address.push((address.clone(), txs));
-            }
+            single_txs.push(TransactionNew {
+                tx: tx_status.tx.unwrap(),
+                block_info: tx_status.block_info.unwrap(),
+                confirmations: tx_status.confirmations,
+                status: state,
+            });
         }
 
         let funds_requests = self.store.get_funding_requests()?;
 
         Ok(News {
-            txs_by_id,
-            txs_by_address,
+            instance_txs: txs_by_id,
+            single_txs,
             funds_requests,
         })
     }
@@ -692,7 +674,7 @@ where
         processed_news: ProcessedNews,
     ) -> Result<(), BitcoinCoordinatorError> {
         // Acknowledge transaction news for each instance
-        for (instance_id, tx_ids) in processed_news.txs_by_id {
+        for (instance_id, tx_ids) in processed_news.instance_txs {
             for tx_id in tx_ids {
                 self.store
                     .acknowledge_instance_tx_news(instance_id, tx_id)?;
@@ -700,8 +682,8 @@ where
         }
 
         // Acknowledge address news
-        for address in processed_news.txs_by_address {
-            self.monitor.acknowledge_address_news(address)?;
+        for address in processed_news.single_txs {
+            self.monitor.acknowledge_tx_news(address)?;
         }
 
         // Acknowledge funding requests
