@@ -47,10 +47,10 @@ pub trait BitcoinCoordinatorApi {
 
     // Add a non-existent transaction for an existing instance.
     // This will be use in the final step.
-    fn add_tx_to_instance(
+    fn include_tx_to_instance(
         &self,
         instance_id: InstanceId,
-        tx_id: &Txid,
+        tx: &Transaction,
     ) -> Result<(), BitcoinCoordinatorError>;
 
     // The protocol requires delivering an existing transaction for an instance.
@@ -577,15 +577,18 @@ where
         Ok(())
     }
 
-    fn add_tx_to_instance(
+    fn include_tx_to_instance(
         &self,
-        _instance_id: InstanceId,
-        _tx: &Txid,
+        instance_id: InstanceId,
+        tx: &Transaction,
     ) -> Result<(), BitcoinCoordinatorError> {
         // Add a non-existent transaction to an existing instance.
         // The instance should exist in the storage.
         // The transaction id should not exist in the storage.
-        // Usage: This method will likely be used for the final transaction to withdraw the funds.
+        // Usage: This method will likely be used for the final transaction to withdraw the funds or pegins requests
+
+        self.store.include_tx_to_instance(instance_id, tx)?;
+
         Ok(())
     }
 

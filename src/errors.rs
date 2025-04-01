@@ -22,6 +22,9 @@ pub enum BitcoinCoordinatorStoreError {
 
     #[error("Error: {0}, {1}")]
     BitcoinCoordinatorStoreError(String, storage_backend::error::StorageError),
+
+    #[error("Transaction already exists in instance")]
+    TransactionAlreadyExists,
 }
 
 #[derive(Error, Debug)]

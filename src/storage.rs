@@ -60,6 +60,12 @@ pub trait BitcoinCoordinatorStoreApi {
     ) -> Result<(), BitcoinCoordinatorStoreError>;
     fn remove_instance(&self, instance_id: InstanceId) -> Result<(), BitcoinCoordinatorStoreError>;
 
+    fn include_tx_to_instance(
+        &self,
+        instance_id: InstanceId,
+        tx: &Transaction,
+    ) -> Result<(), BitcoinCoordinatorStoreError>;
+
     fn update_instance_tx_as_sent(
         &self,
         instance_id: InstanceId,
@@ -375,6 +381,34 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 break;
             }
         }
+
+        Ok(())
+    }
+
+    fn include_tx_to_instance(
+        &self,
+        instance_id: InstanceId,
+        tx: &Transaction,
+    ) -> Result<(), BitcoinCoordinatorStoreError> {
+        let mut txs = self.get_instance(instance_id)?;
+
+        // Check if transaction already exists in instance
+        if txs.iter().any(|_tx| _tx.tx_id == tx.compute_txid()) {
+            return Err(BitcoinCoordinatorStoreError::TransactionAlreadyExists);
+        }
+
+        let tx_info = TransactionInfo {
+            tx_id: tx.compute_txid(),
+            tx: Some(tx.clone()),
+            tx_hex: None,
+            state: TransactionState::New,
+            deliver_block_height: None,
+        };
+
+        txs.push(tx_info);
+
+        let key = self.get_key(StoreKey::Instance(instance_id));
+        self.store.set(key, txs, None)?;
 
         Ok(())
     }
