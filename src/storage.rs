@@ -1,7 +1,7 @@
 use crate::{
     errors::BitcoinCoordinatorStoreError,
     types::{
-        BitvmxInstance, FundingTx, InstanceId, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
+        BitvmxInstance, FundingTx, Id, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
         TransactionState,
     },
 };
@@ -16,10 +16,10 @@ pub struct BitcoinCoordinatorStore {
 }
 
 enum StoreKey {
-    Instance(InstanceId),
+    Instance(Id),
     InstanceList,
-    InstanceFundingList(InstanceId),
-    InstanceSpeedUpList(InstanceId),
+    InstanceFundingList(Id),
+    InstanceSpeedUpList(Id),
     FundingRequestList,
     InstanceTxNews,
 }
@@ -28,17 +28,17 @@ enum StoreKey {
 pub trait BitcoinCoordinatorStoreApi {
     fn tx_exists(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
     ) -> Result<bool, BitcoinCoordinatorStoreError>;
     fn get_instance(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
     ) -> Result<Vec<TransactionInfo>, BitcoinCoordinatorStoreError>;
-    fn get_instances(&self) -> Result<Vec<InstanceId>, BitcoinCoordinatorStoreError>;
+    fn get_instances(&self) -> Result<Vec<Id>, BitcoinCoordinatorStoreError>;
     fn get_instance_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
     ) -> Result<Option<TransactionInfo>, BitcoinCoordinatorStoreError>;
 
@@ -48,21 +48,21 @@ pub trait BitcoinCoordinatorStoreApi {
     ) -> Result<(), BitcoinCoordinatorStoreError>;
     fn add_instance_tx_hex(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: Txid,
         tx_hex: String,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn add_tx_to_instance(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx: &Transaction,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
-    fn remove_instance(&self, instance_id: InstanceId) -> Result<(), BitcoinCoordinatorStoreError>;
+    fn remove_instance(&self, instance_id: Id) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn update_instance_tx_as_sent(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
         block_height: BlockHeight,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
@@ -70,11 +70,11 @@ pub trait BitcoinCoordinatorStoreApi {
     fn get_txs_info(
         &self,
         tx_state: TransactionState,
-    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>, BitcoinCoordinatorStoreError>;
+    ) -> Result<Vec<(Id, Vec<TransactionInfo>)>, BitcoinCoordinatorStoreError>;
 
     fn update_instance_tx_status(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
         status: TransactionState,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
@@ -82,25 +82,25 @@ pub trait BitcoinCoordinatorStoreApi {
     // SPEED UP TRANSACTIONS
     fn get_speed_up_txs_for_child(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         child_tx_id: &Txid,
     ) -> Result<Vec<SpeedUpTx>, BitcoinCoordinatorStoreError>;
 
     fn add_speed_up_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         speed_up_tx: &SpeedUpTx,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn get_speed_up_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
     ) -> Result<Option<SpeedUpTx>, BitcoinCoordinatorStoreError>;
 
     fn is_speed_up_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
     ) -> Result<bool, BitcoinCoordinatorStoreError>;
 
@@ -109,43 +109,38 @@ pub trait BitcoinCoordinatorStoreApi {
     // when fee acceleration is needed
     fn get_funding_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
     ) -> Result<Option<FundingTx>, BitcoinCoordinatorStoreError>;
     fn add_funding_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx: &FundingTx,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
     fn remove_funding_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx: &Txid,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     // FUNDING TRANSACTIONS REQUESTS
     // Funding requests are created when an instance run out off funds
     // and requires additional funding to speed up transactions
-    fn add_funding_request(
-        &self,
-        instance_id: InstanceId,
-    ) -> Result<(), BitcoinCoordinatorStoreError>;
+    fn add_funding_request(&self, instance_id: Id) -> Result<(), BitcoinCoordinatorStoreError>;
     fn acknowledge_funding_request(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
-    fn get_funding_requests(&self) -> Result<Vec<InstanceId>, BitcoinCoordinatorStoreError>;
+    fn get_funding_requests(&self) -> Result<Vec<Id>, BitcoinCoordinatorStoreError>;
 
     fn add_instance_tx_news(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: Txid,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
-    fn get_instance_tx_news(
-        &self,
-    ) -> Result<Vec<(InstanceId, Vec<Txid>)>, BitcoinCoordinatorStoreError>;
+    fn get_instance_tx_news(&self) -> Result<Vec<(Id, Vec<Txid>)>, BitcoinCoordinatorStoreError>;
     fn acknowledge_instance_tx_news(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: Txid,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 }
@@ -173,7 +168,7 @@ impl BitcoinCoordinatorStore {
 
     pub fn update_instance_tx_status(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
         tx_state: TransactionState,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
@@ -196,9 +191,9 @@ impl BitcoinCoordinatorStore {
     fn get_txs_info(
         &self,
         status: TransactionState,
-    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>, BitcoinCoordinatorStoreError> {
+    ) -> Result<Vec<(Id, Vec<TransactionInfo>)>, BitcoinCoordinatorStoreError> {
         let instances_ids = self.get_instances()?;
-        let mut ret_instance_txs: Vec<(InstanceId, Vec<TransactionInfo>)> = Vec::new();
+        let mut ret_instance_txs: Vec<(Id, Vec<TransactionInfo>)> = Vec::new();
 
         for instance_id in instances_ids {
             let mut txs: Vec<TransactionInfo> = Vec::new();
@@ -223,16 +218,16 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
     fn get_txs_info(
         &self,
         tx_state: TransactionState,
-    ) -> Result<Vec<(InstanceId, Vec<TransactionInfo>)>, BitcoinCoordinatorStoreError> {
+    ) -> Result<Vec<(Id, Vec<TransactionInfo>)>, BitcoinCoordinatorStoreError> {
         self.get_txs_info(tx_state)
     }
 
-    fn get_instances(&self) -> Result<Vec<InstanceId>, BitcoinCoordinatorStoreError> {
+    fn get_instances(&self) -> Result<Vec<Id>, BitcoinCoordinatorStoreError> {
         let instances_list_key = self.get_key(StoreKey::InstanceList);
 
         let all_instance_ids = self
             .store
-            .get::<&str, Vec<InstanceId>>(&instances_list_key)
+            .get::<&str, Vec<Id>>(&instances_list_key)
             .map_err(|e| {
                 BitcoinCoordinatorStoreError::BitcoinCoordinatorStoreError(
                     "Failed to retrieve instances".to_string(),
@@ -246,7 +241,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn get_instance(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
     ) -> Result<Vec<TransactionInfo>, BitcoinCoordinatorStoreError> {
         let key = self.get_key(StoreKey::Instance(instance_id));
         let txs = self
@@ -291,7 +286,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
         let mut all_instances = self
             .store
-            .get::<_, Vec<InstanceId>>(&instances_key)?
+            .get::<_, Vec<Id>>(&instances_key)?
             .unwrap_or_default();
 
         // Add the new instance ID to the list if it's not already present
@@ -309,7 +304,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     // This method is currently used for testing purposes only and may not be necessary in the future.
     // It is intended to facilitate the testing of instance-related operations within the storage system.
-    fn remove_instance(&self, instance_id: InstanceId) -> Result<(), BitcoinCoordinatorStoreError> {
+    fn remove_instance(&self, instance_id: Id) -> Result<(), BitcoinCoordinatorStoreError> {
         let instance_key = self.get_key(StoreKey::Instance(instance_id));
         self.store.delete(&instance_key)?;
 
@@ -317,7 +312,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
         let mut all_instance_ids = self
             .store
-            .get::<_, Vec<InstanceId>>(&instances_key)?
+            .get::<_, Vec<Id>>(&instances_key)?
             .unwrap_or_default();
 
         all_instance_ids.retain(|&id| id != instance_id);
@@ -335,7 +330,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn get_instance_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
     ) -> Result<Option<TransactionInfo>, BitcoinCoordinatorStoreError> {
         let txs = self.get_instance(instance_id)?;
@@ -351,7 +346,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn tx_exists(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
     ) -> Result<bool, BitcoinCoordinatorStoreError> {
         let tx_instance = self.get_instance_tx(instance_id, tx_id)?;
@@ -360,7 +355,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn add_tx_to_instance(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx: &Transaction,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let mut txs = self.get_instance(instance_id)?;
@@ -381,7 +376,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn update_instance_tx_as_sent(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
         block_height: BlockHeight,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
@@ -410,7 +405,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn add_instance_tx_hex(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: Txid,
         tx_hex: String,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
@@ -427,7 +422,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn get_funding_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
     ) -> Result<Option<FundingTx>, BitcoinCoordinatorStoreError> {
         let funding_tx_key = self.get_key(StoreKey::InstanceFundingList(instance_id));
         let funding_txs = self
@@ -450,7 +445,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn add_funding_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         funding_tx: &FundingTx,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let funding_tx_key = self.get_key(StoreKey::InstanceFundingList(instance_id));
@@ -475,7 +470,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn get_speed_up_txs_for_child(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         child_tx_id: &Txid,
     ) -> Result<Vec<SpeedUpTx>, BitcoinCoordinatorStoreError> {
         let speed_up_tx_key = self.get_key(StoreKey::InstanceSpeedUpList(instance_id));
@@ -499,7 +494,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn get_speed_up_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
     ) -> Result<Option<SpeedUpTx>, BitcoinCoordinatorStoreError> {
         let speed_up_tx_key = self.get_key(StoreKey::InstanceSpeedUpList(instance_id));
@@ -528,7 +523,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
     // for the same instance, except for one that is specifically related to the same child transaction.
     fn add_speed_up_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         speed_up_tx: &SpeedUpTx,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let speed_up_tx_key = self.get_key(StoreKey::InstanceSpeedUpList(instance_id));
@@ -556,7 +551,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn is_speed_up_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
     ) -> Result<bool, BitcoinCoordinatorStoreError> {
         let speed_up_tx = self.get_speed_up_tx(instance_id, tx_id)?;
@@ -565,7 +560,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn update_instance_tx_status(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
         tx_state: TransactionState,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
@@ -574,7 +569,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn remove_funding_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         funding_tx_id: &Txid,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let funding_tx_key = self.get_key(StoreKey::InstanceFundingList(instance_id));
@@ -600,14 +595,11 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn add_funding_request(
-        &self,
-        instance_id: InstanceId,
-    ) -> Result<(), BitcoinCoordinatorStoreError> {
+    fn add_funding_request(&self, instance_id: Id) -> Result<(), BitcoinCoordinatorStoreError> {
         let funding_request_key = self.get_key(StoreKey::FundingRequestList);
         let mut funding_requests = self
             .store
-            .get::<&str, Vec<InstanceId>>(&funding_request_key)
+            .get::<&str, Vec<Id>>(&funding_request_key)
             .map_err(|e| {
                 BitcoinCoordinatorStoreError::BitcoinCoordinatorStoreError(
                     "Failed to retrieve funding transaction".to_string(),
@@ -624,12 +616,12 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn acknowledge_funding_request(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let funding_request_key = self.get_key(StoreKey::FundingRequestList);
         let mut funding_requests = self
             .store
-            .get::<&str, Vec<InstanceId>>(&funding_request_key)
+            .get::<&str, Vec<Id>>(&funding_request_key)
             .map_err(|e| {
                 BitcoinCoordinatorStoreError::BitcoinCoordinatorStoreError(
                     "Failed to retrieve funding transaction".to_string(),
@@ -644,11 +636,11 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn get_funding_requests(&self) -> Result<Vec<InstanceId>, BitcoinCoordinatorStoreError> {
+    fn get_funding_requests(&self) -> Result<Vec<Id>, BitcoinCoordinatorStoreError> {
         let funding_request_key = self.get_key(StoreKey::FundingRequestList);
         let funding_requests = self
             .store
-            .get::<&str, Vec<InstanceId>>(&funding_request_key)
+            .get::<&str, Vec<Id>>(&funding_request_key)
             .map_err(|e| {
                 BitcoinCoordinatorStoreError::BitcoinCoordinatorStoreError(
                     "Failed to retrieve funding transaction".to_string(),
@@ -661,13 +653,13 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn add_instance_tx_news(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: Txid,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let instance_tx_news_key = self.get_key(StoreKey::InstanceTxNews);
         let mut instance_tx_news = self
             .store
-            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)
+            .get::<&str, Vec<(Id, Vec<Txid>)>>(&instance_tx_news_key)
             .map_err(|e| {
                 BitcoinCoordinatorStoreError::BitcoinCoordinatorStoreError(
                     "Failed to retrieve instance tx news".to_string(),
@@ -694,13 +686,11 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn get_instance_tx_news(
-        &self,
-    ) -> Result<Vec<(InstanceId, Vec<Txid>)>, BitcoinCoordinatorStoreError> {
+    fn get_instance_tx_news(&self) -> Result<Vec<(Id, Vec<Txid>)>, BitcoinCoordinatorStoreError> {
         let instance_tx_news_key = self.get_key(StoreKey::InstanceTxNews);
         let instance_tx_news = self
             .store
-            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)
+            .get::<&str, Vec<(Id, Vec<Txid>)>>(&instance_tx_news_key)
             .map_err(|e| {
                 BitcoinCoordinatorStoreError::BitcoinCoordinatorStoreError(
                     "Failed to retrieve instance tx news".to_string(),
@@ -713,13 +703,13 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn acknowledge_instance_tx_news(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: Txid,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let instance_tx_news_key = self.get_key(StoreKey::InstanceTxNews);
         let mut instance_tx_news = self
             .store
-            .get::<&str, Vec<(InstanceId, Vec<Txid>)>>(&instance_tx_news_key)
+            .get::<&str, Vec<(Id, Vec<Txid>)>>(&instance_tx_news_key)
             .map_err(|e| {
                 BitcoinCoordinatorStoreError::BitcoinCoordinatorStoreError(
                     "Failed to retrieve instance tx news".to_string(),

@@ -2,7 +2,7 @@ use bitcoin::{absolute, transaction, Amount, Network, ScriptBuf, Transaction, Tx
 use bitcoin_coordinator::{
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
     storage::BitcoinCoordinatorStore,
-    types::{BitvmxInstance, FundingTx, InstanceId, TransactionPartialInfo},
+    types::{BitvmxInstance, FundingTx, Id, TransactionPartialInfo},
 };
 use bitvmx_transaction_monitor::{monitor::MockMonitorApi, types::InstanceData};
 use mockall::predicate::eq;
@@ -105,11 +105,7 @@ fn generate_random_string() -> String {
     (0..10).map(|_| rng.gen_range('a'..='z')).collect()
 }
 
-fn get_mock_data() -> (
-    InstanceId,
-    BitvmxInstance<TransactionPartialInfo>,
-    Transaction,
-) {
+fn get_mock_data() -> (Id, BitvmxInstance<TransactionPartialInfo>, Transaction) {
     let tx = Transaction {
         version: transaction::Version::TWO,
         lock_time: absolute::LockTime::ZERO,

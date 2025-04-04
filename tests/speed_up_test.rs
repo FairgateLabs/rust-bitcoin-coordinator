@@ -4,7 +4,7 @@ use bitcoin::{
 };
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
-use bitcoin_coordinator::types::{BitvmxInstance, FundingTx, InstanceId, TransactionPartialInfo};
+use bitcoin_coordinator::types::{BitvmxInstance, FundingTx, Id, TransactionPartialInfo};
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use bitvmx_transaction_monitor::types::{BlockInfo, InstanceData, TransactionStatus};
 use mockall::predicate::eq;
@@ -477,7 +477,7 @@ fn generate_random_string() -> String {
 }
 
 fn get_mock_data() -> (
-    InstanceId,
+    Id,
     BitvmxInstance<TransactionPartialInfo>,
     Transaction,
 ) {

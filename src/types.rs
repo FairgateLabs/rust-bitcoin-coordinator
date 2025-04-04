@@ -1,28 +1,21 @@
 use bitcoin::{Amount, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use bitvmx_transaction_monitor::types::{BlockInfo, MonitorType};
+use bitvmx_transaction_monitor::{
+    store::TransactionMonitoredType,
+    types::{AcknowledgeTransactionNews, BlockInfo, MonitorType, TransactionBlockchainStatus},
+};
 use serde::{Deserialize, Serialize};
 use transaction_dispatcher::DispatcherType;
 
 use crate::{coordinator::BitcoinCoordinator, storage::BitcoinCoordinatorStore};
 use uuid::Uuid;
-pub type InstanceId = Uuid;
+pub type Id = Uuid;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct FundingTx {
     pub tx_id: Txid,
     pub utxo_index: u32,
     pub utxo_output: TxOut,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub enum TransactionBlockchainStatus {
-    // Represents a transaction that has been successfully confirmed by the network but a reorganizacion move it out of the chain.
-    Orphan,
-    // Represents a transaction that has been successfully confirmed by the network
-    Confirmed,
-    // Represents when the transaction was confirmed an amount of blocks
-    Finalized,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -106,7 +99,7 @@ pub struct TransactionFullInfo {
 //TODO Change the way we store data in the storage. BitvmxInstance should be different.
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct BitvmxInstance<T> {
-    pub instance_id: InstanceId,
+    pub instance_id: Id,
     pub txs: Vec<T>,
     // TODO: The instance could receive the txid of the funding or the transaction to be mined.
     // If the txid is sent, it is necessary to check that this transaction is mined.
@@ -116,7 +109,7 @@ pub struct BitvmxInstance<T> {
 }
 
 impl<T> BitvmxInstance<T> {
-    pub fn new(instance_id: InstanceId, txs: Vec<T>, funding_tx: Option<FundingTx>) -> Self {
+    pub fn new(instance_id: Id, txs: Vec<T>, funding_tx: Option<FundingTx>) -> Self {
         Self {
             instance_id,
             txs,
@@ -149,15 +142,13 @@ impl BitvmxInstance<TransactionFullInfo> {
 /// - funds_requests: Instance IDs that need additional funding
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct News {
-    pub instance_txs: Vec<(InstanceId, Vec<TransactionNew>)>,
-    pub single_txs: Vec<TransactionNew>,
-    pub funds_requests: Vec<InstanceId>,
+    pub txs: Vec<TransactionMonitoredType>,
+    pub funds_requests: Vec<Id>,
 }
 
-pub struct ProcessedNews {
-    pub instance_txs: Vec<(InstanceId, Vec<Txid>)>,
-    pub single_txs: Vec<Txid>,
-    pub funds_requests: Vec<InstanceId>,
+pub enum AcknowledgeNews {
+    Transaction(AcknowledgeTransactionNews),
+    FundingRequest(Id),
 }
 
 pub type BitcoinCoordinatorType =

@@ -4,9 +4,8 @@ use crate::{
     errors::BitcoinCoordinatorError,
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{
-        BitcoinCoordinatorType, BitvmxInstance, FundingTx, InstanceId, News, ProcessedNews,
-        SpeedUpTx, TransactionBlockchainStatus, TransactionInfo, TransactionNew,
-        TransactionPartialInfo, TransactionState,
+        AcknowledgeNews, BitcoinCoordinatorType, BitvmxInstance, FundingTx, Id, News, SpeedUpTx,
+        TransactionInfo, TransactionNew, TransactionPartialInfo, TransactionState,
     },
 };
 
@@ -15,7 +14,7 @@ use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
-    types::{InstanceData, TransactionStatus},
+    types::{AcknowledgeTransactionNews, TransactionMonitor, TransactionNews, TransactionStatus},
 };
 use console::style;
 use key_manager::{key_manager::KeyManager, keystorage::database::DatabaseKeyStore};
@@ -49,7 +48,7 @@ pub trait BitcoinCoordinatorApi {
     // This will be use in the final step.
     fn add_tx_to_instance(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
     ) -> Result<(), BitcoinCoordinatorError>;
 
@@ -57,7 +56,7 @@ pub trait BitcoinCoordinatorApi {
     // This is achieved by passing the full transaction.
     fn send_tx_instance(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx: &Transaction,
     ) -> Result<(), BitcoinCoordinatorError>;
 
@@ -67,16 +66,13 @@ pub trait BitcoinCoordinatorApi {
 
     fn add_funding_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         funding_tx: &FundingTx,
     ) -> Result<(), BitcoinCoordinatorError>;
 
     fn get_news(&self) -> Result<News, BitcoinCoordinatorError>;
 
-    fn acknowledge_news(
-        &self,
-        processed_news: ProcessedNews,
-    ) -> Result<(), BitcoinCoordinatorError>;
+    fn acknowledge_news(&self, news: AcknowledgeNews) -> Result<(), BitcoinCoordinatorError>;
 }
 
 impl BitcoinCoordinatorType {
@@ -148,7 +144,7 @@ where
                 self.store.update_instance_tx_as_sent(
                     instance_id,
                     &tx_info.tx_id,
-                    self.monitor.get_current_height()?,
+                    self.monitor.get_monitor_height()?,
                 )?;
             }
         }
@@ -158,7 +154,7 @@ where
 
     fn speed_up(
         &self,
-        instance_id: InstanceId,
+        group_id: Id,
         tx: &Transaction,
         funding_txid: Txid,
         tx_public_key: PublicKey,
@@ -171,7 +167,7 @@ where
         if let Err(error) = dispatch_result {
             match error {
                 DispatcherError::InsufficientFunds => {
-                    self.store.add_funding_request(instance_id)?;
+                    self.store.add_funding_request(group_id)?;
                     return Ok(());
                 }
                 e => return Err(e.into()),
@@ -180,7 +176,7 @@ where
 
         if dispatch_result.is_ok() {
             let (speed_up_tx_id, deliver_fee_rate) = dispatch_result.unwrap();
-            let deliver_block_height = self.monitor.get_current_height()?;
+            let deliver_block_height = self.monitor.get_monitor_height()?;
 
             let speed_up_tx = SpeedUpTx {
                 tx_id: speed_up_tx_id,
@@ -191,10 +187,11 @@ where
                 utxo_output: funding_utxo.1,
             };
 
-            self.store.add_speed_up_tx(instance_id, &speed_up_tx)?;
+            self.store.add_speed_up_tx(group_id, &speed_up_tx)?;
 
-            self.monitor
-                .save_transaction_for_tracking(instance_id, speed_up_tx_id)?;
+            let monitor_data = TransactionMonitor::GroupTransaction(group_id, vec![speed_up_tx_id]);
+
+            self.monitor.monitor(monitor_data)?;
         }
 
         Ok(())
@@ -216,14 +213,11 @@ where
                 );
 
                 // Get the latest transaction status from monitor for this transaction
-                let tx_status = self.monitor.get_instance_tx_status(&tx_info.tx_id)?;
+                let tx_status = self.monitor.get_tx_status(&tx_info.tx_id);
 
-                if let Some(tx_status) = tx_status {
-                    self.process_instance_tx_change(instance_id, &tx_status)?
-                } else {
-                    return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(
-                        "Transaction status not found in monitor".to_string(),
-                    ));
+                match tx_status {
+                    Ok(tx_status) => self.process_tx_change(instance_id, &tx_status)?,
+                    Err(e) => return Err(e.into()),
                 }
             }
         }
@@ -231,34 +225,58 @@ where
         Ok(())
     }
 
-    fn process_instance_news(&self) -> Result<(), BitcoinCoordinatorError> {
+    fn process_news(&self) -> Result<(), BitcoinCoordinatorError> {
         // Get any news in each instance that are being monitored.
         // Get instances news also returns the speed ups txs added for each instance.
-        let news = self.monitor.get_instance_news()?;
+        let list_news = self.monitor.get_news()?;
 
-        for (instance_id, txs_status) in &news {
-            info!(
-                "{} Instance ID: {} has new transactions: {}",
-                style("News").green(),
-                style(instance_id).green(),
-                style(txs_status.len()).red()
-            );
-        }
+        for news in list_news {
+            match &news {
+                TransactionNews::GroupTransaction(group_id, txs_status) => {
+                    info!(
+                        "{} Group Transaction ID: {} has news in tx: {}",
+                        style("News").green(),
+                        style(group_id).green(),
+                        style(txs_status.tx_id).red()
+                    );
 
-        for (instance_id, txs_status) in news {
-            for tx_status in txs_status {
-                let is_speed_up = self.store.is_speed_up_tx(instance_id, &tx_status.tx_id)?;
+                    // Only the group transaction should be speed up.
+                    let is_speed_up = self.store.is_speed_up_tx(*group_id, &txs_status.tx_id)?;
 
-                if is_speed_up {
-                    self.process_speed_up_change(instance_id, &tx_status)?;
-                } else {
-                    self.process_instance_tx_change(instance_id, &tx_status)?;
+                    if is_speed_up {
+                        self.process_speed_up_change(*group_id, &txs_status)?;
+                    } else {
+                        self.process_tx_change(*group_id, &txs_status)?;
+                    }
+
+                    // Acknowledge the transaction news to the monitor to update its state.
+                    // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
+                    let monitor_data =
+                        AcknowledgeTransactionNews::GroupTransaction(*group_id, txs_status.tx_id);
+                    self.monitor.acknowledge_news(monitor_data)?;
                 }
-
-                // Acknowledge the transaction news to the monitor to update its state.
-                // This step ensures that the monitor is aware of the transaction's completion and can update its tracking accordingly.
-                self.monitor
-                    .acknowledge_instance_tx_news(instance_id, &tx_status.tx_id)?;
+                TransactionNews::SingleTransaction(tx_status) => {
+                    info!(
+                        "{} Single Transaction ID: {}",
+                        style("News").green(),
+                        style(tx_status.tx_id).red()
+                    );
+                }
+                TransactionNews::RskPeginTransaction(tx_status) => {
+                    info!(
+                        "{} RSK PegIn Transaction ID: {}",
+                        style("News").green(),
+                        style(tx_status.tx_id).red()
+                    );
+                }
+                TransactionNews::SpendingUTXOTransaction(utxo_index, tx_status) => {
+                    info!(
+                        "{} Spending UTXO Transaction ID: {} with utxo index: {}",
+                        style("News").green(),
+                        style(tx_status.tx_id).red(),
+                        style(utxo_index).green()
+                    );
+                }
             }
         }
 
@@ -267,7 +285,7 @@ where
 
     fn process_speed_up_change(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_status: &TransactionStatus,
     ) -> Result<(), BitcoinCoordinatorError> {
         // This indicates that this is a speed-up transaction that has been mined with 1 confirmation,
@@ -294,9 +312,9 @@ where
         Ok(())
     }
 
-    fn process_instance_tx_change(
+    fn process_tx_change(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_status: &TransactionStatus,
     ) -> Result<(), BitcoinCoordinatorError> {
         let is_confirmed = tx_status.is_confirmed();
@@ -356,7 +374,7 @@ where
 
     fn handle_confirmation_transaction(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_status: &TransactionStatus,
     ) -> Result<(), BitcoinCoordinatorError> {
         // Update the transaction to completed given that transaction has more than the threshold confirmations
@@ -374,7 +392,7 @@ where
 
     fn handle_confirmation_speed_up_transaction(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         speed_up_tx_id: &Txid,
     ) -> Result<(), BitcoinCoordinatorError> {
         let speed_up_tx = self
@@ -399,7 +417,7 @@ where
 
     fn handle_orphan_speed_up_transaction(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         speed_up_tx_id: &Txid,
     ) -> Result<(), BitcoinCoordinatorError> {
         //Speed up previouly was mined, now is orphan then, we have to remove it as a funding tx.
@@ -410,7 +428,7 @@ where
 
     fn handle_complete_transaction(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_status: &TransactionStatus,
     ) -> Result<(), BitcoinCoordinatorError> {
         // Transaction was mined and has sufficient confirmations to mark it as complete.
@@ -430,7 +448,7 @@ where
 
     fn handle_unseen_transaction(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_data: &TransactionInfo,
     ) -> Result<(), BitcoinCoordinatorError> {
         // We get all the existing speed up transaction for tx_id. Then we figure out if we should speed it up again.
@@ -504,7 +522,7 @@ where
         self.process_pending_txs()?;
 
         // Handle any updates related to instances, including new information about transactions that have not been reviewed yet.
-        self.process_instance_news()?;
+        self.process_news()?;
 
         // Handle any updates related to instances, including new information about transactions that have not been reviewed yet.
         self.process_in_progress_txs()?;
@@ -526,18 +544,17 @@ where
 
         self.store.add_instance(instance)?;
 
-        let instance_new = InstanceData {
-            instance_id: instance.instance_id,
-            txs: instance.txs.iter().map(|tx| tx.tx_id).collect(),
-        };
+        let monitor_data = TransactionMonitor::GroupTransaction(
+            instance.instance_id,
+            instance.txs.iter().map(|tx| tx.tx_id).collect(),
+        );
 
         // When an instance is saved in the monitor for tracking,
         // the current height of the indexer is used as the starting point for tracking.
         // This is not currently configurable.
         // It may change if we found a case where it should be configurable.
 
-        self.monitor
-            .save_instances_for_tracking(vec![instance_new])?;
+        self.monitor.monitor(monitor_data)?;
 
         Ok(())
     }
@@ -551,7 +568,7 @@ where
 
     fn send_tx_instance(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx: &Transaction,
     ) -> Result<(), BitcoinCoordinatorError> {
         // This section of code is responsible for adding a transaction to an instance and marking it as pending.
@@ -579,7 +596,7 @@ where
 
     fn add_tx_to_instance(
         &self,
-        _instance_id: InstanceId,
+        _instance_id: Id,
         _tx: &Txid,
     ) -> Result<(), BitcoinCoordinatorError> {
         // Add a non-existent transaction to an existing instance.
@@ -591,7 +608,7 @@ where
 
     fn add_funding_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         funding_tx: &FundingTx,
     ) -> Result<(), BitcoinCoordinatorError> {
         self.store.add_funding_tx(instance_id, funding_tx)?;
@@ -599,11 +616,11 @@ where
     }
 
     fn get_news(&self) -> Result<News, BitcoinCoordinatorError> {
-        let instance_tx_news = self.store.get_instance_tx_news()?;
-        let mut txs_by_id: Vec<(InstanceId, Vec<TransactionNew>)> = Vec::new();
+        let news = self.store.get_instance_tx_news()?;
+        let mut txs_by_id: Vec<(Id, Vec<TransactionNew>)> = Vec::new();
 
-        for (instance_id, tx_ids) in instance_tx_news {
-            let mut instance_txs = Vec::new();
+        for (instance_id, tx_ids) in news {
+            let mut txs = Vec::new();
 
             for tx_id in tx_ids {
                 // Transaction information is stored in both the monitor and orchastrator storage.
@@ -616,81 +633,37 @@ where
                     .get_instance_tx(instance_id, &tx_id)?
                     .expect("Transaction not found in instance");
 
-                let tx_status = self
-                    .monitor
-                    .get_instance_tx_status(&tx_id)?
-                    .expect("Transaction status not found in monitor");
+                let tx_status = self.monitor.get_tx_status(&tx_id);
 
-                let status = match tx_info.state {
-                    TransactionState::Orphan => TransactionBlockchainStatus::Orphan,
-                    TransactionState::Confirmed => TransactionBlockchainStatus::Confirmed,
-                    TransactionState::Finalized => TransactionBlockchainStatus::Finalized,
-                    _ => continue, // Skip other states
+                let tx_status = match tx_status {
+                    Ok(tx_status) => tx_status,
+                    Err(e) => return Err(e.into()),
                 };
 
-                instance_txs.push(TransactionNew {
+                txs.push(TransactionNew {
                     tx: tx_status.tx.unwrap(),
                     block_info: tx_status.block_info.unwrap(),
                     confirmations: tx_status.confirmations,
-                    status,
+                    status: tx_status.status,
                 });
             }
 
-            txs_by_id.push((instance_id, instance_txs));
-        }
-
-        let tx_news: Vec<TransactionStatus> = self.monitor.get_single_tx_news()?;
-
-        let mut single_txs = Vec::new();
-
-        for tx_status in tx_news {
-            let state = if tx_status.confirmations > self.monitor.get_confirmation_threshold() {
-                TransactionBlockchainStatus::Finalized
-            } else if tx_status.confirmations == 1 {
-                TransactionBlockchainStatus::Confirmed
-            } else {
-                TransactionBlockchainStatus::Orphan
-            };
-
-            single_txs.push(TransactionNew {
-                tx: tx_status.tx.unwrap(),
-                block_info: tx_status.block_info.unwrap(),
-                confirmations: tx_status.confirmations,
-                status: state,
-            });
+            txs_by_id.push((instance_id, txs));
         }
 
         let funds_requests = self.store.get_funding_requests()?;
 
         Ok(News {
-            instance_txs: txs_by_id,
-            single_txs,
+            txs,
             funds_requests,
         })
     }
 
-    fn acknowledge_news(
-        &self,
-        processed_news: ProcessedNews,
-    ) -> Result<(), BitcoinCoordinatorError> {
-        // Acknowledge transaction news for each instance
-        for (instance_id, tx_ids) in processed_news.instance_txs {
-            for tx_id in tx_ids {
-                self.store
-                    .acknowledge_instance_tx_news(instance_id, tx_id)?;
-            }
+    fn acknowledge_news(&self, news: AcknowledgeNews) -> Result<(), BitcoinCoordinatorError> {
+        match news {
+            AcknowledgeNews::Transaction(news) => self.monitor.acknowledge_news(news)?,
+            AcknowledgeNews::FundingRequest(id) => self.store.acknowledge_funding_request(id)?,
         }
-
-        // Acknowledge address news
-        for address in processed_news.single_txs {
-            self.monitor.acknowledge_tx_news(address)?;
-        }
-
-        // Acknowledge funding requests
-        for instance_id in processed_news.funds_requests {
-            self.store.acknowledge_funding_request(instance_id)?;
-        }
-
         Ok(())
     }
 }

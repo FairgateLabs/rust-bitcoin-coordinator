@@ -6,7 +6,7 @@ use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::tx_builder_helper::{
     create_instance, create_key_manager, send_transaction,
 };
-use bitcoin_coordinator::types::{InstanceId, ProcessedNews};
+use bitcoin_coordinator::types::{Id, ProcessedNews};
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_transaction_monitor::monitor::Monitor;
 use console::style;
@@ -74,7 +74,7 @@ fn main() -> Result<()> {
     );
     send_transaction(instance.txs[0].tx.clone(), &Config::load()?)?;
 
-    let mut tx_to_answer: (InstanceId, bitcoin::Txid, Option<Transaction>) = (
+    let mut tx_to_answer: (Id, bitcoin::Txid, Option<Transaction>) = (
         instance.instance_id,
         instance.txs[0].tx.compute_txid(),
         Some(instance.txs[1].tx.clone()),
@@ -136,7 +136,7 @@ fn main() -> Result<()> {
                 coordinator.send_tx_instance(instance_id, &tx)?;
 
                 coordinator.acknowledge_news(ProcessedNews {
-                    instance_txs: vec![(instance_id, vec![tx.compute_txid()])],
+                    txs: vec![(instance_id, vec![tx.compute_txid()])],
                     single_txs: vec![],
                     funds_requests: vec![],
                 })?;

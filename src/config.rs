@@ -1,12 +1,11 @@
 use std::env;
 
+use crate::errors::ConfigError;
 use bitvmx_bitcoin_rpc::{rpc_config::RpcConfig, types::BlockHeight};
 use config as settings;
 use key_manager::config::{KeyManagerConfig, KeyStorageConfig};
 use serde::Deserialize;
 use tracing::warn;
-
-use crate::errors::ConfigError;
 
 static DEFAULT_ENV: &str = "development";
 static CONFIG_PATH: &str = "config";
