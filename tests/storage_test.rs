@@ -4,8 +4,8 @@ use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
 use bitcoin_coordinator::{
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{
-        BitvmxInstance, FundingTx, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
-        TransactionState,
+        FundingTransaction, SpeedUpTx, TransactionDispatch, TransactionInfo,
+        TransactionPartialInfo, TransactionState,
     },
 };
 use storage_backend::storage::Storage;
@@ -28,10 +28,10 @@ fn instances_store() -> Result<(), anyhow::Error> {
 
     let tx2_summary = TransactionPartialInfo { tx_id: tx_id_2 };
 
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id: Uuid::from_u128(1),
+    let instance = TransactionDispatch::<TransactionPartialInfo> {
+        id: Uuid::from_u128(1),
         txs: vec![tx1_summary, tx2_summary],
-        funding_tx: Some(FundingTx {
+        funding_tx: Some(FundingTransaction {
             tx_id,
             utxo_index: 1,
             utxo_output: TxOut {
@@ -42,7 +42,7 @@ fn instances_store() -> Result<(), anyhow::Error> {
     };
 
     //add instance
-    bitvmx_store.add_instance(&instance)?;
+    bitvmx_store.coordinate(&instance)?;
 
     //get instances
     let instances = bitvmx_store.get_instances()?;
@@ -55,7 +55,7 @@ fn instances_store() -> Result<(), anyhow::Error> {
     assert_eq!(instance.len(), 2);
 
     //remove instance
-    bitvmx_store.remove_instance(Uuid::from_u128(1))?;
+    bitvmx_store.remove_coordinator(Uuid::from_u128(1))?;
     let instances = bitvmx_store.get_instances()?;
     assert_eq!(instances.len(), 0);
 
@@ -98,10 +98,10 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
 
     let block_height = 2;
 
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id,
+    let instance = TransactionDispatch::<TransactionPartialInfo> {
+        id: instance_id,
         txs: vec![tx_instance_summary_1, tx_instance_summary_2],
-        funding_tx: Some(FundingTx {
+        funding_tx: Some(FundingTransaction {
             tx_id: tx_id_1,
             utxo_index: 1,
             utxo_output: TxOut {
@@ -112,7 +112,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     };
 
     // Add instance for the first time.
-    store.add_instance(&instance)?;
+    store.coordinate(&instance)?;
 
     // Move instances to in progress.
     store.update_instance_tx_as_sent(instance_id, &tx_id_1, block_height)?;
@@ -137,7 +137,7 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
 
     let instance_id = Uuid::from_u128(1);
     // Remove the instance 1, as a mather of cleaning the database.
-    let _ = bitvmx_store.remove_instance(instance_id);
+    let _ = bitvmx_store.remove_coordinator(instance_id);
 
     let block_height = 2;
     let fee_rate = Amount::from_sat(1000);
@@ -174,10 +174,10 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
 
     let tx_instance_summary_1 = TransactionPartialInfo { tx_id: tx_id_1 };
 
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id,
+    let instance = TransactionDispatch::<TransactionPartialInfo> {
+        id: instance_id,
         txs: vec![tx_instance_summary_1],
-        funding_tx: Some(FundingTx {
+        funding_tx: Some(FundingTransaction {
             tx_id: tx_id_1,
             utxo_index: 1,
             utxo_output: TxOut {
@@ -188,7 +188,7 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
     };
 
     // Add the instance
-    bitvmx_store.add_instance(&instance)?;
+    bitvmx_store.coordinate(&instance)?;
 
     // Add the speed up transaction
     bitvmx_store.add_speed_up_tx(instance_id, &speed_up_tx)?;
@@ -217,7 +217,7 @@ fn update_status() -> Result<(), anyhow::Error> {
 
     let instance_id = Uuid::from_u128(1);
     // Remove the instance 1, as a mather of cleaning the database.
-    let _ = bitvmx_store.remove_instance(instance_id);
+    let _ = bitvmx_store.remove_coordinator(instance_id);
 
     let tx_1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -230,10 +230,10 @@ fn update_status() -> Result<(), anyhow::Error> {
 
     let tx_instance_summary_1 = TransactionPartialInfo { tx_id: tx_id_1 };
 
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id,
+    let instance = TransactionDispatch::<TransactionPartialInfo> {
+        id: instance_id,
         txs: vec![tx_instance_summary_1],
-        funding_tx: Some(FundingTx {
+        funding_tx: Some(FundingTransaction {
             tx_id: tx_id_1,
             utxo_index: 1,
             utxo_output: TxOut {
@@ -246,7 +246,7 @@ fn update_status() -> Result<(), anyhow::Error> {
     let instance_txs = bitvmx_store.get_txs_info(TransactionState::New)?;
     assert_eq!(instance_txs.len(), 0);
 
-    bitvmx_store.add_instance(&instance)?;
+    bitvmx_store.coordinate(&instance)?;
 
     let transaction_info = TransactionInfo {
         tx_id: tx_id_1,
@@ -269,22 +269,14 @@ fn update_status() -> Result<(), anyhow::Error> {
     assert_eq!(instance_completed.len(), 0);
 
     // Move transaction to in inprogress.
-    bitvmx_store.update_instance_tx_status(
-        instance.instance_id,
-        &tx_id_1,
-        TransactionState::Sent,
-    )?;
+    bitvmx_store.update_instance_tx_status(instance.id, &tx_id_1, TransactionState::Sent)?;
 
     let instance_txs = bitvmx_store.get_txs_info(TransactionState::New)?;
     assert_eq!(instance_txs.len(), 0);
     let instance_txs = bitvmx_store.get_txs_info(TransactionState::Sent)?;
     assert_eq!(instance_txs.len(), 1);
 
-    bitvmx_store.update_instance_tx_status(
-        instance.instance_id,
-        &tx_id_1,
-        TransactionState::ReadyToSend,
-    )?;
+    bitvmx_store.update_instance_tx_status(instance.id, &tx_id_1, TransactionState::ReadyToSend)?;
 
     let instance_txs = bitvmx_store.get_txs_info(TransactionState::Sent)?;
     assert_eq!(instance_txs.len(), 0);
@@ -292,11 +284,7 @@ fn update_status() -> Result<(), anyhow::Error> {
     let instance_txs = bitvmx_store.get_txs_info(TransactionState::ReadyToSend)?;
     assert_eq!(instance_txs.len(), 1);
 
-    bitvmx_store.update_instance_tx_status(
-        instance.instance_id,
-        &tx_id_1,
-        TransactionState::Confirmed,
-    )?;
+    bitvmx_store.update_instance_tx_status(instance.id, &tx_id_1, TransactionState::Confirmed)?;
 
     let instance_txs = bitvmx_store.get_txs_info(TransactionState::ReadyToSend)?;
     assert_eq!(instance_txs.len(), 0);
@@ -316,7 +304,7 @@ fn funding_tests() -> Result<(), anyhow::Error> {
 
     let instance_id = Uuid::from_u128(1);
     // Remove the instance 1, as a mather of cleaning the database.
-    let _ = bitvmx_store.remove_instance(instance_id);
+    let _ = bitvmx_store.remove_coordinator(instance_id);
 
     let tx_1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -338,7 +326,7 @@ fn funding_tests() -> Result<(), anyhow::Error> {
 
     let tx_instance_summary_1 = TransactionPartialInfo { tx_id: tx_id_1 };
 
-    let funding_tx = FundingTx {
+    let funding_tx = FundingTransaction {
         tx_id: tx_id_1,
         utxo_index: 1,
         utxo_output: TxOut {
@@ -347,7 +335,7 @@ fn funding_tests() -> Result<(), anyhow::Error> {
         },
     };
 
-    let funding_tx_2 = FundingTx {
+    let funding_tx_2 = FundingTransaction {
         tx_id: tx_id_2,
         utxo_index: 3,
         utxo_output: TxOut {
@@ -356,19 +344,19 @@ fn funding_tests() -> Result<(), anyhow::Error> {
         },
     };
 
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id,
+    let instance = TransactionDispatch::<TransactionPartialInfo> {
+        id: instance_id,
         txs: vec![tx_instance_summary_1],
         funding_tx: Some(funding_tx.clone()),
     };
 
     //Add instance 1 with funding tx and check if funding tx exists.
-    bitvmx_store.add_instance(&instance)?;
+    bitvmx_store.coordinate(&instance)?;
     let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
     assert_eq!(funding_tx_to_validate.unwrap(), funding_tx);
 
     //Add new funding tx, then ask for funding tx. should return the new funding tx.
-    bitvmx_store.add_funding_tx(instance_id, &funding_tx_2)?;
+    bitvmx_store.fund_for_speedup(instance_id, &funding_tx_2)?;
     let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
     assert_eq!(funding_tx_to_validate.unwrap(), funding_tx_2);
 

@@ -75,7 +75,7 @@ fn main() -> Result<()> {
     send_transaction(instance.txs[0].tx.clone(), &Config::load()?)?;
 
     let mut tx_to_answer: (Id, bitcoin::Txid, Option<Transaction>) = (
-        instance.instance_id,
+        instance.id,
         instance.txs[0].tx.compute_txid(),
         Some(instance.txs[1].tx.clone()),
     );
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
     let coordinator = BitcoinCoordinator::new(monitor, store, dispatcher, account.clone());
 
     coordinator
-        .monitor_instance(&instance.map_partial_info())
+        .monitor(&instance.map_partial_info())
         .context("Error monitoring instance")?;
 
     let rx = handle_contro_c();
@@ -133,7 +133,7 @@ fn main() -> Result<()> {
                 }
 
                 let tx: Transaction = tx.unwrap();
-                coordinator.send_tx_instance(instance_id, &tx)?;
+                coordinator.dispatch(instance_id, &tx)?;
 
                 coordinator.acknowledge_news(ProcessedNews {
                     txs: vec![(instance_id, vec![tx.compute_txid()])],

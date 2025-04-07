@@ -2,17 +2,15 @@ use bitcoin::{Amount, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::{
     store::TransactionMonitoredType,
-    types::{AcknowledgeTransactionNews, BlockInfo, MonitorType, TransactionBlockchainStatus},
+    types::{AcknowledgeTransactionNews, BlockInfo, Id, MonitorType, TransactionBlockchainStatus},
 };
 use serde::{Deserialize, Serialize};
 use transaction_dispatcher::DispatcherType;
 
 use crate::{coordinator::BitcoinCoordinator, storage::BitcoinCoordinatorStore};
-use uuid::Uuid;
-pub type Id = Uuid;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct FundingTx {
+pub struct FundingTransaction {
     pub tx_id: Txid,
     pub utxo_index: u32,
     pub utxo_output: TxOut,
@@ -57,6 +55,7 @@ impl TransactionInfo {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TransactionNew {
+    pub tx_id: Txid,
     pub tx: Transaction,
     pub block_info: BlockInfo,
     pub confirmations: u32,
@@ -74,66 +73,21 @@ pub struct SpeedUpTx {
     //TODO: maybe we need to add status.
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct TransactionPartialInfo {
-    pub tx_id: Txid,
-}
-
-impl From<Txid> for TransactionPartialInfo {
-    fn from(tx_id: Txid) -> Self {
-        TransactionPartialInfo { tx_id }
-    }
-}
-
-impl TransactionPartialInfo {
-    pub fn new(tx_id: Txid) -> Self {
-        Self { tx_id }
-    }
-}
-
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TransactionFullInfo {
     pub tx: Transaction,
 }
 
-//TODO Change the way we store data in the storage. BitvmxInstance should be different.
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct BitvmxInstance<T> {
-    pub instance_id: Id,
-    pub txs: Vec<T>,
-    // TODO: The instance could receive the txid of the funding or the transaction to be mined.
-    // If the txid is sent, it is necessary to check that this transaction is mined.
-    // On the other hand, if the transaction to be mined is sent, it is necessary to dispatch
-    // this transaction and wait for it to be mined in order to start sending speed up transactions.
-    pub funding_tx: Option<FundingTx>,
+pub enum TransactionDispatch {
+    GroupTransaction(Id, Txid),
+    SingleTransaction(Txid),
 }
 
-impl<T> BitvmxInstance<T> {
-    pub fn new(instance_id: Id, txs: Vec<T>, funding_tx: Option<FundingTx>) -> Self {
-        Self {
-            instance_id,
-            txs,
-            funding_tx,
-        }
-    }
-}
-
-impl BitvmxInstance<TransactionFullInfo> {
-    pub fn map_partial_info(&self) -> BitvmxInstance<TransactionPartialInfo> {
-        let partial_info_txs = self
-            .txs
-            .iter()
-            .map(|tx_info| TransactionPartialInfo {
-                tx_id: tx_info.tx.compute_txid(),
-            })
-            .collect();
-
-        BitvmxInstance::<TransactionPartialInfo> {
-            instance_id: self.instance_id,
-            txs: partial_info_txs,
-            funding_tx: self.funding_tx.clone(),
-        }
-    }
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub enum TransactionFund {
+    GroupTransaction(Id, FundingTransaction),
+    SingleTransaction(Txid, FundingTransaction),
 }
 
 /// News represents new events that need to be processed

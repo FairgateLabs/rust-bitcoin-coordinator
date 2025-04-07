@@ -2,7 +2,7 @@ use bitcoin::{absolute, transaction, Amount, Network, ScriptBuf, Transaction, Tx
 use bitcoin_coordinator::{
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
     storage::BitcoinCoordinatorStore,
-    types::{BitvmxInstance, FundingTx, Id, TransactionPartialInfo},
+    types::{FundingTransaction, Id, TransactionDispatch, TransactionPartialInfo},
 };
 use bitvmx_transaction_monitor::{monitor::MockMonitorApi, types::InstanceData};
 use mockall::predicate::eq;
@@ -78,7 +78,7 @@ fn monitor_instance_test() -> Result<(), anyhow::Error> {
 
     let orchastrator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
 
-    orchastrator.monitor_instance(&instance)?;
+    orchastrator.monitor(&instance)?;
 
     Ok(())
 }
@@ -105,7 +105,7 @@ fn generate_random_string() -> String {
     (0..10).map(|_| rng.gen_range('a'..='z')).collect()
 }
 
-fn get_mock_data() -> (Id, BitvmxInstance<TransactionPartialInfo>, Transaction) {
+fn get_mock_data() -> (Id, TransactionDispatch<TransactionPartialInfo>, Transaction) {
     let tx = Transaction {
         version: transaction::Version::TWO,
         lock_time: absolute::LockTime::ZERO,
@@ -119,10 +119,10 @@ fn get_mock_data() -> (Id, BitvmxInstance<TransactionPartialInfo>, Transaction) 
 
     let instance_id = Uuid::from_u128(1);
 
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id,
+    let instance = TransactionDispatch::<TransactionPartialInfo> {
+        id: instance_id,
         txs: vec![tx_info],
-        funding_tx: Some(FundingTx {
+        funding_tx: Some(FundingTransaction {
             tx_id: tx.compute_txid(),
             utxo_index: 1,
             utxo_output: TxOut {

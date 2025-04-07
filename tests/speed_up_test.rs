@@ -4,7 +4,9 @@ use bitcoin::{
 };
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
-use bitcoin_coordinator::types::{BitvmxInstance, FundingTx, Id, TransactionPartialInfo};
+use bitcoin_coordinator::types::{
+    FundingTransaction, Id, TransactionDispatch, TransactionPartialInfo,
+};
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use bitvmx_transaction_monitor::types::{BlockInfo, InstanceData, TransactionStatus};
 use mockall::predicate::eq;
@@ -196,10 +198,10 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
 
     // Initialize the bitcoin coordinator with mocks and begin monitoring the instance.
     let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
-    coordinator.monitor_instance(&instance.clone())?;
+    coordinator.monitor(&instance.clone())?;
 
     // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.send_tx_instance(instance_id, &tx)?;
+    coordinator.dispatch(instance_id, &tx)?;
 
     // Simulate ticks to monitor and adjust transaction status with each blockchain height update.
     coordinator.tick()?; // Dispatch and observe unmined status.
@@ -439,10 +441,10 @@ fn reorg_speed_up_tx_test() -> Result<(), anyhow::Error> {
 
     // Initialize the bitcoin coordinator with mocks and begin monitoring the instance.
     let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
-    coordinator.monitor_instance(&instance.clone())?;
+    coordinator.monitor(&instance.clone())?;
 
     // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.send_tx_instance(instance_id, &tx)?;
+    coordinator.dispatch(instance_id, &tx)?;
 
     // Simulate ticks to monitor and adjust transaction status with each blockchain height update.
 
@@ -476,11 +478,7 @@ fn generate_random_string() -> String {
     (0..10).map(|_| rng.gen_range('a'..='z')).collect()
 }
 
-fn get_mock_data() -> (
-    Id,
-    BitvmxInstance<TransactionPartialInfo>,
-    Transaction,
-) {
+fn get_mock_data() -> (Id, TransactionDispatch<TransactionPartialInfo>, Transaction) {
     let tx = Transaction {
         version: transaction::Version::TWO,
         lock_time: absolute::LockTime::ZERO,
@@ -494,10 +492,10 @@ fn get_mock_data() -> (
 
     let instance_id = Uuid::from_u128(1);
 
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id,
+    let instance = TransactionDispatch::<TransactionPartialInfo> {
+        id: instance_id,
         txs: vec![tx_info],
-        funding_tx: Some(FundingTx {
+        funding_tx: Some(FundingTransaction {
             tx_id: tx.compute_txid(),
             utxo_index: 1,
             utxo_output: TxOut {

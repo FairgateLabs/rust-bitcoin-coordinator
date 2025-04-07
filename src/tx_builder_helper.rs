@@ -9,10 +9,10 @@ use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use console::style;
 use key_manager::errors::KeyManagerError;
 use key_manager::{create_file_key_store_from_config, create_key_manager_from_config};
-use storage_backend::storage::Storage;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
+use storage_backend::storage::Storage;
 use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
 use transaction_dispatcher::signer::AccountApi;
 use uuid::Uuid;
@@ -22,21 +22,21 @@ use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account}
 
 use crate::config::{Config, DispatcherConfig};
 use crate::errors::TxBuilderHelperError;
-use crate::types::{BitvmxInstance, FundingTx, TransactionFullInfo};
+use crate::types::{TransactionDispatch, FundingTransaction, TransactionFullInfo};
 
 pub fn create_instance(
     user: &Account,
     rpc_config: &RpcConfig,
     network: Network,
     dispatcher: &DispatcherConfig,
-) -> Result<BitvmxInstance<TransactionFullInfo>, TxBuilderHelperError> {
+) -> Result<TransactionDispatch<TransactionFullInfo>, TxBuilderHelperError> {
     let instance_id = Uuid::from_u128(1);
 
     //hardcoded transaction.
     let funding_tx_id =
         Txid::from_str("3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f").unwrap();
 
-    let funding_tx = Some(FundingTx {
+    let funding_tx = Some(FundingTransaction {
         tx_id: funding_tx_id,
         utxo_index: 0,
         utxo_output: TxOut {
@@ -67,8 +67,8 @@ pub fn create_instance(
         style(tx_2.compute_txid()).blue(),
     );
 
-    let instance = BitvmxInstance {
-        instance_id,
+    let instance = TransactionDispatch {
+        id: instance_id,
         txs,
         funding_tx,
     };
@@ -169,7 +169,7 @@ pub fn create_key_manager(config: &Config) -> Result<KeyManager<FileKeyStore>, K
     // TODO read from config
     let path = PathBuf::from(format!("data/development/musig_store"));
     let store = Rc::new(Storage::new_with_path(&path).unwrap());
-    
+
     create_key_manager_from_config(&config.key_manager, key_storage, store)
 }
 
