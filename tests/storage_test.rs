@@ -4,7 +4,7 @@ use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
 use bitcoin_coordinator::{
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{
-        FundingTransaction, SpeedUpTx, TransactionDispatch, TransactionInfo,
+        CoordinatedTransaction, FundingTransaction, SpeedUpTx, TransactionDispatch,
         TransactionPartialInfo, TransactionState,
     },
 };
@@ -119,7 +119,7 @@ fn in_progress_tx_store() -> Result<(), anyhow::Error> {
     store.update_instance_tx_as_sent(instance_id, &tx_id_2, block_height)?;
 
     //get in progress tx by id
-    let instance_txs = store.get_txs_info(TransactionState::Sent)?;
+    let instance_txs = store.get_tx(TransactionState::Sent)?;
     assert_eq!(instance_txs.len(), 1);
     let (instance_id, txs) = &instance_txs[0];
     assert_eq!(instance_id, &Uuid::from_u128(1));
@@ -243,27 +243,26 @@ fn update_status() -> Result<(), anyhow::Error> {
         }),
     };
 
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::New)?;
+    let instance_txs = bitvmx_store.get_tx(TransactionState::New)?;
     assert_eq!(instance_txs.len(), 0);
 
     bitvmx_store.coordinate(&instance)?;
 
-    let transaction_info = TransactionInfo {
+    let transaction_info = CoordinatedTransaction {
         tx_id: tx_id_1,
         deliver_block_height: None,
         tx: None,
         state: TransactionState::New,
-        tx_hex: None,
     };
 
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::New)?;
+    let instance_txs = bitvmx_store.get_tx(TransactionState::New)?;
     assert_eq!(instance_txs.len(), 1);
     assert_eq!(instance_txs[0].1, vec![transaction_info.clone()]);
 
     //Get instances by other status should be 0
-    let instance_in_progress = bitvmx_store.get_txs_info(TransactionState::Sent)?;
-    let instance_pending = bitvmx_store.get_txs_info(TransactionState::ReadyToSend)?;
-    let instance_completed = bitvmx_store.get_txs_info(TransactionState::Confirmed)?;
+    let instance_in_progress = bitvmx_store.get_tx(TransactionState::Sent)?;
+    let instance_pending = bitvmx_store.get_tx(TransactionState::ReadyToSend)?;
+    let instance_completed = bitvmx_store.get_tx(TransactionState::Confirmed)?;
     assert_eq!(instance_in_progress.len(), 0);
     assert_eq!(instance_pending.len(), 0);
     assert_eq!(instance_completed.len(), 0);
@@ -271,25 +270,25 @@ fn update_status() -> Result<(), anyhow::Error> {
     // Move transaction to in inprogress.
     bitvmx_store.update_instance_tx_status(instance.id, &tx_id_1, TransactionState::Sent)?;
 
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::New)?;
+    let instance_txs = bitvmx_store.get_tx(TransactionState::New)?;
     assert_eq!(instance_txs.len(), 0);
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::Sent)?;
+    let instance_txs = bitvmx_store.get_tx(TransactionState::Sent)?;
     assert_eq!(instance_txs.len(), 1);
 
     bitvmx_store.update_instance_tx_status(instance.id, &tx_id_1, TransactionState::ReadyToSend)?;
 
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::Sent)?;
+    let instance_txs = bitvmx_store.get_tx(TransactionState::Sent)?;
     assert_eq!(instance_txs.len(), 0);
 
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::ReadyToSend)?;
+    let instance_txs = bitvmx_store.get_tx(TransactionState::ReadyToSend)?;
     assert_eq!(instance_txs.len(), 1);
 
     bitvmx_store.update_instance_tx_status(instance.id, &tx_id_1, TransactionState::Confirmed)?;
 
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::ReadyToSend)?;
+    let instance_txs = bitvmx_store.get_tx(TransactionState::ReadyToSend)?;
     assert_eq!(instance_txs.len(), 0);
 
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::Confirmed)?;
+    let instance_txs = bitvmx_store.get_tx(TransactionState::Confirmed)?;
     assert_eq!(instance_txs.len(), 1);
 
     Ok(())

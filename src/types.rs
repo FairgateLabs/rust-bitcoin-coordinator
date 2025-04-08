@@ -2,7 +2,10 @@ use bitcoin::{Amount, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::{
     store::TransactionMonitoredType,
-    types::{AcknowledgeTransactionNews, BlockInfo, Id, MonitorType, TransactionBlockchainStatus},
+    types::{
+        AcknowledgeTransactionNews, BlockInfo, Id, MonitorType, TransactionBlockchainStatus,
+        TransactionNews,
+    },
 };
 use serde::{Deserialize, Serialize};
 use transaction_dispatcher::DispatcherType;
@@ -18,8 +21,6 @@ pub struct FundingTransaction {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum TransactionState {
-    // Represents a transaction that is being monitored.
-    New,
     // Represents a transaction that has been chosen by the protocol to be sent.
     ReadyToSend,
     // Represents a transaction that has been broadcast to the network and is waiting for confirmations.
@@ -35,21 +36,23 @@ pub enum TransactionState {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct TransactionInfo {
+pub struct CoordinatedTransaction {
+    pub group_id: Option<Id>,
     pub tx_id: Txid,
-    // Represents the transaction itself, which is added when the transaction is ready to be sent.
-    pub tx: Option<Transaction>,
-    // Represents the hexadecimal representation of the transaction, which is added when the transaction is seen on the blockchain and confirmed.
-    pub tx_hex: Option<String>,
+    pub tx: Transaction,
     pub deliver_block_height: Option<BlockHeight>,
     pub state: TransactionState,
 }
 
-impl TransactionInfo {
-    pub fn is_transaction_owned(&self) -> bool {
-        // This method provides a simple way to determine if this transaction belongs to the current operator.
-        // A transaction is considered owned if it has been sent by the operator.
-        self.tx.is_some() && self.deliver_block_height.is_some()
+impl CoordinatedTransaction {
+    pub fn new(group_id: Option<Id>, tx: Transaction, state: TransactionState) -> Self {
+        Self {
+            group_id,
+            tx_id: tx.compute_txid(),
+            tx,
+            deliver_block_height: None,
+            state,
+        }
     }
 }
 
@@ -73,6 +76,26 @@ pub struct SpeedUpTx {
     //TODO: maybe we need to add status.
 }
 
+impl SpeedUpTx {
+    pub fn new(
+        tx_id: Txid,
+        deliver_block_height: BlockHeight,
+        deliver_fee_rate: Amount,
+        child_tx_id: Txid,
+        utxo_index: u32,
+        utxo_output: TxOut,
+    ) -> Self {
+        Self {
+            tx_id,
+            deliver_block_height,
+            deliver_fee_rate,
+            child_tx_id,
+            utxo_index,
+            utxo_output,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TransactionFullInfo {
     pub tx: Transaction,
@@ -80,8 +103,8 @@ pub struct TransactionFullInfo {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum TransactionDispatch {
-    GroupTransaction(Id, Txid),
-    SingleTransaction(Txid),
+    GroupTransaction(Id, Transaction),
+    SingleTransaction(Transaction),
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -96,8 +119,17 @@ pub enum TransactionFund {
 /// - funds_requests: Instance IDs that need additional funding
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct News {
-    pub txs: Vec<TransactionMonitoredType>,
+    pub txs: Vec<TransactionNews>,
     pub funds_requests: Vec<Id>,
+}
+
+impl News {
+    pub fn new(txs: Vec<TransactionNews>, funds_requests: Vec<Id>) -> Self {
+        Self {
+            txs,
+            funds_requests,
+        }
+    }
 }
 
 pub enum AcknowledgeNews {
