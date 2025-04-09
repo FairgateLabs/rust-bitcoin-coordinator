@@ -66,8 +66,8 @@ pub trait BitcoinCoordinatorStoreApi {
 
     fn remove_funding(
         &self,
+        funding_tx_id: Txid,
         tx_id: Txid,
-        child_txid: Txid,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn update_funding(
@@ -133,14 +133,15 @@ impl BitcoinCoordinatorStore {
         Ok(tx.unwrap())
     }
 
-    fn get_fundings_key(&self, tx_id: Txid) -> Result<Uuid, BitcoinCoordinatorStoreError> {
+    fn get_fundings_key(&self, tx_id: Txid) -> Result<Option<Uuid>, BitcoinCoordinatorStoreError> {
         let id_key = self.get_key(StoreKey::TransactionFundingId(tx_id));
-        let fundings_id = self.store.get::<&str, Uuid>(&id_key)?;
+        let fundings_id = self.store.get::<&str, (String, Uuid)>(&id_key)?;
 
-        match fundings_id {
-            Some(id) => Ok(id),
-            None => Err(BitcoinCoordinatorStoreError::FundingKeyNotFound),
+        if fundings_id.is_none() {
+            return Ok(None);
         }
+
+        Ok(Some(fundings_id.unwrap().1))
     }
 }
 
@@ -186,14 +187,17 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
     ) -> Result<Option<FundingTransaction>, BitcoinCoordinatorStoreError> {
         let funding_txs_id = self.get_fundings_key(tx_id)?;
 
-        let funding_txs_key = self.get_key(StoreKey::FundingTransactions(funding_txs_id));
+        if funding_txs_id.is_none() {
+            return Ok(None);
+        }
 
+        let funding_txs_key = self.get_key(StoreKey::FundingTransactions(funding_txs_id.unwrap()));
         let funding_txs = self
             .store
-            .get::<&str, (String, Vec<FundingTransaction>)>(&funding_txs_key)?
+            .get::<&str, Vec<FundingTransaction>>(&funding_txs_key)?
             .unwrap_or_default();
 
-        if let Some(last_funding_tx) = funding_txs.1.last() {
+        if let Some(last_funding_tx) = funding_txs.last() {
             // Funding transaction is the last one.
             Ok(Some(last_funding_tx.clone()))
         } else {
@@ -207,48 +211,48 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         funding_tx: FundingTransaction,
         context: String,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
-        let new_funding_txs_id = Uuid::new_v4();
+        let new_funding_txs_id = Uuid::new_v4(); // This id represent the array of funding transactions
 
         for tx_id in tx_ids.clone() {
             // For each transaction, we need to set the funding id
             let id_key = self.get_key(StoreKey::TransactionFundingId(tx_id));
-            self.store.set(id_key, new_funding_txs_id, None)?;
+            self.store
+                .set(id_key, (context.clone(), new_funding_txs_id), None)?;
         }
 
         let fundings_txs_key = self.get_key(StoreKey::FundingTransactions(new_funding_txs_id));
 
-        let mut funding_txs = self
+        let mut funding_info = self
             .store
-            .get::<&str, (String, Vec<FundingTransaction>)>(&fundings_txs_key)?
+            .get::<&str, Vec<FundingTransaction>>(&fundings_txs_key)?
             .unwrap_or_default();
 
-        funding_txs.1.push(funding_tx);
+        funding_info.push(funding_tx);
 
-        self.store
-            .set(&fundings_txs_key, (context, funding_txs), None)?;
+        self.store.set(&fundings_txs_key, &funding_info, None)?;
 
         Ok(())
     }
 
     fn remove_funding(
         &self,
+        funding_tx_id: Txid,
         tx_id: Txid,
-        child_txid: Txid,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
-        let funding_txs_id = self.get_fundings_key(child_txid)?;
+        let funding_txs_id = self.get_fundings_key(tx_id)?;
 
-        let fundings_txs_key = self.get_key(StoreKey::FundingTransactions(funding_txs_id));
-
-        let mut funding_txs = self
-            .store
-            .get::<&str, (String, Vec<FundingTransaction>)>(&fundings_txs_key)?
-            .unwrap_or_default();
-
-        if funding_txs.1.is_empty() || funding_txs.1.last().unwrap().tx_id != tx_id {
+        if funding_txs_id.is_none() {
             return Err(BitcoinCoordinatorStoreError::FundingTransactionNotFound);
         }
 
-        funding_txs.1.retain(|tx| tx.tx_id != tx_id);
+        let fundings_txs_key = self.get_key(StoreKey::FundingTransactions(funding_txs_id.unwrap()));
+
+        let mut funding_txs = self
+            .store
+            .get::<&str, Vec<FundingTransaction>>(&fundings_txs_key)?
+            .unwrap_or_default();
+
+        funding_txs.retain(|tx| tx.tx_id != funding_tx_id);
 
         self.store.set(&fundings_txs_key, &funding_txs, None)?;
 
@@ -262,14 +266,18 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let funding_txs_id = self.get_fundings_key(tx_id)?;
 
-        let fundings_txs_key = self.get_key(StoreKey::FundingTransactions(funding_txs_id));
+        if funding_txs_id.is_none() {
+            return Err(BitcoinCoordinatorStoreError::FundingTransactionNotFound);
+        }
+
+        let fundings_txs_key = self.get_key(StoreKey::FundingTransactions(funding_txs_id.unwrap()));
 
         let mut funding_txs = self
             .store
-            .get::<&str, (String, Vec<FundingTransaction>)>(&fundings_txs_key)?
+            .get::<&str, Vec<FundingTransaction>>(&fundings_txs_key)?
             .unwrap_or_default();
 
-        funding_txs.1.push(funding_tx);
+        funding_txs.push(funding_tx);
 
         self.store.set(&fundings_txs_key, &funding_txs, None)?;
 
@@ -361,7 +369,12 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn add_insufficient_funds_news(&self, tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
         let fundings = self.get_fundings_key(tx_id)?;
-        let fundings_txs_key = self.get_key(StoreKey::FundingTransactions(fundings));
+
+        if fundings.is_none() {
+            return Err(BitcoinCoordinatorStoreError::FundingTransactionNotFound);
+        }
+
+        let fundings_txs_key = self.get_key(StoreKey::FundingTransactions(fundings.unwrap()));
         let fundings_data = self
             .store
             .get::<&str, (String, Vec<FundingTransaction>)>(&fundings_txs_key)?

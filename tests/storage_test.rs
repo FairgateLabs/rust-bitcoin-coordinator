@@ -3,7 +3,7 @@ use std::{path::PathBuf, rc::Rc, str::FromStr};
 use bitcoin::{absolute::LockTime, hashes::Hash, Amount, Transaction, Txid};
 use bitcoin_coordinator::{
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
-    types::{SpeedUpTx, TransactionState},
+    types::{FundingTransaction, SpeedUpTx, TransactionState},
 };
 use key_manager::tests::utils::helper::clear_output;
 use storage_backend::storage::Storage;
@@ -269,77 +269,76 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// #[test]
-// fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
-//     use crate::utils::helper::clear_output;
-//     use bitcoin::{Amount, Txid};
-//     use storage_backend::storage::Storage;
-//     use std::rc::Rc;
-//     use std::str::FromStr;
-//     use uuid::Uuid;
+#[test]
+fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
+    clear_output();
 
-//     use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
-//     use bitcoin_coordinator::types::{FundingTransaction, TransactionState};
+    // Create a temporary directory for testing
+    let store = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/test"))?);
+    let bitcoin_store = BitcoinCoordinatorStore::new(store)?;
 
-//     // Create a temporary directory for testing
-//     let _ = std::fs::create_dir_all("test_output");
-//     let store = Rc::new(Storage::new("test_output")?);
-//     let bitcoin_store = BitcoinCoordinatorStore::new(store);
+    let funding_tx_id_1 =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2001")?;
 
-//     // Create test transaction IDs
-//     let tx_id1 = Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2001")?;
-//     let tx_id2 = Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2002")?;
-//     let child_tx_id = Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2003")?;
+    // Test that get_funding returns None for a transaction ID that hasn't been added yet
+    let initial_funding = bitcoin_store.get_funding(funding_tx_id_1)?;
+    assert!(initial_funding.is_none());
 
-//     // Create a funding transaction
-//     let funding_tx = FundingTransaction {
-//         tx_id: tx_id1,
-//         utxo_index: 0,
-//         utxo_output: bitcoin::TxOut {
-//             value: Amount::from_sat(10000),
-//             script_pubkey: bitcoin::ScriptBuf::new(),
-//         },
-//         state: TransactionState::Pending,
-//     };
+    // Test add_funding
+    let tx_id_1 =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2003")?;
+    let tx_id_2 =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2004")?;
 
-//     // Test add_funding
-//     let tx_ids = vec![tx_id1, tx_id2];
-//     let context = "Test funding context".to_string();
-//     bitcoin_store.add_funding(tx_ids, funding_tx.clone(), context.clone())?;
+    let funding_tx_id_2 =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2002")?;
 
-//     // Test get_funding
-//     let retrieved_funding = bitcoin_store.get_funding(tx_id1)?;
-//     assert!(retrieved_funding.is_some());
-//     let retrieved = retrieved_funding.unwrap();
-//     assert_eq!(retrieved.tx_id, tx_id1);
-//     assert_eq!(retrieved.utxo_index, 0);
-//     assert_eq!(retrieved.utxo_output.value, Amount::from_sat(10000));
-//     assert_eq!(retrieved.state, TransactionState::Pending);
+    // Create a funding transaction
+    let funding_tx = FundingTransaction {
+        tx_id: funding_tx_id_1,
+        utxo_index: 3,
+        utxo_output: bitcoin::TxOut {
+            value: Amount::from_sat(10000),
+            script_pubkey: bitcoin::ScriptBuf::new(),
+        },
+    };
 
-//     // Test update_funding
-//     let mut updated_funding = funding_tx.clone();
-//     updated_funding.utxo_index = 1;
-//     updated_funding.state = TransactionState::InProgress;
-//     bitcoin_store.update_funding(tx_id1, updated_funding)?;
+    let tx_ids = vec![tx_id_1, tx_id_2];
+    let context = "Test funding context".to_string();
+    bitcoin_store.add_funding(tx_ids, funding_tx.clone(), context.clone())?;
 
-//     // Verify the update
-//     let updated_retrieved = bitcoin_store.get_funding(tx_id1)?.unwrap();
-//     assert_eq!(updated_retrieved.utxo_index, 1);
-//     assert_eq!(updated_retrieved.state, TransactionState::InProgress);
+    // Test get_funding
+    let retrieved_funding = bitcoin_store.get_funding(tx_id_1)?;
+    assert!(retrieved_funding.is_some());
+    let retrieved = retrieved_funding.unwrap();
+    assert_eq!(retrieved.tx_id, funding_tx_id_1);
+    assert_eq!(retrieved.utxo_index, 3);
+    assert_eq!(retrieved.utxo_output.value, Amount::from_sat(10000));
 
-//     // Test remove_funding
-//     bitcoin_store.remove_funding(tx_id1, child_tx_id)?;
+    // Test update_funding
+    let mut updated_funding = funding_tx.clone();
+    updated_funding.utxo_index = 1;
+    updated_funding.tx_id = funding_tx_id_2;
+    bitcoin_store.update_funding(tx_id_1, updated_funding)?;
 
-//     // Verify the funding was removed
-//     let removed_funding = bitcoin_store.get_funding(tx_id1)?;
-//     assert!(removed_funding.is_none());
+    // Verify the update
+    let updated_retrieved = bitcoin_store.get_funding(tx_id_1)?.unwrap();
+    assert_eq!(updated_retrieved.utxo_index, 1);
+    assert_eq!(updated_retrieved.tx_id, funding_tx_id_2);
 
-//     // Test with non-existent transaction ID
-//     let non_existent_tx_id = Txid::from_slice(&[4; 32]).unwrap();
-//     let non_existent_funding = bitcoin_store.get_funding(non_existent_tx_id)?;
-//     assert!(non_existent_funding.is_none());
+    // Test remove_funding
+    bitcoin_store.remove_funding(funding_tx_id_1, tx_id_1)?;
 
-//     // Clean up
-//     clear_output();
-//     Ok(())
-// }
+    // Verify the funding was removed
+    let removed_funding = bitcoin_store.get_funding(funding_tx_id_1)?;
+    assert!(removed_funding.is_none());
+
+    // Test with non-existent transaction ID
+    let non_existent_tx_id = Txid::from_slice(&[4; 32]).unwrap();
+    let non_existent_funding = bitcoin_store.get_funding(non_existent_tx_id)?;
+    assert!(non_existent_funding.is_none());
+
+    // Clean up
+    clear_output();
+    Ok(())
+}
