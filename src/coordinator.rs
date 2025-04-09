@@ -221,9 +221,10 @@ where
                 if let Some(tx_status) = tx_status {
                     self.process_instance_tx_change(instance_id, &tx_status)?
                 } else {
-                    return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(
-                        "Transaction status not found in monitor".to_string(),
-                    ));
+                    // Was not found in the indexer.
+                    // This could be a speed up transaction that was not mined yet.
+                    // We should speed up the transaction again.
+                    // self.handle_unseen_transaction(instance_id, &tx_info)?;
                 }
             }
         }
