@@ -1,11 +1,8 @@
 use bitcoin::{Amount, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use bitvmx_transaction_monitor::{
-    store::TransactionMonitoredType,
-    types::{
-        AcknowledgeTransactionNews, BlockInfo, Id, MonitorType, TransactionBlockchainStatus,
-        TransactionNews,
-    },
+use bitvmx_transaction_monitor::types::{
+    AcknowledgeTransactionNews, BlockInfo, MonitorType, TransactionBlockchainStatus,
+    TransactionNews,
 };
 use serde::{Deserialize, Serialize};
 use transaction_dispatcher::DispatcherType;
@@ -37,7 +34,6 @@ pub enum TransactionState {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct CoordinatedTransaction {
-    pub group_id: Option<Id>,
     pub tx_id: Txid,
     pub tx: Transaction,
     pub deliver_block_height: Option<BlockHeight>,
@@ -45,9 +41,8 @@ pub struct CoordinatedTransaction {
 }
 
 impl CoordinatedTransaction {
-    pub fn new(group_id: Option<Id>, tx: Transaction, state: TransactionState) -> Self {
+    pub fn new(tx: Transaction, state: TransactionState) -> Self {
         Self {
-            group_id,
             tx_id: tx.compute_txid(),
             tx,
             deliver_block_height: None,
@@ -101,30 +96,14 @@ pub struct TransactionFullInfo {
     pub tx: Transaction,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub enum TransactionDispatch {
-    GroupTransaction(Id, Transaction),
-    SingleTransaction(Transaction),
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub enum TransactionFund {
-    GroupTransaction(Id, FundingTransaction),
-    SingleTransaction(Txid, FundingTransaction),
-}
-
-/// News represents new events that need to be processed
-/// - instance_txs: New transactions found for specific instance IDs
-/// - single_txs: Transactions are detected that are monitored by the system (for now pegins)
-/// - funds_requests: Instance IDs that need additional funding
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct News {
     pub txs: Vec<TransactionNews>,
-    pub funds_requests: Vec<Id>,
+    pub funds_requests: Vec<(Txid, String)>,
 }
 
 impl News {
-    pub fn new(txs: Vec<TransactionNews>, funds_requests: Vec<Id>) -> Self {
+    pub fn new(txs: Vec<TransactionNews>, funds_requests: Vec<(Txid, String)>) -> Self {
         Self {
             txs,
             funds_requests,
@@ -134,7 +113,7 @@ impl News {
 
 pub enum AcknowledgeNews {
     Transaction(AcknowledgeTransactionNews),
-    FundingRequest(Id),
+    InsufficientFunds(Txid),
 }
 
 pub type BitcoinCoordinatorType =

@@ -6,6 +6,7 @@ use bitcoin::{
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
+use bitvmx_transaction_monitor::types::{ExtraData, TransactionMonitor};
 use console::style;
 use key_manager::errors::KeyManagerError;
 use key_manager::{create_file_key_store_from_config, create_key_manager_from_config};
@@ -22,38 +23,35 @@ use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account}
 
 use crate::config::{Config, DispatcherConfig};
 use crate::errors::TxBuilderHelperError;
-use crate::types::{TransactionDispatch, FundingTransaction, TransactionFullInfo};
+use crate::types::FundingTransaction;
 
-pub fn create_instance(
+pub fn create_txs(
     user: &Account,
     rpc_config: &RpcConfig,
     network: Network,
     dispatcher: &DispatcherConfig,
-) -> Result<TransactionDispatch<TransactionFullInfo>, TxBuilderHelperError> {
-    let instance_id = Uuid::from_u128(1);
+) -> Result<(TransactionMonitor, FundingTransaction), TxBuilderHelperError> {
+    let group_id = Uuid::from_u128(1);
 
     //hardcoded transaction.
     let funding_tx_id =
         Txid::from_str("3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f").unwrap();
 
-    let funding_tx = Some(FundingTransaction {
+    let funding_tx = FundingTransaction {
         tx_id: funding_tx_id,
         utxo_index: 0,
         utxo_output: TxOut {
             value: Amount::default(),
             script_pubkey: ScriptBuf::default(),
         },
-    });
+    };
 
     let tx_1: Transaction = generate_tx(user, rpc_config, network, dispatcher)?;
     let tx_2: Transaction = generate_tx(user, rpc_config, network, dispatcher)?;
 
-    let txs = vec![
-        TransactionFullInfo { tx: tx_1.clone() },
-        TransactionFullInfo { tx: tx_2.clone() },
-    ];
+    let txs = vec![tx_1.compute_txid(), tx_2.compute_txid()];
 
-    println!("{} Create Instance id: 1", style("→").cyan());
+    println!("{} Create Group tx: 1", style("→").cyan());
 
     println!(
         "{} Create transaction: {:#?} for operator: 1",
@@ -67,13 +65,11 @@ pub fn create_instance(
         style(tx_2.compute_txid()).blue(),
     );
 
-    let instance = TransactionDispatch {
-        id: instance_id,
-        txs,
-        funding_tx,
-    };
+    let extra_data = ExtraData::GroupId(group_id);
 
-    Ok(instance)
+    let txs_to_monitor = TransactionMonitor::Transactions(txs, extra_data);
+
+    Ok((txs_to_monitor, funding_tx))
 }
 
 pub fn generate_tx(

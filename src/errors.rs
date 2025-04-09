@@ -25,6 +25,15 @@ pub enum BitcoinCoordinatorStoreError {
 
     #[error("Transaction not found: {0}")]
     TransactionNotFound(String),
+
+    #[error("Invalid extra data")]
+    InvalidExtraData,
+
+    #[error("Funding key not found")]
+    FundingKeyNotFound,
+
+    #[error("Funding transaction not found")]
+    FundingTransactionNotFound,
 }
 
 #[derive(Error, Debug)]

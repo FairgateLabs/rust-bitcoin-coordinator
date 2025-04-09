@@ -1,21 +1,24 @@
 use anyhow::{Context, Ok, Result};
-use bitcoin::Transaction;
+use bitcoin::{Amount, ScriptBuf, Transaction, TxOut, Txid};
 use bitcoin_coordinator::config::Config;
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::tx_builder_helper::{
-    create_instance, create_key_manager, send_transaction,
+    create_key_manager, create_txs, generate_tx, send_transaction,
 };
-use bitcoin_coordinator::types::{Id, ProcessedNews};
+use bitcoin_coordinator::types::FundingTransaction;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_transaction_monitor::monitor::Monitor;
+use bitvmx_transaction_monitor::types::{ExtraData, TransactionMonitor};
 use console::style;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::str::FromStr;
 use std::sync::mpsc::{channel, Receiver};
 use storage_backend::storage::Storage;
 use tracing::info;
 use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
+use uuid::Uuid;
 
 fn main() -> Result<()> {
     let config = Config::load()?;
@@ -59,26 +62,68 @@ fn main() -> Result<()> {
         style("Step 1").blue()
     );
 
-    let instance = create_instance(
+    let group_id = Uuid::from_u128(1);
+
+    //hardcoded transaction.
+    let funding_tx_id =
+        Txid::from_str("3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f").unwrap();
+
+    let funding_tx = FundingTransaction {
+        tx_id: funding_tx_id,
+        utxo_index: 0,
+        utxo_output: TxOut {
+            value: Amount::default(),
+            script_pubkey: ScriptBuf::default(),
+        },
+    };
+
+    let tx_1: Transaction = generate_tx(
+        &account,
+        &config.rpc,
+        config.rpc.network,
+        &config.dispatcher,
+    )?;
+    let tx_2: Transaction = generate_tx(
         &account,
         &config.rpc,
         config.rpc.network,
         &config.dispatcher,
     )?;
 
+    let txs = vec![tx_1, tx_2];
+
+    println!("{} Create Group tx: 1", style("→").cyan());
+
+    println!(
+        "{} Create transaction: {:#?} for operator: 1",
+        style("→").cyan(),
+        style(tx_1.compute_txid()).red()
+    );
+
+    println!(
+        "{} Create transaction: {:#?}  for operator: 2",
+        style("→").cyan(),
+        style(tx_2.compute_txid()).blue(),
+    );
+
+    let extra_data = ExtraData::GroupId(group_id);
+
+    let txs_to_monitor = TransactionMonitor::Transactions(
+        txs.iter().map(|tx| tx.compute_txid()).collect(),
+        extra_data,
+    );
+
     // Step 2: Send the first transaction for operator one
     println!(
         "\n{} Step 3: Sending tx_id: {}.\n",
         style("Step 3").cyan(),
-        style(instance.txs[0].tx.compute_txid()).red(),
+        style(txs[0].compute_txid()).red(),
     );
-    send_transaction(instance.txs[0].tx.clone(), &Config::load()?)?;
 
-    let mut tx_to_answer: (Id, bitcoin::Txid, Option<Transaction>) = (
-        instance.id,
-        instance.txs[0].tx.compute_txid(),
-        Some(instance.txs[1].tx.clone()),
-    );
+    send_transaction(txs[0].clone(), &Config::load()?)?;
+
+    let mut tx_to_answer: (Uuid, Txid, Option<Transaction>) =
+        (group_id, txs[0].compute_txid(), Some(txs[1].clone()));
 
     // Step 2: Make the Bitcoin Coordinator monitor the instance
     println!(
@@ -86,11 +131,10 @@ fn main() -> Result<()> {
         style("Bitcoin Coordinator").cyan()
     );
 
-    println!("{:?}", instance.map_partial_info());
     let coordinator = BitcoinCoordinator::new(monitor, store, dispatcher, account.clone());
 
     coordinator
-        .monitor(&instance.map_partial_info())
+        .monitor(txs_to_monitor)
         .context("Error monitoring instance")?;
 
     let rx = handle_contro_c();
@@ -107,40 +151,38 @@ fn main() -> Result<()> {
             .tick()
             .context("Failed tick Bitcoin Coordinator")?;
 
-        let news = coordinator.get_news()?;
+        let news_list = coordinator.get_news()?;
 
-        for (instance_id, tx_news) in news.instance_txs {
-            for tx_new in tx_news {
+        for tx_news in news_list.txs {
+            info!(
+                "{} Transaction ID {} for Instance ID {} CONFIRMED!!! \n",
+                style("Bitcoin Coordinator").green(),
+                style(tx_news.tx_id).blue(),
+                style(tx_news.instance_id).green()
+            );
+
+            let tx_id = tx_new.tx.compute_txid();
+            let tx: Option<Transaction> = tx_to_answer.2;
+            tx_to_answer.2 = None;
+
+            if tx.is_none() {
                 info!(
-                    "{} Transaction ID {} for Instance ID {} CONFIRMED!!! \n",
-                    style("Bitcoin Coordinator").green(),
-                    style(tx_new.tx.compute_txid()).blue(),
+                    "{} Transaction ID {} for Instance ID {} NO ANSWER FOUND \n",
+                    style("Info").green(),
+                    style(tx_id).blue(),
                     style(instance_id).green()
                 );
-
-                let tx_id = tx_new.tx.compute_txid();
-                let tx: Option<Transaction> = tx_to_answer.2;
-                tx_to_answer.2 = None;
-
-                if tx.is_none() {
-                    info!(
-                        "{} Transaction ID {} for Instance ID {} NO ANSWER FOUND \n",
-                        style("Info").green(),
-                        style(tx_id).blue(),
-                        style(instance_id).green()
-                    );
-                    return Ok(());
-                }
-
-                let tx: Transaction = tx.unwrap();
-                coordinator.dispatch(instance_id, &tx)?;
-
-                coordinator.acknowledge_news(ProcessedNews {
-                    txs: vec![(instance_id, vec![tx.compute_txid()])],
-                    single_txs: vec![],
-                    funds_requests: vec![],
-                })?;
+                return Ok(());
             }
+
+            let tx: Transaction = tx.unwrap();
+            coordinator.dispatch(instance_id, &tx)?;
+
+            coordinator.ack_news(ProcessedNews {
+                txs: vec![(instance_id, vec![tx.compute_txid()])],
+                single_txs: vec![],
+                funds_requests: vec![],
+            })?;
         }
 
         wait();

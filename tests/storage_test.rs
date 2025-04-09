@@ -194,7 +194,7 @@ fn speed_up_txs_test() -> Result<(), anyhow::Error> {
     bitvmx_store.add_speed_up_tx(instance_id, &speed_up_tx)?;
 
     // Retrieve the speed up transactions associated with the given instance_id and tx_id_1
-    let speed_up_tx_to_validate = bitvmx_store.get_speed_up_txs_for_child(instance_id, &tx_id_1)?;
+    let speed_up_tx_to_validate = bitvmx_store.get_speedup_txs(instance_id, &tx_id_1)?;
 
     // Assert that the retrieved transactions match the expected speed_up_instance
     assert_eq!(speed_up_tx_to_validate, vec![speed_up_tx.clone()]);
@@ -351,22 +351,22 @@ fn funding_tests() -> Result<(), anyhow::Error> {
 
     //Add instance 1 with funding tx and check if funding tx exists.
     bitvmx_store.coordinate(&instance)?;
-    let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
+    let funding_tx_to_validate = bitvmx_store.get_funding(instance_id)?;
     assert_eq!(funding_tx_to_validate.unwrap(), funding_tx);
 
     //Add new funding tx, then ask for funding tx. should return the new funding tx.
-    bitvmx_store.fund_for_speedup(instance_id, &funding_tx_2)?;
-    let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
+    bitvmx_store.add_funding(instance_id, &funding_tx_2)?;
+    let funding_tx_to_validate = bitvmx_store.get_funding(instance_id)?;
     assert_eq!(funding_tx_to_validate.unwrap(), funding_tx_2);
 
     //Remove the last funding tx and check if the first funding tx is retrieved
-    bitvmx_store.remove_funding_tx(instance_id, &tx_id_2)?;
-    let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
+    bitvmx_store.remove_funding(instance_id, &tx_id_2)?;
+    let funding_tx_to_validate = bitvmx_store.get_funding(instance_id)?;
     assert_eq!(funding_tx_to_validate.unwrap(), funding_tx);
 
     // Remove the first funding transaction and verify it's no longer present
-    bitvmx_store.remove_funding_tx(instance_id, &tx_id_1)?;
-    let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
+    bitvmx_store.remove_funding(instance_id, &tx_id_1)?;
+    let funding_tx_to_validate = bitvmx_store.get_funding(instance_id)?;
     assert_eq!(funding_tx_to_validate, None);
 
     Ok(())
