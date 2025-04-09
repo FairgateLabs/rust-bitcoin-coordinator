@@ -1,19 +1,18 @@
 use anyhow::{Context, Ok, Result};
-use bitcoin::{Amount, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::{Transaction, Txid};
 use bitcoin_coordinator::config::Config;
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
-use bitcoin_coordinator::tx_builder_helper::{
-    create_key_manager, create_txs, generate_tx, send_transaction,
-};
-use bitcoin_coordinator::types::FundingTransaction;
+use bitcoin_coordinator::tx_builder_helper::{create_key_manager, generate_tx, send_transaction};
+use bitcoin_coordinator::types::AckNews;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_transaction_monitor::monitor::Monitor;
-use bitvmx_transaction_monitor::types::{ExtraData, TransactionMonitor};
+use bitvmx_transaction_monitor::types::{
+    AckTransactionNews, ExtraData, TransactionMonitor, TransactionNews,
+};
 use console::style;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::str::FromStr;
 use std::sync::mpsc::{channel, Receiver};
 use storage_backend::storage::Storage;
 use tracing::info;
@@ -64,25 +63,13 @@ fn main() -> Result<()> {
 
     let group_id = Uuid::from_u128(1);
 
-    //hardcoded transaction.
-    let funding_tx_id =
-        Txid::from_str("3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f").unwrap();
-
-    let funding_tx = FundingTransaction {
-        tx_id: funding_tx_id,
-        utxo_index: 0,
-        utxo_output: TxOut {
-            value: Amount::default(),
-            script_pubkey: ScriptBuf::default(),
-        },
-    };
-
     let tx_1: Transaction = generate_tx(
         &account,
         &config.rpc,
         config.rpc.network,
         &config.dispatcher,
     )?;
+    let tx_1_id = tx_1.compute_txid();
     let tx_2: Transaction = generate_tx(
         &account,
         &config.rpc,
@@ -90,20 +77,22 @@ fn main() -> Result<()> {
         &config.dispatcher,
     )?;
 
-    let txs = vec![tx_1, tx_2];
+    let tx_2_id = tx_2.compute_txid();
+
+    let txs = [tx_1, tx_2];
 
     println!("{} Create Group tx: 1", style("→").cyan());
 
     println!(
         "{} Create transaction: {:#?} for operator: 1",
         style("→").cyan(),
-        style(tx_1.compute_txid()).red()
+        style(tx_1_id).red()
     );
 
     println!(
         "{} Create transaction: {:#?}  for operator: 2",
         style("→").cyan(),
-        style(tx_2.compute_txid()).blue(),
+        style(tx_2_id).blue(),
     );
 
     let extra_data = ExtraData::GroupId(group_id);
@@ -153,36 +142,57 @@ fn main() -> Result<()> {
 
         let news_list = coordinator.get_news()?;
 
-        for tx_news in news_list.txs {
-            info!(
-                "{} Transaction ID {} for Instance ID {} CONFIRMED!!! \n",
-                style("Bitcoin Coordinator").green(),
-                style(tx_news.tx_id).blue(),
-                style(tx_news.instance_id).green()
-            );
+        for news in news_list.txs {
+            match news {
+                TransactionNews::Transaction(tx_id, _, extra_data) => {
+                    let context = match extra_data {
+                        ExtraData::Context(context) => context,
+                        _ => "".to_string(),
+                    };
 
-            let tx_id = tx_new.tx.compute_txid();
-            let tx: Option<Transaction> = tx_to_answer.2;
-            tx_to_answer.2 = None;
+                    info!(
+                        "{} Transaction ID {} for Instance ID {} CONFIRMED!!! \n",
+                        style("Bitcoin Coordinator").green(),
+                        style(tx_id).blue(),
+                        style(context.clone()).green()
+                    );
 
-            if tx.is_none() {
-                info!(
-                    "{} Transaction ID {} for Instance ID {} NO ANSWER FOUND \n",
-                    style("Info").green(),
-                    style(tx_id).blue(),
-                    style(instance_id).green()
-                );
-                return Ok(());
+                    let tx: Option<Transaction> = tx_to_answer.2;
+
+                    tx_to_answer.2 = None;
+
+                    if tx.is_none() {
+                        info!(
+                            "{} Transaction ID {} for Instance ID {} NO ANSWER FOUND \n",
+                            style("Info").green(),
+                            style(tx_1_id).blue(),
+                            style(context).green()
+                        );
+                        return Ok(());
+                    }
+
+                    let tx: Transaction = tx.unwrap();
+                    coordinator.dispatch(tx, "my_context".to_string())?;
+
+                    let ack_news = AckNews::Transaction(AckTransactionNews::Transaction(tx_1_id));
+                    coordinator.ack_news(ack_news)?;
+                }
+                TransactionNews::RskPeginTransaction(tx_id, _) => {
+                    info!(
+                        "{} RSK Pegin transaction with ID: {} detected",
+                        style("Bitcoin Coordinator").green(),
+                        style(tx_id).yellow(),
+                    );
+                }
+                TransactionNews::SpendingUTXOTransaction(tx_id, utxo_txid, _, _) => {
+                    info!(
+                        "{} Insufficient funds for transaction: {} - UTXO {} was spent",
+                        style("Bitcoin Coordinator").red(),
+                        style(tx_id).red(),
+                        style(utxo_txid).yellow()
+                    );
+                }
             }
-
-            let tx: Transaction = tx.unwrap();
-            coordinator.dispatch(instance_id, &tx)?;
-
-            coordinator.ack_news(ProcessedNews {
-                txs: vec![(instance_id, vec![tx.compute_txid()])],
-                single_txs: vec![],
-                funds_requests: vec![],
-            })?;
         }
 
         wait();

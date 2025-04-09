@@ -4,7 +4,7 @@ use crate::{
     errors::BitcoinCoordinatorError,
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{
-        AcknowledgeNews, BitcoinCoordinatorType, CoordinatedTransaction, FundingTransaction, News,
+        AckNews, BitcoinCoordinatorType, CoordinatedTransaction, FundingTransaction, News,
         SpeedUpTx, TransactionState,
     },
 };
@@ -16,8 +16,7 @@ use bitvmx_transaction_monitor::{
     errors::MonitorError,
     monitor::{Monitor, MonitorApi},
     types::{
-        AcknowledgeTransactionNews, ExtraData, TransactionMonitor, TransactionNews,
-        TransactionStatus,
+        AckTransactionNews, ExtraData, TransactionMonitor, TransactionNews, TransactionStatus,
     },
 };
 use console::style;
@@ -60,7 +59,7 @@ pub trait BitcoinCoordinatorApi {
 
     fn get_news(&self) -> Result<News, BitcoinCoordinatorError>;
 
-    fn ack_news(&self, news: AcknowledgeNews) -> Result<(), BitcoinCoordinatorError>;
+    fn ack_news(&self, news: AckNews) -> Result<(), BitcoinCoordinatorError>;
 }
 
 impl BitcoinCoordinatorType {
@@ -190,24 +189,21 @@ where
         let list_news = self.monitor.get_news()?;
 
         for news in list_news {
-            match news {
-                TransactionNews::Transaction(tx_id, tx_status, extra_data) => {
-                    let child_txid = match extra_data {
-                        ExtraData::SpeedUp(tx_id) => tx_id,
-                        _ => return Ok(()),
-                    };
+            if let TransactionNews::Transaction(tx_id, tx_status, extra_data) = news {
+                let child_txid = match extra_data {
+                    ExtraData::SpeedUp(tx_id) => tx_id,
+                    _ => return Ok(()),
+                };
 
-                    info!(
-                        "Transaction Speed-up with id: {} for child {}",
-                        style(tx_id).red(),
-                        style(child_txid).red()
-                    );
+                info!(
+                    "Transaction Speed-up with id: {} for child {}",
+                    style(tx_id).red(),
+                    style(child_txid).red()
+                );
 
-                    self.process_speed_up(&tx_status, child_txid)?;
-                    let ack = AcknowledgeTransactionNews::Transaction(tx_id);
-                    self.monitor.acknowledge_news(ack)?;
-                }
-                _ => {}
+                self.process_speed_up(&tx_status, child_txid)?;
+                let ack = AckTransactionNews::Transaction(tx_id);
+                self.monitor.acknowledge_news(ack)?;
             }
         }
 
@@ -221,12 +217,9 @@ where
         tx_public_key: PublicKey,
         funding_utxo: (u32, TxOut, PublicKey),
     ) -> Result<(), BitcoinCoordinatorError> {
-        let dispatch_result = self.dispatcher.speed_up(
-            tx,
-            tx_public_key,
-            funding_txid.clone(),
-            funding_utxo.clone(),
-        );
+        let dispatch_result =
+            self.dispatcher
+                .speed_up(tx, tx_public_key, funding_txid, funding_utxo.clone());
 
         if let Err(error) = dispatch_result {
             match error {
@@ -374,15 +367,12 @@ where
     }
 
     fn monitor(&self, data: TransactionMonitor) -> Result<(), BitcoinCoordinatorError> {
-        match data.clone() {
-            TransactionMonitor::Transactions(txs, _) => {
-                if txs.is_empty() {
-                    return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(format!(
-                        "transactions array is empty"
-                    )));
-                }
+        if let TransactionMonitor::Transactions(txs, _) = data.clone() {
+            if txs.is_empty() {
+                return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(
+                    "transactions array is empty".to_string(),
+                ));
             }
-            _ => {}
         }
 
         self.monitor.monitor(data)?;
@@ -441,12 +431,10 @@ where
         Ok(News::new(txs, funds_requests))
     }
 
-    fn ack_news(&self, news: AcknowledgeNews) -> Result<(), BitcoinCoordinatorError> {
+    fn ack_news(&self, news: AckNews) -> Result<(), BitcoinCoordinatorError> {
         match news {
-            AcknowledgeNews::Transaction(news) => self.monitor.acknowledge_news(news)?,
-            AcknowledgeNews::InsufficientFunds(tx_id) => {
-                self.store.ack_insufficient_funds_news(tx_id)?
-            }
+            AckNews::Transaction(news) => self.monitor.acknowledge_news(news)?,
+            AckNews::InsufficientFunds(tx_id) => self.store.ack_insufficient_funds_news(tx_id)?,
         }
         Ok(())
     }

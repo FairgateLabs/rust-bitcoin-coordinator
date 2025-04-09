@@ -1,8 +1,7 @@
 use bitcoin::{Amount, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::types::{
-    AcknowledgeTransactionNews, BlockInfo, MonitorType, TransactionBlockchainStatus,
-    TransactionNews,
+    AckTransactionNews, BlockInfo, MonitorType, TransactionBlockchainStatus, TransactionNews,
 };
 use serde::{Deserialize, Serialize};
 use transaction_dispatcher::DispatcherType;
@@ -111,8 +110,8 @@ impl News {
     }
 }
 
-pub enum AcknowledgeNews {
-    Transaction(AcknowledgeTransactionNews),
+pub enum AckNews {
+    Transaction(AckTransactionNews),
     InsufficientFunds(Txid),
 }
 

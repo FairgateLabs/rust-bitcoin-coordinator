@@ -163,7 +163,7 @@ pub fn create_key_manager(config: &Config) -> Result<KeyManager<FileKeyStore>, K
         create_file_key_store_from_config(&config.key_storage, &config.key_manager.network)?;
 
     // TODO read from config
-    let path = PathBuf::from(format!("data/development/musig_store"));
+    let path = PathBuf::from("data/development/musig_store".to_string());
     let store = Rc::new(Storage::new_with_path(&path).unwrap());
 
     create_key_manager_from_config(&config.key_manager, key_storage, store)
