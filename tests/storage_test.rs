@@ -1,16 +1,18 @@
-use std::{path::PathBuf, rc::Rc, str::FromStr};
-
 use bitcoin::{absolute::LockTime, hashes::Hash, Amount, Transaction, Txid};
 use bitcoin_coordinator::{
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{FundingTransaction, SpeedUpTx, TransactionState},
 };
-use key_manager::tests::utils::helper::clear_output;
+use std::{path::PathBuf, rc::Rc, str::FromStr};
 use storage_backend::storage::Storage;
+use utils::{clear_output, generate_random_string};
+mod utils;
+
 #[test]
 fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
-        "test_output/test"
+        "test_output/test/{}",
+        generate_random_string()
     )))?);
 
     let store = BitcoinCoordinatorStore::new(storage)?;
@@ -78,12 +80,16 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     assert_eq!(finalized_txs[0].state, TransactionState::Finalized);
 
     clear_output();
+
     Ok(())
 }
 
 #[test]
 fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/test"))?);
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
+        "test_output/test/{}",
+        generate_random_string()
+    )))?);
     let store = BitcoinCoordinatorStore::new(storage)?;
 
     // Create a transaction
@@ -161,7 +167,10 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/test"))?);
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
+        "test_output/test/{}",
+        generate_random_string()
+    )))?);
     let store = BitcoinCoordinatorStore::new(storage)?;
 
     // Create a transaction to be used in the test
@@ -274,7 +283,10 @@ fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
     clear_output();
 
     // Create a temporary directory for testing
-    let store = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/test"))?);
+    let store = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
+        "test_output/test/{}",
+        generate_random_string()
+    )))?);
     let bitcoin_store = BitcoinCoordinatorStore::new(store)?;
 
     let funding_tx_id_1 =

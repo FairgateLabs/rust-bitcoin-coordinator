@@ -120,7 +120,7 @@ where
 
             info!(
                 "{} Dispatching transaction ID: {}",
-                style("Orchastrator").green(),
+                style("Coordinator").green(),
                 style(tx_id).blue(),
             );
 
@@ -203,7 +203,7 @@ where
 
                 self.process_speed_up(&tx_status, child_txid)?;
                 let ack = AckTransactionNews::Transaction(tx_id);
-                self.monitor.acknowledge_news(ack)?;
+                self.monitor.ack_news(ack)?;
             }
         }
 
@@ -436,7 +436,7 @@ where
 
     fn ack_news(&self, news: AckNews) -> Result<(), BitcoinCoordinatorError> {
         match news {
-            AckNews::Transaction(news) => self.monitor.acknowledge_news(news)?,
+            AckNews::Transaction(news) => self.monitor.ack_news(news)?,
             AckNews::InsufficientFunds(tx_id) => self.store.ack_insufficient_funds_news(tx_id)?,
         }
         Ok(())
