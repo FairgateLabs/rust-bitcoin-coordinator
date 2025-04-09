@@ -90,19 +90,13 @@ fn get_mocks() -> (
     MockTransactionDispatcherApi,
 ) {
     let mock_monitor = MockMonitorApi::new();
-    let path = format!("data/tests/{}", generate_random_string());
+    let path = format!("data/test");
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(&path)).unwrap());
     let store = BitcoinCoordinatorStore::new(storage).unwrap();
     let network = Network::from_str("regtest").unwrap();
     let account = Account::new(network);
     let mock_dispatcher = MockTransactionDispatcherApi::new();
     (mock_monitor, store, account, mock_dispatcher)
-}
-
-fn generate_random_string() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    (0..10).map(|_| rng.gen_range('a'..='z')).collect()
 }
 
 fn get_mock_data() -> (Id, TransactionDispatch<TransactionPartialInfo>, Transaction) {

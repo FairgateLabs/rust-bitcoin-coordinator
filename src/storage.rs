@@ -24,25 +24,28 @@ enum StoreKey {
 pub trait BitcoinCoordinatorStoreApi {
     fn save_tx(&self, tx: Transaction) -> Result<(), BitcoinCoordinatorStoreError>;
 
-    fn get_txs_by_state(
+    fn get_tx(
         &self,
         state: TransactionState,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError>;
 
-    fn update_tx_state(
+    fn update_tx(
         &self,
         tx_id: Txid,
         status: TransactionState,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     // SPEED UP TRANSACTIONS
-    fn get_speedup_txs(&self, tx_id: &Txid)
-        -> Result<Vec<SpeedUpTx>, BitcoinCoordinatorStoreError>;
+    fn save_speedup_tx(&self, speed_up_tx: &SpeedUpTx) -> Result<(), BitcoinCoordinatorStoreError>;
 
-    fn add_speed_up_tx(&self, speed_up_tx: &SpeedUpTx) -> Result<(), BitcoinCoordinatorStoreError>;
-
-    fn get_speed_up_tx(
+    fn get_last_speedup_tx(
         &self,
+        child_tx_id: &Txid,
+    ) -> Result<Option<SpeedUpTx>, BitcoinCoordinatorStoreError>;
+
+    fn get_speedup_tx(
+        &self,
+        child_tx_id: &Txid,
         tx_id: &Txid,
     ) -> Result<Option<SpeedUpTx>, BitcoinCoordinatorStoreError>;
 
@@ -142,7 +145,7 @@ impl BitcoinCoordinatorStore {
 }
 
 impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
-    fn get_txs_by_state(
+    fn get_tx(
         &self,
         state: TransactionState,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError> {
@@ -273,36 +276,17 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn get_speedup_txs(
+    fn get_speedup_tx(
         &self,
         tx_id: &Txid,
-    ) -> Result<Vec<SpeedUpTx>, BitcoinCoordinatorStoreError> {
-        let speed_up_tx_key = self.get_key(StoreKey::TransactionSpeedUpList(*tx_id));
-
-        let speed_up_txs = self
-            .store
-            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)?
-            .unwrap_or_default();
-
-        Ok(speed_up_txs)
-    }
-
-    fn get_speed_up_tx(
-        &self,
-        tx_id: &Txid,
+        child_tx_id: &Txid,
     ) -> Result<Option<SpeedUpTx>, BitcoinCoordinatorStoreError> {
-        let speed_up_tx_key = self.get_key(StoreKey::TransactionSpeedUpList(*tx_id));
+        let speed_up_tx_key = self.get_key(StoreKey::TransactionSpeedUpList(*child_tx_id));
 
         // Retrieve the list of speed up transactions from storage
         let speed_up_txs = self
             .store
-            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)
-            .map_err(|e| {
-                BitcoinCoordinatorStoreError::BitcoinCoordinatorStoreError(
-                    "Failed to retrieve funding transaction".to_string(),
-                    e,
-                )
-            })?
+            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)?
             .unwrap_or_default();
 
         // Find the specific speed up transaction that matches the given tx_id
@@ -311,12 +295,31 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(speed_up_tx)
     }
 
+    fn get_last_speedup_tx(
+        &self,
+        child_tx_id: &Txid,
+    ) -> Result<Option<SpeedUpTx>, BitcoinCoordinatorStoreError> {
+        let speed_up_tx_key = self.get_key(StoreKey::TransactionSpeedUpList(*child_tx_id));
+
+        // Retrieve the list of speed up transactions from storage
+        let speed_up_txs = self
+            .store
+            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)?
+            .unwrap_or_default();
+
+        // Get the last speed up transaction from the list
+        let speed_up_tx = speed_up_txs.into_iter().last();
+
+        Ok(speed_up_tx)
+    }
+
     // This function adds a new speed up transaction to the list of speed up transactions associated with an instance.
     // Speed up transactions are stored in a list, with the most recent transaction added to the end of the list.
     // This design ensures that if the last transaction in the list is pending, there cannot be another pending speed up transaction
     // for the same instance, except for one that is specifically related to the same child transaction.
-    fn add_speed_up_tx(&self, speed_up_tx: &SpeedUpTx) -> Result<(), BitcoinCoordinatorStoreError> {
-        let speed_up_tx_key = self.get_key(StoreKey::TransactionSpeedUpList(speed_up_tx.tx_id));
+    fn save_speedup_tx(&self, speed_up_tx: &SpeedUpTx) -> Result<(), BitcoinCoordinatorStoreError> {
+        let speed_up_tx_key =
+            self.get_key(StoreKey::TransactionSpeedUpList(speed_up_tx.child_tx_id));
 
         // Retrieve the current list of speed up transactions for the instance from storage.
         let mut speed_up_txs = self
@@ -339,7 +342,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn update_tx_state(
+    fn update_tx(
         &self,
         tx_id: Txid,
         tx_state: TransactionState,

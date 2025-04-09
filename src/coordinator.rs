@@ -108,7 +108,7 @@ where
 
     fn process_pending_txs(&self) -> Result<(), BitcoinCoordinatorError> {
         // Get pending instance transactions to be send to the blockchain
-        let pending_txs = self.store.get_txs_by_state(TransactionState::ReadyToSend)?;
+        let pending_txs = self.store.get_tx(TransactionState::ReadyToSend)?;
 
         info!(
             "transactions pending to be sent #{}",
@@ -126,7 +126,7 @@ where
 
             self.dispatcher.send(pending_tx.tx)?;
 
-            self.store.update_tx_state(tx_id, TransactionState::Sent)?;
+            self.store.update_tx(tx_id, TransactionState::Sent)?;
         }
 
         Ok(())
@@ -136,7 +136,7 @@ where
         //TODO: THIS COULD BE IMPROVED.
         // If transaction still in sent means it should be speed up, and is not confirmed.
         // otherwise it should be moved as confirmed in the previous validations for news.
-        let txs = self.store.get_txs_by_state(TransactionState::Sent)?;
+        let txs = self.store.get_tx(TransactionState::Sent)?;
 
         for tx in txs {
             info!(
@@ -154,7 +154,7 @@ where
                         // If the transaction has only one confirmation
                         // This means it has been included in a block but not yet deeply confirmed.
                         self.store
-                            .update_tx_state(tx_status.tx_id, TransactionState::Confirmed)?;
+                            .update_tx(tx_status.tx_id, TransactionState::Confirmed)?;
 
                         return Ok(());
                     }
@@ -165,7 +165,7 @@ where
                         // Transaction was mined and has sufficient confirmations to mark it as finalized.
                         // Update the transaction to completed given that transaction has more than the threshold confirmations
                         self.store
-                            .update_tx_state(tx_status.tx_id, TransactionState::Finalized)?;
+                            .update_tx(tx_status.tx_id, TransactionState::Finalized)?;
 
                         return Ok(());
                     }
@@ -244,7 +244,7 @@ where
                 funding_utxo.1,
             );
 
-            self.store.add_speed_up_tx(&speed_up_tx)?;
+            self.store.save_speedup_tx(&speed_up_tx)?;
 
             let monitor_data = TransactionMonitor::Transactions(
                 vec![speed_up_tx_id],
@@ -266,7 +266,10 @@ where
         // which means it should be treated as the new funding transaction.
         if tx_status.is_confirmed() {
             if tx_status.confirmations == 1 {
-                let speed_up_tx = self.store.get_speed_up_tx(&tx_status.tx_id)?.unwrap();
+                let speed_up_tx = self
+                    .store
+                    .get_speedup_tx(&child_txid, &tx_status.tx_id)?
+                    .unwrap();
 
                 //Confirmation in 1 means the transaction is already included in the block.
                 //The new transaction funding is gonna be this a speed-up transaction.
@@ -305,13 +308,13 @@ where
         tx_data: &CoordinatedTransaction,
     ) -> Result<(), BitcoinCoordinatorError> {
         // We get all the existing speed up transaction for tx_id. Then we figure out if we should speed it up again.
-        let speed_up_txs = self.store.get_speedup_txs(&tx_data.tx_id)?;
+        let speed_up_txs = self.store.get_last_speedup_tx(&tx_data.tx_id)?;
 
         // In case there are an existing speed up we have to check if a new speed up is needed.
         // Otherwise we always speed up the transaction
-        if !speed_up_txs.is_empty() {
+        if let Some(speed_up_tx) = speed_up_txs {
             //Last speed up transaction should be the last created.
-            let prev_fee_rate = speed_up_txs.last().unwrap().deliver_fee_rate;
+            let prev_fee_rate = speed_up_tx.deliver_fee_rate;
 
             // Check if the transaction should be speed up
             if !self.dispatcher.should_speed_up(prev_fee_rate)? {
