@@ -149,8 +149,11 @@ pub fn make_mock_output(
     Ok(client.get_transaction(&txid, Some(true))?)
 }
 
-pub fn send_transaction(tx: Transaction, config: &Config) -> Result<(), TxBuilderHelperError> {
-    let key_manager = create_key_manager(config)?;
+pub fn send_transaction(
+    tx: Transaction,
+    config: &Config,
+    key_manager: KeyManager<FileKeyStore>,
+) -> Result<(), TxBuilderHelperError> {
     let dispatcher = TransactionDispatcher::new_with_path(&config.rpc, Rc::new(key_manager))?;
 
     dispatcher.send(tx)?;
@@ -163,7 +166,7 @@ pub fn create_key_manager(config: &Config) -> Result<KeyManager<FileKeyStore>, K
         create_file_key_store_from_config(&config.key_storage, &config.key_manager.network)?;
 
     // TODO read from config
-    let path = PathBuf::from("data/development/musig_store".to_string());
+    let path = PathBuf::from("data1".to_string());
     let store = Rc::new(Storage::new_with_path(&path).unwrap());
 
     create_key_manager_from_config(&config.key_manager, key_storage, store)

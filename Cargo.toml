@@ -26,6 +26,7 @@ bitvmx-transaction-monitor = { path = "../rust-bitvmx-transaction-monitor" }
 bitvmx-key-manager = { path = "../rust-bitvmx-key-manager" }
 bitvmx-settings = { path = "../rust-bitvmx-settings" }
 bitvmx-bitcoin-rpc = { path = "../rust-bitvmx-bitcoin-rpc" }
+bitcoind = { path = "../rust-bitcoind" }
 
 [dependencies.bitcoin]
 version = "0.32.2"
