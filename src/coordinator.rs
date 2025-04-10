@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{rc::Rc, str::FromStr};
 
 use crate::{
     errors::BitcoinCoordinatorError,
@@ -15,9 +15,7 @@ use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::{
     errors::MonitorError,
     monitor::{Monitor, MonitorApi},
-    types::{
-        AckTransactionNews, ExtraData, TransactionMonitor, TransactionNews, TransactionStatus,
-    },
+    types::{AckTransactionNews, TransactionMonitor, TransactionNews, TransactionStatus},
 };
 use console::style;
 use key_manager::{key_manager::KeyManager, keystorage::database::DatabaseKeyStore};
@@ -189,19 +187,24 @@ where
         let list_news = self.monitor.get_news()?;
 
         for news in list_news {
-            if let TransactionNews::Transaction(tx_id, tx_status, extra_data) = news {
-                let child_txid = match extra_data {
-                    ExtraData::SpeedUp(tx_id) => tx_id,
-                    _ => return Ok(()),
-                };
-
+            if let TransactionNews::Transaction(tx_id, tx_status, tx_id_data) = news {
                 info!(
                     "Transaction Speed-up with id: {} for child {}",
                     style(tx_id).red(),
-                    style(child_txid).red()
+                    style(tx_id_data.clone()).red()
                 );
 
-                self.process_speed_up(&tx_status, child_txid)?;
+                let tx_child_id = match Txid::from_str(&tx_id_data) {
+                    Ok(txid) => txid,
+                    Err(e) => {
+                        return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(format!(
+                            "Failed to parse transaction ID: {}",
+                            e
+                        )))
+                    }
+                };
+
+                self.process_speed_up(&tx_status, tx_child_id)?;
                 let ack = AckTransactionNews::Transaction(tx_id);
                 self.monitor.ack_news(ack)?;
             }
@@ -248,7 +251,7 @@ where
 
             let monitor_data = TransactionMonitor::Transactions(
                 vec![speed_up_tx_id],
-                ExtraData::SpeedUp(tx.compute_txid()), // child txid
+                tx.compute_txid().to_string(), // child txid
             );
 
             self.monitor.monitor(monitor_data)?;
@@ -392,8 +395,7 @@ where
 
     fn dispatch(&self, tx: Transaction, context: String) -> Result<(), BitcoinCoordinatorError> {
         // First we monitor the transaction if does not exist.
-        let to_monitor =
-            TransactionMonitor::Transactions(vec![tx.compute_txid()], ExtraData::Context(context));
+        let to_monitor = TransactionMonitor::Transactions(vec![tx.compute_txid()], context);
         self.monitor.monitor(to_monitor)?;
 
         // Save the transaction to be dispatched.
@@ -429,9 +431,9 @@ where
     fn get_news(&self) -> Result<News, BitcoinCoordinatorError> {
         let txs = self.monitor.get_news()?;
 
-        let funds_requests = self.store.get_insufficient_funds_news()?;
+        let insufficient_funds = self.store.get_insufficient_funds_news()?;
 
-        Ok(News::new(txs, funds_requests))
+        Ok(News::new(txs, insufficient_funds))
     }
 
     fn ack_news(&self, news: AckNews) -> Result<(), BitcoinCoordinatorError> {

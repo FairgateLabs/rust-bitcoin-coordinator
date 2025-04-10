@@ -98,14 +98,14 @@ pub struct TransactionFullInfo {
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct News {
     pub txs: Vec<TransactionNews>,
-    pub funds_requests: Vec<(Txid, String)>,
+    pub insufficient_funds: Vec<(Txid, String)>,
 }
 
 impl News {
-    pub fn new(txs: Vec<TransactionNews>, funds_requests: Vec<(Txid, String)>) -> Self {
+    pub fn new(txs: Vec<TransactionNews>, insufficient_funds: Vec<(Txid, String)>) -> Self {
         Self {
             txs,
-            funds_requests,
+            insufficient_funds,
         }
     }
 }
@@ -117,3 +117,5 @@ pub enum AckNews {
 
 pub type BitcoinCoordinatorType =
     BitcoinCoordinator<MonitorType, DispatcherType, BitcoinCoordinatorStore>;
+
+pub type TransactionNewsType = TransactionNews;

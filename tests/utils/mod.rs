@@ -10,7 +10,7 @@ use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_transaction_monitor::{
     monitor::MockMonitorApi,
-    types::{ExtraData, TransactionMonitor},
+    types::{TransactionMonitor, TransactionNews},
 };
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -72,8 +72,7 @@ pub fn get_mock_data() -> (TransactionMonitor, Transaction, FundingTransaction) 
         },
     };
 
-    let monitor =
-        TransactionMonitor::Transactions(vec![tx_id], ExtraData::Context(group_id.to_string()));
+    let monitor = TransactionMonitor::Transactions(vec![tx_id], group_id.to_string());
 
     (monitor, tx, funding_tx)
 }

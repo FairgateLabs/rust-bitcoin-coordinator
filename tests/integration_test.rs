@@ -16,9 +16,7 @@ use bitcoin_coordinator::types::AckNews;
 use bitcoind::bitcoind::Bitcoind;
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_transaction_monitor::monitor::Monitor;
-use bitvmx_transaction_monitor::types::{
-    AckTransactionNews, ExtraData, TransactionMonitor, TransactionNews,
-};
+use bitvmx_transaction_monitor::types::{AckTransactionNews, TransactionMonitor, TransactionNews};
 use console::style;
 use std::sync::mpsc::{channel, Receiver};
 use transaction_dispatcher::dispatcher::TransactionDispatcher;
@@ -130,7 +128,7 @@ fn main_test() -> Result<(), anyhow::Error> {
         style(tx_2_id).blue(),
     );
 
-    let extra_data = ExtraData::Context("MY context".to_string());
+    let extra_data = "MY context".to_string();
 
     let txs_to_monitor = TransactionMonitor::Transactions(
         txs.iter().map(|tx| tx.compute_txid()).collect(),
@@ -183,18 +181,14 @@ fn main_test() -> Result<(), anyhow::Error> {
 
         for news in news_list.txs {
             match news {
-                TransactionNews::Transaction(tx_id, _, extra_data) => {
-                    println!("Extra data: {:?}", extra_data);
-                    let context = match extra_data {
-                        ExtraData::Context(context) => context,
-                        _ => "".to_string(),
-                    };
+                TransactionNews::Transaction(tx_id, _, data) => {
+                    println!("Extra data: {:?}", data);
 
                     println!(
                         "{} Transaction ID {} for Instance ID {} CONFIRMED!!! \n",
                         style("Bitcoin Coordinator").green(),
                         style(tx_id).blue(),
-                        style(context.clone()).green()
+                        style(data.clone()).green()
                     );
 
                     let tx: Option<Transaction> = tx_to_answer.2;
@@ -206,7 +200,7 @@ fn main_test() -> Result<(), anyhow::Error> {
                             "{} Transaction ID {} for Instance ID {} NO ANSWER FOUND \n",
                             style("Info").green(),
                             style(tx_1_id).blue(),
-                            style(context).green()
+                            style(data).green()
                         );
                         return Ok(());
                     }
