@@ -1,34 +1,22 @@
 use bitcoin::{Amount, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use bitvmx_transaction_monitor::types::{BlockInfo, MonitorType};
+use bitvmx_transaction_monitor::types::{
+    AckTransactionNews, BlockInfo, MonitorType, TransactionBlockchainStatus, TransactionNews,
+};
 use serde::{Deserialize, Serialize};
 use transaction_dispatcher::DispatcherType;
 
 use crate::{coordinator::BitcoinCoordinator, storage::BitcoinCoordinatorStore};
-use uuid::Uuid;
-pub type InstanceId = Uuid;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct FundingTx {
+pub struct FundingTransaction {
     pub tx_id: Txid,
     pub utxo_index: u32,
     pub utxo_output: TxOut,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub enum TransactionBlockchainStatus {
-    // Represents a transaction that has been successfully confirmed by the network but a reorganizacion move it out of the chain.
-    Orphan,
-    // Represents a transaction that has been successfully confirmed by the network
-    Confirmed,
-    // Represents when the transaction was confirmed an amount of blocks
-    Finalized,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum TransactionState {
-    // Represents a transaction that is being monitored.
-    New,
     // Represents a transaction that has been chosen by the protocol to be sent.
     ReadyToSend,
     // Represents a transaction that has been broadcast to the network and is waiting for confirmations.
@@ -44,26 +32,27 @@ pub enum TransactionState {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct TransactionInfo {
+pub struct CoordinatedTransaction {
     pub tx_id: Txid,
-    // Represents the transaction itself, which is added when the transaction is ready to be sent.
-    pub tx: Option<Transaction>,
-    // Represents the hexadecimal representation of the transaction, which is added when the transaction is seen on the blockchain and confirmed.
-    pub tx_hex: Option<String>,
+    pub tx: Transaction,
     pub deliver_block_height: Option<BlockHeight>,
     pub state: TransactionState,
 }
 
-impl TransactionInfo {
-    pub fn is_transaction_owned(&self) -> bool {
-        // This method provides a simple way to determine if this transaction belongs to the current operator.
-        // A transaction is considered owned if it has been sent by the operator.
-        self.tx.is_some() && self.deliver_block_height.is_some()
+impl CoordinatedTransaction {
+    pub fn new(tx: Transaction, state: TransactionState) -> Self {
+        Self {
+            tx_id: tx.compute_txid(),
+            tx,
+            deliver_block_height: None,
+            state,
+        }
     }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TransactionNew {
+    pub tx_id: Txid,
     pub tx: Transaction,
     pub block_info: BlockInfo,
     pub confirmations: u32,
@@ -81,20 +70,23 @@ pub struct SpeedUpTx {
     //TODO: maybe we need to add status.
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct TransactionPartialInfo {
-    pub tx_id: Txid,
-}
-
-impl From<Txid> for TransactionPartialInfo {
-    fn from(tx_id: Txid) -> Self {
-        TransactionPartialInfo { tx_id }
-    }
-}
-
-impl TransactionPartialInfo {
-    pub fn new(tx_id: Txid) -> Self {
-        Self { tx_id }
+impl SpeedUpTx {
+    pub fn new(
+        tx_id: Txid,
+        deliver_block_height: BlockHeight,
+        deliver_fee_rate: Amount,
+        child_tx_id: Txid,
+        utxo_index: u32,
+        utxo_output: TxOut,
+    ) -> Self {
+        Self {
+            tx_id,
+            deliver_block_height,
+            deliver_fee_rate,
+            child_tx_id,
+            utxo_index,
+            utxo_output,
+        }
     }
 }
 
@@ -103,62 +95,27 @@ pub struct TransactionFullInfo {
     pub tx: Transaction,
 }
 
-//TODO Change the way we store data in the storage. BitvmxInstance should be different.
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct BitvmxInstance<T> {
-    pub instance_id: InstanceId,
-    pub txs: Vec<T>,
-    // TODO: The instance could receive the txid of the funding or the transaction to be mined.
-    // If the txid is sent, it is necessary to check that this transaction is mined.
-    // On the other hand, if the transaction to be mined is sent, it is necessary to dispatch
-    // this transaction and wait for it to be mined in order to start sending speed up transactions.
-    pub funding_tx: Option<FundingTx>,
-}
-
-impl<T> BitvmxInstance<T> {
-    pub fn new(instance_id: InstanceId, txs: Vec<T>, funding_tx: Option<FundingTx>) -> Self {
-        Self {
-            instance_id,
-            txs,
-            funding_tx,
-        }
-    }
-}
-
-impl BitvmxInstance<TransactionFullInfo> {
-    pub fn map_partial_info(&self) -> BitvmxInstance<TransactionPartialInfo> {
-        let partial_info_txs = self
-            .txs
-            .iter()
-            .map(|tx_info| TransactionPartialInfo {
-                tx_id: tx_info.tx.compute_txid(),
-            })
-            .collect();
-
-        BitvmxInstance::<TransactionPartialInfo> {
-            instance_id: self.instance_id,
-            txs: partial_info_txs,
-            funding_tx: self.funding_tx.clone(),
-        }
-    }
-}
-
-/// News represents new events that need to be processed
-/// - instance_txs: New transactions found for specific instance IDs
-/// - single_txs: Transactions are detected that are monitored by the system (for now pegins)
-/// - funds_requests: Instance IDs that need additional funding
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct News {
-    pub instance_txs: Vec<(InstanceId, Vec<TransactionNew>)>,
-    pub single_txs: Vec<TransactionNew>,
-    pub funds_requests: Vec<InstanceId>,
+    pub txs: Vec<TransactionNews>,
+    pub insufficient_funds: Vec<(Txid, String)>,
 }
 
-pub struct ProcessedNews {
-    pub instance_txs: Vec<(InstanceId, Vec<Txid>)>,
-    pub single_txs: Vec<Txid>,
-    pub funds_requests: Vec<InstanceId>,
+impl News {
+    pub fn new(txs: Vec<TransactionNews>, insufficient_funds: Vec<(Txid, String)>) -> Self {
+        Self {
+            txs,
+            insufficient_funds,
+        }
+    }
+}
+
+pub enum AckNews {
+    Transaction(AckTransactionNews),
+    InsufficientFunds(Txid),
 }
 
 pub type BitcoinCoordinatorType =
     BitcoinCoordinator<MonitorType, DispatcherType, BitcoinCoordinatorStore>;
+
+pub type TransactionNewsType = TransactionNews;

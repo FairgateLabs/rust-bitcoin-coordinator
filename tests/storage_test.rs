@@ -1,386 +1,356 @@
-use std::{path::PathBuf, rc::Rc, str::FromStr};
-
-use bitcoin::{absolute::LockTime, Amount, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::{absolute::LockTime, hashes::Hash, Amount, Transaction, Txid};
 use bitcoin_coordinator::{
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
-    types::{
-        BitvmxInstance, FundingTx, SpeedUpTx, TransactionInfo, TransactionPartialInfo,
-        TransactionState,
-    },
+    types::{FundingTransaction, SpeedUpTx, TransactionState},
 };
+use std::{path::PathBuf, rc::Rc, str::FromStr};
 use storage_backend::storage::Storage;
-use uuid::Uuid;
+use utils::{clear_output, generate_random_string};
+mod utils;
 
 #[test]
-fn instances_store() -> Result<(), anyhow::Error> {
-    let tx_id = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
-        .unwrap();
+fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
+        "test_output/test/{}",
+        generate_random_string()
+    )))?);
 
-    let tx_id_2 =
-        Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
-            .unwrap();
-
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_output/test1"))?);
-
-    let bitvmx_store = BitcoinCoordinatorStore::new(storage)?;
-
-    let tx1_summary = TransactionPartialInfo { tx_id: tx_id };
-
-    let tx2_summary = TransactionPartialInfo { tx_id: tx_id_2 };
-
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id: Uuid::from_u128(1),
-        txs: vec![tx1_summary, tx2_summary],
-        funding_tx: Some(FundingTx {
-            tx_id,
-            utxo_index: 1,
-            utxo_output: TxOut {
-                value: Amount::default(),
-                script_pubkey: ScriptBuf::default(),
-            },
-        }),
-    };
-
-    //add instance
-    bitvmx_store.add_instance(&instance)?;
-
-    //get instances
-    let instances = bitvmx_store.get_instances()?;
-    assert_eq!(instances.len(), 1);
-    let instace_txs = bitvmx_store.get_instance(instances[0])?;
-    assert_eq!(instace_txs.len(), 2);
-
-    //get instance by id
-    let instance = bitvmx_store.get_instance(Uuid::from_u128(1))?;
-    assert_eq!(instance.len(), 2);
-
-    //remove instance
-    bitvmx_store.remove_instance(Uuid::from_u128(1))?;
-    let instances = bitvmx_store.get_instances()?;
-    assert_eq!(instances.len(), 0);
-
-    // get instance by id
-    let instance_txs = bitvmx_store.get_instance(Uuid::from_u128(1))?;
-    assert_eq!(instance_txs.len(), 0);
-
-    Ok(())
-}
-
-#[test]
-fn in_progress_tx_store() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
-        "test_output/in_progress_tx_store",
-    ))?);
     let store = BitcoinCoordinatorStore::new(storage)?;
 
-    let instance_id = Uuid::from_u128(1);
-    let tx_1 = Transaction {
+    // Storage is empty, so all states should return empty vectors
+    let empty_txs = store.get_tx(TransactionState::ReadyToSend)?;
+    assert_eq!(empty_txs.len(), 0);
+
+    let empty_sent_txs = store.get_tx(TransactionState::Sent)?;
+    assert_eq!(empty_sent_txs.len(), 0);
+
+    let empty_confirmed_txs = store.get_tx(TransactionState::Confirmed)?;
+    assert_eq!(empty_confirmed_txs.len(), 0);
+
+    let empty_finalized_txs = store.get_tx(TransactionState::Finalized)?;
+    assert_eq!(empty_finalized_txs.len(), 0);
+
+    let tx = Transaction {
         version: bitcoin::transaction::Version::TWO,
         lock_time: LockTime::from_time(1653195600).unwrap(),
         input: vec![],
         output: vec![],
     };
 
-    let tx_id_1 = tx_1.compute_txid();
+    let tx_id = tx.compute_txid();
 
-    let tx_2 = Transaction {
-        version: bitcoin::transaction::Version::TWO,
-        lock_time: LockTime::from_time(1653195601).unwrap(),
-        input: vec![],
-        output: vec![],
-    };
+    // Save transaction
+    store.save_tx(tx.clone())?;
 
-    let tx_id_2 = tx_2.compute_txid();
+    // Get transactions by state
+    let txs = store.get_tx(TransactionState::ReadyToSend)?;
+    assert_eq!(txs.len(), 1);
+    assert_eq!(txs[0].tx_id, tx_id);
+    assert_eq!(txs[0].state, TransactionState::ReadyToSend);
 
-    let tx_instance_summary_1 = TransactionPartialInfo { tx_id: tx_id_1 };
+    // Update transaction state
+    store.update_tx(tx_id, TransactionState::Sent)?;
 
-    let tx_instance_summary_2 = TransactionPartialInfo { tx_id: tx_id_2 };
+    // Verify state was updated
+    let sent_txs = store.get_tx(TransactionState::Sent)?;
+    assert_eq!(sent_txs.len(), 1);
+    assert_eq!(sent_txs[0].tx_id, tx_id);
+    assert_eq!(sent_txs[0].state, TransactionState::Sent);
 
-    let block_height = 2;
+    // Verify no transactions in ReadyToSend state
+    let ready_txs = store.get_tx(TransactionState::ReadyToSend)?;
+    assert_eq!(ready_txs.len(), 0);
 
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id,
-        txs: vec![tx_instance_summary_1, tx_instance_summary_2],
-        funding_tx: Some(FundingTx {
-            tx_id: tx_id_1,
-            utxo_index: 1,
-            utxo_output: TxOut {
-                value: Amount::default(),
-                script_pubkey: ScriptBuf::default(),
-            },
-        }),
-    };
+    // Update to confirmed state
+    store.update_tx(tx_id, TransactionState::Confirmed)?;
 
-    // Add instance for the first time.
-    store.add_instance(&instance)?;
+    // Verify state was updated
+    let confirmed_txs = store.get_tx(TransactionState::Confirmed)?;
+    assert_eq!(confirmed_txs.len(), 1);
+    assert_eq!(confirmed_txs[0].tx_id, tx_id);
+    assert_eq!(confirmed_txs[0].state, TransactionState::Confirmed);
 
-    // Move instances to in progress.
-    store.update_instance_tx_as_sent(instance_id, &tx_id_1, block_height)?;
-    store.update_instance_tx_as_sent(instance_id, &tx_id_2, block_height)?;
+    // Update to finalized state
+    store.update_tx(tx_id, TransactionState::Finalized)?;
 
-    //get in progress tx by id
-    let instance_txs = store.get_txs_info(TransactionState::Sent)?;
-    assert_eq!(instance_txs.len(), 1);
-    let (instance_id, txs) = &instance_txs[0];
-    assert_eq!(instance_id, &Uuid::from_u128(1));
-    assert_eq!(txs.len(), 2);
+    // Verify state was updated
+    let finalized_txs = store.get_tx(TransactionState::Finalized)?;
+    assert_eq!(finalized_txs.len(), 1);
+    assert_eq!(finalized_txs[0].tx_id, tx_id);
+    assert_eq!(finalized_txs[0].state, TransactionState::Finalized);
+
+    clear_output();
 
     Ok(())
 }
 
 #[test]
-fn speed_up_txs_test() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
-        "test_output/speed_up_txs_test",
-    ))?);
-    let bitvmx_store = BitcoinCoordinatorStore::new(storage)?;
+fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
+        "test_output/test/{}",
+        generate_random_string()
+    )))?);
+    let store = BitcoinCoordinatorStore::new(storage)?;
 
-    let instance_id = Uuid::from_u128(1);
-    // Remove the instance 1, as a mather of cleaning the database.
-    let _ = bitvmx_store.remove_instance(instance_id);
-
-    let block_height = 2;
-    let fee_rate = Amount::from_sat(1000);
-
-    let tx_1 = Transaction {
+    // Create a transaction
+    let tx = Transaction {
         version: bitcoin::transaction::Version::TWO,
         lock_time: LockTime::from_time(1653195600).unwrap(),
         input: vec![],
         output: vec![],
     };
 
-    let tx_id_1 = tx_1.compute_txid();
+    let tx_id = tx.compute_txid();
 
-    let speed_up_tx = Transaction {
+    // Save transaction
+    store.save_tx(tx.clone())?;
+
+    // Test adding multiple transactions and verifying transaction list
+
+    // Create additional transactions
+    let tx2 = Transaction {
         version: bitcoin::transaction::Version::TWO,
-        lock_time: LockTime::from_time(1653195601).unwrap(),
+        lock_time: LockTime::from_time(1653195700).unwrap(),
         input: vec![],
         output: vec![],
     };
 
-    let speed_up_tx_id = speed_up_tx.compute_txid();
+    let tx3 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195800).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
 
+    let tx2_id = tx2.compute_txid();
+    let tx3_id = tx3.compute_txid();
+
+    // Save additional transactions
+    store.save_tx(tx2.clone())?;
+    store.save_tx(tx3.clone())?;
+
+    // Get all transactions in ReadyToSend state (should be all three)
+    let ready_txs = store.get_tx(TransactionState::ReadyToSend)?;
+    assert_eq!(ready_txs.len(), 3);
+
+    // Verify all transactions are in the list
+    let tx_ids: Vec<Txid> = ready_txs.iter().map(|tx| tx.tx_id).collect();
+    assert!(tx_ids.contains(&tx_id));
+    assert!(tx_ids.contains(&tx2_id));
+    assert!(tx_ids.contains(&tx3_id));
+
+    // Update states of transactions to different states
+    store.update_tx(tx_id, TransactionState::Finalized)?;
+    store.update_tx(tx2_id, TransactionState::Sent)?;
+    store.update_tx(tx3_id, TransactionState::Confirmed)?;
+
+    // Verify each state has the correct transactions
+    let sent_txs = store.get_tx(TransactionState::Sent)?;
+    assert_eq!(sent_txs.len(), 1);
+    assert_eq!(sent_txs[0].tx_id, tx2_id);
+
+    let confirmed_txs = store.get_tx(TransactionState::Confirmed)?;
+    assert_eq!(confirmed_txs.len(), 1);
+    assert_eq!(confirmed_txs[0].tx_id, tx3_id);
+
+    let finalized_txs = store.get_tx(TransactionState::Finalized)?;
+    assert_eq!(finalized_txs.len(), 1);
+    assert_eq!(finalized_txs[0].tx_id, tx_id);
+
+    // Verify no transactions in ReadyToSend state
+    let ready_txs = store.get_tx(TransactionState::ReadyToSend)?;
+    assert_eq!(ready_txs.len(), 0);
+
+    clear_output();
+    Ok(())
+}
+
+#[test]
+fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
+        "test_output/test/{}",
+        generate_random_string()
+    )))?);
+    let store = BitcoinCoordinatorStore::new(storage)?;
+
+    // Create a transaction to be used in the test
+    let tx_to_speedup = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id = tx_to_speedup.compute_txid();
+
+    // Save the transaction first
+    store.save_tx(tx_to_speedup.clone())?;
+
+    // Initially, there should be no speed-up transactions
+    let speed_up_tx = store.get_last_speedup_tx(&tx_id)?;
+    println!("speed_up_tx: {:?}", speed_up_tx);
+    assert!(speed_up_tx.is_none());
+
+    let speed_up_tx_id =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
+    // Create and add a speed-up transaction
     let speed_up_tx = SpeedUpTx {
         tx_id: speed_up_tx_id,
-        deliver_block_height: block_height,
-        deliver_fee_rate: fee_rate,
-        child_tx_id: tx_id_1,
-        utxo_index: 1,
-        utxo_output: TxOut {
-            value: Amount::default(),
-            script_pubkey: ScriptBuf::default(),
+        deliver_block_height: 100,
+        deliver_fee_rate: Amount::from_sat(1000),
+        child_tx_id: tx_id,
+        utxo_index: 0,
+        utxo_output: bitcoin::TxOut {
+            value: Amount::ZERO,
+            script_pubkey: bitcoin::ScriptBuf::new(),
         },
     };
 
-    let tx_instance_summary_1 = TransactionPartialInfo { tx_id: tx_id_1 };
+    // Add the speed-up transaction
+    store.save_speedup_tx(&speed_up_tx)?;
 
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id,
-        txs: vec![tx_instance_summary_1],
-        funding_tx: Some(FundingTx {
-            tx_id: tx_id_1,
-            utxo_index: 1,
-            utxo_output: TxOut {
-                value: Amount::default(),
-                script_pubkey: ScriptBuf::default(),
-            },
-        }),
+    // Verify the speed-up transaction was added using get_last_speedup_tx
+    let retrieved_speed_up_tx = store.get_last_speedup_tx(&tx_id)?;
+    assert!(retrieved_speed_up_tx.is_some());
+    let retrieved = retrieved_speed_up_tx.unwrap();
+    assert_eq!(retrieved.tx_id, speed_up_tx_id);
+    assert_eq!(retrieved.deliver_fee_rate, Amount::from_sat(1000));
+
+    // Test get_speedup_tx to retrieve a specific speed-up transaction
+    let specific_speed_up = store.get_speedup_tx(&speed_up_tx_id, &tx_id)?;
+    assert!(specific_speed_up.is_some());
+    let specific = specific_speed_up.unwrap();
+    assert_eq!(specific.tx_id, speed_up_tx_id);
+    assert_eq!(specific.child_tx_id, tx_id);
+    assert_eq!(specific.deliver_fee_rate, Amount::from_sat(1000));
+
+    // Create another speed-up transaction with higher fee
+    let second_speed_up_tx_id =
+        Txid::from_str("f8b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b").unwrap();
+    let speed_up_tx2 = SpeedUpTx {
+        tx_id: second_speed_up_tx_id,
+        deliver_block_height: 110,
+        deliver_fee_rate: Amount::from_sat(1500),
+        child_tx_id: tx_id,
+        utxo_index: 1,
+        utxo_output: bitcoin::TxOut {
+            value: Amount::from_sat(5000),
+            script_pubkey: bitcoin::ScriptBuf::new(),
+        },
     };
 
-    // Add the instance
-    bitvmx_store.add_instance(&instance)?;
+    // Add the second speed-up transaction using save_speedup_tx
+    store.save_speedup_tx(&speed_up_tx2)?;
 
-    // Add the speed up transaction
-    bitvmx_store.add_speed_up_tx(instance_id, &speed_up_tx)?;
+    // Test get_last_speedup_tx which should return the latest speed-up transaction
+    let latest_speed_up = store.get_last_speedup_tx(&tx_id)?;
+    assert!(latest_speed_up.is_some());
+    let latest = latest_speed_up.unwrap();
+    assert_eq!(latest.tx_id, second_speed_up_tx_id);
+    assert_eq!(latest.deliver_fee_rate, Amount::from_sat(1500));
 
-    // Retrieve the speed up transactions associated with the given instance_id and tx_id_1
-    let speed_up_tx_to_validate = bitvmx_store.get_speed_up_txs_for_child(instance_id, &tx_id_1)?;
+    // Test get_speedup_tx with the first transaction
+    let first_specific = store.get_speedup_tx(&speed_up_tx_id, &tx_id)?;
+    assert!(first_specific.is_some());
+    assert_eq!(
+        first_specific.unwrap().deliver_fee_rate,
+        Amount::from_sat(1000)
+    );
 
-    // Assert that the retrieved transactions match the expected speed_up_instance
-    assert_eq!(speed_up_tx_to_validate, vec![speed_up_tx.clone()]);
+    // Test get_speedup_tx with the second transaction
+    let second_specific = store.get_speedup_tx(&second_speed_up_tx_id, &tx_id)?;
+    assert!(second_specific.is_some());
+    assert_eq!(
+        second_specific.unwrap().deliver_fee_rate,
+        Amount::from_sat(1500)
+    );
 
-    // Retrieve the speed up transactions associated with the given instance_id and tx_id_1
-    let speed_up_tx_to_validate = bitvmx_store.get_speed_up_tx(instance_id, &speed_up_tx.tx_id)?;
+    // Test with a non-existent transaction ID
+    let non_existent_tx_id = Txid::from_slice(&[3; 32]).unwrap();
+    let non_existent_speed_up = store.get_last_speedup_tx(&non_existent_tx_id)?;
+    assert!(non_existent_speed_up.is_none());
 
-    // Assert that the retrieved transactions match the expected speed_up_instance
-    assert_eq!(speed_up_tx_to_validate, Some(speed_up_tx));
+    // Test get_speedup_tx with non-existent IDs
+    let non_existent_specific = store.get_speedup_tx(&non_existent_tx_id, &tx_id)?;
+    assert!(non_existent_specific.is_none());
 
+    clear_output();
     Ok(())
 }
 
 #[test]
-fn update_status() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
-        "test_output/update_status",
-    ))?);
-    let bitvmx_store = BitcoinCoordinatorStore::new(storage)?;
+fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
+    clear_output();
 
-    let instance_id = Uuid::from_u128(1);
-    // Remove the instance 1, as a mather of cleaning the database.
-    let _ = bitvmx_store.remove_instance(instance_id);
+    // Create a temporary directory for testing
+    let store = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
+        "test_output/test/{}",
+        generate_random_string()
+    )))?);
+    let bitcoin_store = BitcoinCoordinatorStore::new(store)?;
 
-    let tx_1 = Transaction {
-        version: bitcoin::transaction::Version::TWO,
-        lock_time: LockTime::from_time(1653195600).unwrap(),
-        input: vec![],
-        output: vec![],
-    };
+    let funding_tx_id_1 =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2001")?;
 
-    let tx_id_1 = tx_1.compute_txid();
+    // Test that get_funding returns None for a transaction ID that hasn't been added yet
+    let initial_funding = bitcoin_store.get_funding(funding_tx_id_1)?;
+    assert!(initial_funding.is_none());
 
-    let tx_instance_summary_1 = TransactionPartialInfo { tx_id: tx_id_1 };
+    // Test add_funding
+    let tx_id_1 =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2003")?;
+    let tx_id_2 =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2004")?;
 
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id,
-        txs: vec![tx_instance_summary_1],
-        funding_tx: Some(FundingTx {
-            tx_id: tx_id_1,
-            utxo_index: 1,
-            utxo_output: TxOut {
-                value: Amount::default(),
-                script_pubkey: ScriptBuf::default(),
-            },
-        }),
-    };
+    let funding_tx_id_2 =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2002")?;
 
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::New)?;
-    assert_eq!(instance_txs.len(), 0);
-
-    bitvmx_store.add_instance(&instance)?;
-
-    let transaction_info = TransactionInfo {
-        tx_id: tx_id_1,
-        deliver_block_height: None,
-        tx: None,
-        state: TransactionState::New,
-        tx_hex: None,
-    };
-
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::New)?;
-    assert_eq!(instance_txs.len(), 1);
-    assert_eq!(instance_txs[0].1, vec![transaction_info.clone()]);
-
-    //Get instances by other status should be 0
-    let instance_in_progress = bitvmx_store.get_txs_info(TransactionState::Sent)?;
-    let instance_pending = bitvmx_store.get_txs_info(TransactionState::ReadyToSend)?;
-    let instance_completed = bitvmx_store.get_txs_info(TransactionState::Confirmed)?;
-    assert_eq!(instance_in_progress.len(), 0);
-    assert_eq!(instance_pending.len(), 0);
-    assert_eq!(instance_completed.len(), 0);
-
-    // Move transaction to in inprogress.
-    bitvmx_store.update_instance_tx_status(
-        instance.instance_id,
-        &tx_id_1,
-        TransactionState::Sent,
-    )?;
-
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::New)?;
-    assert_eq!(instance_txs.len(), 0);
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::Sent)?;
-    assert_eq!(instance_txs.len(), 1);
-
-    bitvmx_store.update_instance_tx_status(
-        instance.instance_id,
-        &tx_id_1,
-        TransactionState::ReadyToSend,
-    )?;
-
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::Sent)?;
-    assert_eq!(instance_txs.len(), 0);
-
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::ReadyToSend)?;
-    assert_eq!(instance_txs.len(), 1);
-
-    bitvmx_store.update_instance_tx_status(
-        instance.instance_id,
-        &tx_id_1,
-        TransactionState::Confirmed,
-    )?;
-
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::ReadyToSend)?;
-    assert_eq!(instance_txs.len(), 0);
-
-    let instance_txs = bitvmx_store.get_txs_info(TransactionState::Confirmed)?;
-    assert_eq!(instance_txs.len(), 1);
-
-    Ok(())
-}
-
-#[test]
-fn funding_tests() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
-        "test_output/funding_tests",
-    ))?);
-    let bitvmx_store = BitcoinCoordinatorStore::new(storage)?;
-
-    let instance_id = Uuid::from_u128(1);
-    // Remove the instance 1, as a mather of cleaning the database.
-    let _ = bitvmx_store.remove_instance(instance_id);
-
-    let tx_1 = Transaction {
-        version: bitcoin::transaction::Version::TWO,
-        lock_time: LockTime::from_time(1653195600).unwrap(),
-        input: vec![],
-        output: vec![],
-    };
-
-    let tx_id_1 = tx_1.compute_txid();
-
-    let tx_2 = Transaction {
-        version: bitcoin::transaction::Version::TWO,
-        lock_time: LockTime::from_time(1653195601).unwrap(),
-        input: vec![],
-        output: vec![],
-    };
-
-    let tx_id_2 = tx_2.compute_txid();
-
-    let tx_instance_summary_1 = TransactionPartialInfo { tx_id: tx_id_1 };
-
-    let funding_tx = FundingTx {
-        tx_id: tx_id_1,
-        utxo_index: 1,
-        utxo_output: TxOut {
-            value: Amount::default(),
-            script_pubkey: ScriptBuf::default(),
-        },
-    };
-
-    let funding_tx_2 = FundingTx {
-        tx_id: tx_id_2,
+    // Create a funding transaction
+    let funding_tx = FundingTransaction {
+        tx_id: funding_tx_id_1,
         utxo_index: 3,
-        utxo_output: TxOut {
-            value: Amount::default(),
-            script_pubkey: ScriptBuf::default(),
+        utxo_output: bitcoin::TxOut {
+            value: Amount::from_sat(10000),
+            script_pubkey: bitcoin::ScriptBuf::new(),
         },
     };
 
-    let instance = BitvmxInstance::<TransactionPartialInfo> {
-        instance_id,
-        txs: vec![tx_instance_summary_1],
-        funding_tx: Some(funding_tx.clone()),
-    };
+    let tx_ids = vec![tx_id_1, tx_id_2];
+    let context = "Test funding context".to_string();
+    bitcoin_store.add_funding(tx_ids, funding_tx.clone(), context.clone())?;
 
-    //Add instance 1 with funding tx and check if funding tx exists.
-    bitvmx_store.add_instance(&instance)?;
-    let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
-    assert_eq!(funding_tx_to_validate.unwrap(), funding_tx);
+    // Test get_funding
+    let retrieved_funding = bitcoin_store.get_funding(tx_id_1)?;
+    assert!(retrieved_funding.is_some());
+    let retrieved = retrieved_funding.unwrap();
+    assert_eq!(retrieved.tx_id, funding_tx_id_1);
+    assert_eq!(retrieved.utxo_index, 3);
+    assert_eq!(retrieved.utxo_output.value, Amount::from_sat(10000));
 
-    //Add new funding tx, then ask for funding tx. should return the new funding tx.
-    bitvmx_store.add_funding_tx(instance_id, &funding_tx_2)?;
-    let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
-    assert_eq!(funding_tx_to_validate.unwrap(), funding_tx_2);
+    // Test update_funding
+    let mut updated_funding = funding_tx.clone();
+    updated_funding.utxo_index = 1;
+    updated_funding.tx_id = funding_tx_id_2;
+    bitcoin_store.update_funding(tx_id_1, updated_funding)?;
 
-    //Remove the last funding tx and check if the first funding tx is retrieved
-    bitvmx_store.remove_funding_tx(instance_id, &tx_id_2)?;
-    let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
-    assert_eq!(funding_tx_to_validate.unwrap(), funding_tx);
+    // Verify the update
+    let updated_retrieved = bitcoin_store.get_funding(tx_id_1)?.unwrap();
+    assert_eq!(updated_retrieved.utxo_index, 1);
+    assert_eq!(updated_retrieved.tx_id, funding_tx_id_2);
 
-    // Remove the first funding transaction and verify it's no longer present
-    bitvmx_store.remove_funding_tx(instance_id, &tx_id_1)?;
-    let funding_tx_to_validate = bitvmx_store.get_funding_tx(instance_id)?;
-    assert_eq!(funding_tx_to_validate, None);
+    // Test remove_funding
+    bitcoin_store.remove_funding(funding_tx_id_1, tx_id_1)?;
 
+    // Verify the funding was removed
+    let removed_funding = bitcoin_store.get_funding(funding_tx_id_1)?;
+    assert!(removed_funding.is_none());
+
+    // Test with non-existent transaction ID
+    let non_existent_tx_id = Txid::from_slice(&[4; 32]).unwrap();
+    let non_existent_funding = bitcoin_store.get_funding(non_existent_tx_id)?;
+    assert!(non_existent_funding.is_none());
+
+    // Clean up
+    clear_output();
     Ok(())
 }

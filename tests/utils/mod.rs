@@ -1,79 +1,80 @@
 use bitcoin::Network;
 use bitcoin::{
     absolute, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction, Amount,
-    EcdsaSighashType, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness,
+    EcdsaSighashType, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
 };
+use bitcoin_coordinator::config::DispatcherConfig;
+use bitcoin_coordinator::errors::TxBuilderHelperError;
+use bitcoin_coordinator::{storage::BitcoinCoordinatorStore, types::FundingTransaction};
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
-
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
-use console::style;
-use key_manager::errors::KeyManagerError;
-use key_manager::{create_file_key_store_from_config, create_key_manager_from_config};
-use storage_backend::storage::Storage;
+use bitvmx_transaction_monitor::{
+    monitor::MockMonitorApi,
+    types::{TransactionMonitor, TransactionNews},
+};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
-use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
+use storage_backend::storage::Storage;
+use transaction_dispatcher::dispatcher::MockTransactionDispatcherApi;
+use transaction_dispatcher::signer::Account;
 use transaction_dispatcher::signer::AccountApi;
 use uuid::Uuid;
 
-use key_manager::{key_manager::KeyManager, keystorage::file::FileKeyStore};
-use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
+pub fn clear_output() {
+    let _ = std::fs::remove_dir_all("test_output");
+}
 
-use crate::config::{Config, DispatcherConfig};
-use crate::errors::TxBuilderHelperError;
-use crate::types::{BitvmxInstance, FundingTx, TransactionFullInfo};
+pub fn clear_db(path: &str) {
+    let _ = std::fs::remove_dir_all(path);
+}
 
-pub fn create_instance(
-    user: &Account,
-    rpc_config: &RpcConfig,
-    network: Network,
-    dispatcher: &DispatcherConfig,
-) -> Result<BitvmxInstance<TransactionFullInfo>, TxBuilderHelperError> {
-    let instance_id = Uuid::from_u128(1);
+pub fn generate_random_string() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    (0..10).map(|_| rng.gen_range('a'..='z')).collect()
+}
 
-    //hardcoded transaction.
-    let funding_tx_id =
-        Txid::from_str("3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f").unwrap();
+pub fn get_mocks() -> (
+    MockMonitorApi,
+    BitcoinCoordinatorStore,
+    Account,
+    MockTransactionDispatcherApi,
+) {
+    let mock_monitor = MockMonitorApi::new();
+    let path = format!("test_output/test/{}", generate_random_string());
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(&path)).unwrap());
+    let store = BitcoinCoordinatorStore::new(storage).unwrap();
+    let network = Network::from_str("regtest").unwrap();
+    let account = Account::new(network);
+    let mock_dispatcher = MockTransactionDispatcherApi::new();
+    (mock_monitor, store, account, mock_dispatcher)
+}
 
-    let funding_tx = Some(FundingTx {
-        tx_id: funding_tx_id,
-        utxo_index: 0,
+pub fn get_mock_data() -> (TransactionMonitor, Transaction, FundingTransaction) {
+    let tx = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id = tx.compute_txid();
+
+    let group_id = Uuid::from_u128(1);
+
+    let funding_tx = FundingTransaction {
+        tx_id: tx.compute_txid(),
+        utxo_index: 1,
         utxo_output: TxOut {
             value: Amount::default(),
             script_pubkey: ScriptBuf::default(),
         },
-    });
-
-    let tx_1: Transaction = generate_tx(user, rpc_config, network, dispatcher)?;
-    let tx_2: Transaction = generate_tx(user, rpc_config, network, dispatcher)?;
-
-    let txs = vec![
-        TransactionFullInfo { tx: tx_1.clone() },
-        TransactionFullInfo { tx: tx_2.clone() },
-    ];
-
-    println!("{} Create Instance id: 1", style("→").cyan());
-
-    println!(
-        "{} Create transaction: {:#?} for operator: 1",
-        style("→").cyan(),
-        style(tx_1.compute_txid()).red()
-    );
-
-    println!(
-        "{} Create transaction: {:#?}  for operator: 2",
-        style("→").cyan(),
-        style(tx_2.compute_txid()).blue(),
-    );
-
-    let instance = BitvmxInstance {
-        instance_id,
-        txs,
-        funding_tx,
     };
 
-    Ok(instance)
+    let monitor = TransactionMonitor::Transactions(vec![tx_id], group_id.to_string());
+
+    (monitor, tx, funding_tx)
 }
 
 pub fn generate_tx(
@@ -151,26 +152,6 @@ pub fn make_mock_output(
 
     // get transaction details
     Ok(client.get_transaction(&txid, Some(true))?)
-}
-
-pub fn send_transaction(tx: Transaction, config: &Config) -> Result<(), TxBuilderHelperError> {
-    let key_manager = create_key_manager(config)?;
-    let dispatcher = TransactionDispatcher::new_with_path(&config.rpc, Rc::new(key_manager))?;
-
-    dispatcher.send(tx)?;
-
-    Ok(())
-}
-
-pub fn create_key_manager(config: &Config) -> Result<KeyManager<FileKeyStore>, KeyManagerError> {
-    let key_storage =
-        create_file_key_store_from_config(&config.key_storage, &config.key_manager.network)?;
-
-    // TODO read from config
-    let path = PathBuf::from(format!("data/development/musig_store"));
-    let store = Rc::new(Storage::new_with_path(&path).unwrap());
-    
-    create_key_manager_from_config(&config.key_manager, key_storage, store)
 }
 
 /// Builds a transaction with a single input and multiple outputs.
