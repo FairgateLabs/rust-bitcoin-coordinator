@@ -37,5 +37,6 @@ features = ["serde"]
 version = "0.8.5"
 features = ["std", "std_rng"]
 
+
 [dev-dependencies]
 bitcoind = { path = "../rust-bitcoind" }
