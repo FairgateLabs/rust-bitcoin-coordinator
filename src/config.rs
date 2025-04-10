@@ -13,7 +13,7 @@ static CONFIG_PATH: &str = "config";
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)] // enforce strict field compliance
 pub struct Config {
-    pub database: DatabaseConfig,
+    pub storage: StorageConfig,
     pub rpc: RpcConfig,
     pub monitor: MonitorConfig,
     pub dispatcher: DispatcherConfig,
@@ -22,9 +22,10 @@ pub struct Config {
     pub log_level: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct DatabaseConfig {
-    pub path: String,
+#[derive(Debug, Deserialize, Clone)]
+pub struct StorageConfig {
+    pub password: String,
+    pub db: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

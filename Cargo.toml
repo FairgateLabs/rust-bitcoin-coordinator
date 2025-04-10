@@ -16,17 +16,14 @@ tracing-subscriber = "0.3.18"
 ctrlc = "3.4"
 hex = "0.4.3"
 mockall = "0.13.0"
-
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
 
-# BitVMX dependencies
 rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
 bitvmx-transaction-dispatcher = { path = "../rust-bitvmx-transaction-dispatcher" }
 bitvmx-transaction-monitor = { path = "../rust-bitvmx-transaction-monitor" }
 bitvmx-key-manager = { path = "../rust-bitvmx-key-manager" }
 bitvmx-settings = { path = "../rust-bitvmx-settings" }
 bitvmx-bitcoin-rpc = { path = "../rust-bitvmx-bitcoin-rpc" }
-bitcoind = { path = "../rust-bitcoind" }
 
 [dependencies.bitcoin]
 version = "0.32.2"
@@ -39,3 +36,6 @@ features = ["serde"]
 [dependencies.rand]
 version = "0.8.5"
 features = ["std", "std_rng"]
+
+[dev-dependencies]
+bitcoind = { path = "../rust-bitcoind" }

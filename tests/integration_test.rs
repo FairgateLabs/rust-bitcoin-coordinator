@@ -1,9 +1,17 @@
+use bitcoin::{Transaction, Txid};
+use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
+use key_manager::{
+    create_database_key_store_from_config, create_file_key_store_from_config,
+    create_key_manager_from_config,
+};
+use std::{path::PathBuf, rc::Rc};
+use storage_backend::storage::Storage;
+use utils::{clear_db, generate_tx};
+mod utils;
 use anyhow::{Context, Ok, Result};
-use bitcoin::{Network, Transaction, Txid};
+use bitcoin::Network;
 use bitcoin_coordinator::config::Config;
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
-use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
-use bitcoin_coordinator::tx_builder_helper::{create_key_manager, generate_tx};
 use bitcoin_coordinator::types::AckNews;
 use bitcoind::bitcoind::Bitcoind;
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
@@ -12,16 +20,15 @@ use bitvmx_transaction_monitor::types::{
     AckTransactionNews, ExtraData, TransactionMonitor, TransactionNews,
 };
 use console::style;
-use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::mpsc::{channel, Receiver};
-use storage_backend::storage::Storage;
-use tracing::info;
+use transaction_dispatcher::dispatcher::TransactionDispatcher;
 use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
-use transaction_dispatcher::{dispatcher::TransactionDispatcher, signer::Account};
+use transaction_dispatcher::signer::Account;
 use uuid::Uuid;
 
-fn main() -> Result<()> {
+#[test]
+#[ignore]
+fn main_test() -> Result<(), anyhow::Error> {
     let config = Config::load()?;
 
     let log_level = match config.log_level {
@@ -31,19 +38,22 @@ fn main() -> Result<()> {
 
     tracing_subscriber::fmt().with_max_level(log_level).init();
 
-    info!(
+    println!(
         "\n{} I'm here to showcase the interaction between the different BitVMX modules.\n",
         style("Hi!").cyan()
     );
 
     let config = Config::load()?;
 
+    clear_db(&config.storage.db);
+    clear_db(&config.key_storage.path);
+
     let bitcoind = Bitcoind::new(
         "bitcoin-regtest",
         "ruimarinho/bitcoin-core",
         config.rpc.clone(),
     );
-    info!("Starting bitcoind");
+    println!("Starting bitcoind");
     bitcoind.start()?;
 
     let bitcoin_client = BitcoinClient::new_from_config(&config.rpc)?;
@@ -51,24 +61,34 @@ fn main() -> Result<()> {
         .init_wallet(Network::Regtest, "test_wallet")
         .unwrap();
 
-    info!("Mine 101 blocks to address {:?}", wallet);
+    println!("Mine 101 blocks to address {:?}", wallet);
     bitcoin_client.mine_blocks_to_address(202, &wallet).unwrap();
 
     let account = Account::new(config.rpc.network);
-    let key_manager = create_key_manager(&config)?;
+    let store = Rc::new(Storage::new_with_path(&PathBuf::from(&config.storage.db))?);
+
+    println!("Storage Created");
+    // let key_storage =
+    //     create_file_key_store_from_config(&config.key_storage, &config.key_manager.network)?;
+    // let key_manager =
+    //     create_key_manager_from_config(&config.key_manager, key_storage, storage.clone())?;
+
+    let keystore =
+        create_database_key_store_from_config(&config.key_storage, &config.key_manager.network)?;
+
+    let key_manager = create_key_manager_from_config(&config.key_manager, keystore, store.clone())?;
+
     let dispatcher = TransactionDispatcher::new(bitcoin_client, Rc::new(key_manager));
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
-        &config.database.path,
-    ))?);
+
     let monitor = Monitor::new_with_paths(
         &config.rpc,
-        storage.clone(),
+        store.clone(),
         config.monitor.checkpoint_height,
         config.monitor.confirmation_threshold,
     )?;
 
     // This is the storage for the protocol, for this porpouse will be a different storage
-    let store = BitcoinCoordinatorStore::new(storage.clone())?;
+    let store = BitcoinCoordinatorStore::new(store.clone())?;
 
     // Step 1: Create an instance with 2 transactions for different operators
     println!(
@@ -151,15 +171,13 @@ fn main() -> Result<()> {
         }
 
         if rx.try_recv().is_ok() {
-            info!("Stopping Bitvmx Runner");
+            println!("Stopping Bitvmx Runner");
             break;
         }
 
-        info!("New tick for for Bitcoin Coordinator");
+        println!("New tick for for Bitcoin Coordinator");
 
-        coordinator
-            .tick()
-            .context("Failed tick Bitcoin Coordinator")?;
+        coordinator.tick()?;
 
         let news_list = coordinator.get_news()?;
 
@@ -172,7 +190,7 @@ fn main() -> Result<()> {
                         _ => "".to_string(),
                     };
 
-                    info!(
+                    println!(
                         "{} Transaction ID {} for Instance ID {} CONFIRMED!!! \n",
                         style("Bitcoin Coordinator").green(),
                         style(tx_id).blue(),
@@ -184,7 +202,7 @@ fn main() -> Result<()> {
                     tx_to_answer.2 = None;
 
                     if tx.is_none() {
-                        info!(
+                        println!(
                             "{} Transaction ID {} for Instance ID {} NO ANSWER FOUND \n",
                             style("Info").green(),
                             style(tx_1_id).blue(),
@@ -200,14 +218,14 @@ fn main() -> Result<()> {
                     coordinator.ack_news(ack_news)?;
                 }
                 TransactionNews::RskPeginTransaction(tx_id, _) => {
-                    info!(
+                    println!(
                         "{} RSK Pegin transaction with ID: {} detected",
                         style("Bitcoin Coordinator").green(),
                         style(tx_id).yellow(),
                     );
                 }
                 TransactionNews::SpendingUTXOTransaction(tx_id, utxo_txid, _, _) => {
-                    info!(
+                    println!(
                         "{} Insufficient funds for transaction: {} - UTXO {} was spent",
                         style("Bitcoin Coordinator").red(),
                         style(tx_id).red(),

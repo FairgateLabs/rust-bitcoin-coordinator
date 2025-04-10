@@ -1,5 +1,6 @@
-database:
-    path: data
+storage:
+    password: secret_password
+    db: /tmp/storage.db
 dispatcher:
     cpfp_amount: 546
     cpfp_fee: 141
