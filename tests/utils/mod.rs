@@ -1,8 +1,8 @@
-use bitcoin::Network;
 use bitcoin::{
     absolute, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction, Amount,
     EcdsaSighashType, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
 };
+use bitcoin::{Network, Txid};
 use bitcoin_coordinator::config::DispatcherConfig;
 use bitcoin_coordinator::errors::TxBuilderHelperError;
 use bitcoin_coordinator::{storage::BitcoinCoordinatorStore, types::FundingTransaction};
@@ -51,7 +51,25 @@ pub fn get_mocks() -> (
     (mock_monitor, store, account, mock_dispatcher)
 }
 
-pub fn get_mock_data() -> (TransactionMonitor, Transaction, FundingTransaction) {
+pub fn get_mock_data() -> (
+    TransactionMonitor,
+    Transaction,
+    FundingTransaction,
+    Txid,
+    String,
+) {
+    let new_funding_tx_id =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
+
+    let funding_tx = FundingTransaction {
+        tx_id: new_funding_tx_id,
+        utxo_index: 1,
+        utxo_output: TxOut {
+            value: Amount::default(),
+            script_pubkey: ScriptBuf::default(),
+        },
+    };
+
     let tx = Transaction {
         version: transaction::Version::TWO,
         lock_time: absolute::LockTime::ZERO,
@@ -60,21 +78,10 @@ pub fn get_mock_data() -> (TransactionMonitor, Transaction, FundingTransaction) 
     };
 
     let tx_id = tx.compute_txid();
+    let context_data = "My context monitor".to_string();
+    let to_monitor = TransactionMonitor::Transactions(vec![tx_id], context_data.clone());
 
-    let group_id = Uuid::from_u128(1);
-
-    let funding_tx = FundingTransaction {
-        tx_id: tx.compute_txid(),
-        utxo_index: 1,
-        utxo_output: TxOut {
-            value: Amount::default(),
-            script_pubkey: ScriptBuf::default(),
-        },
-    };
-
-    let monitor = TransactionMonitor::Transactions(vec![tx_id], group_id.to_string());
-
-    (monitor, tx, funding_tx)
+    (to_monitor, tx, funding_tx, tx_id, context_data)
 }
 
 pub fn generate_tx(

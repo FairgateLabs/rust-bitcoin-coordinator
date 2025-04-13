@@ -34,6 +34,9 @@ pub enum BitcoinCoordinatorStoreError {
 
     #[error("Funding transaction not found")]
     FundingTransactionNotFound,
+
+    #[error("Funding transaction already exists")]
+    FundingTransactionAlreadyExists,
 }
 
 #[derive(Error, Debug)]

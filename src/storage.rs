@@ -1,6 +1,6 @@
 use crate::{
     errors::BitcoinCoordinatorStoreError,
-    types::{CoordinatedTransaction, FundingTransaction, SpeedUpTx, TransactionState},
+    types::{CoordinatedTransaction, FundingTransaction, SpeedUpTx, TransactionDispatchState},
 };
 
 use bitcoin::{Transaction, Txid};
@@ -24,15 +24,21 @@ enum StoreKey {
 pub trait BitcoinCoordinatorStoreApi {
     fn save_tx(&self, tx: Transaction) -> Result<(), BitcoinCoordinatorStoreError>;
 
-    fn get_tx(
+    fn get_txs(
         &self,
-        state: TransactionState,
+        state: TransactionDispatchState,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError>;
 
     fn update_tx(
         &self,
         tx_id: Txid,
-        status: TransactionState,
+        status: TransactionDispatchState,
+    ) -> Result<(), BitcoinCoordinatorStoreError>;
+
+    fn update_tx_to_dispatched(
+        &self,
+        tx_id: Txid,
+        deliver_block_height: u32,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     // SPEED UP TRANSACTIONS
@@ -76,9 +82,7 @@ pub trait BitcoinCoordinatorStoreApi {
         funding_tx: FundingTransaction,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
-    // FUNDING TRANSACTIONS REQUESTS
-    // Funding requests are created when an instance run out off funds
-    // and requires additional funding to speed up transactions
+    // FUNDING TRANSACTIONS NEWS
     fn add_insufficient_funds_news(&self, tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
     fn ack_insufficient_funds_news(&self, tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
     fn get_insufficient_funds_news(
@@ -146,9 +150,9 @@ impl BitcoinCoordinatorStore {
 }
 
 impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
-    fn get_tx(
+    fn get_txs(
         &self,
-        state: TransactionState,
+        state: TransactionDispatchState,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError> {
         let txs = self.get_txs()?;
         let mut txs_filter = Vec::new();
@@ -166,7 +170,8 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
     fn save_tx(&self, tx: Transaction) -> Result<(), BitcoinCoordinatorStoreError> {
         let key = self.get_key(StoreKey::Transaction(tx.compute_txid()));
 
-        let tx_info = CoordinatedTransaction::new(tx.clone(), TransactionState::ReadyToSend);
+        let tx_info =
+            CoordinatedTransaction::new(tx.clone(), TransactionDispatchState::PendingDispatch);
 
         self.store.set(&key, &tx_info, None)?;
 
@@ -277,6 +282,13 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             .get::<&str, Vec<FundingTransaction>>(&fundings_txs_key)?
             .unwrap_or_default();
 
+        // Check if the funding transaction already exists to avoid duplicates
+        if funding_txs.iter().any(|tx| tx.tx_id == funding_tx.tx_id) {
+            return Err(BitcoinCoordinatorStoreError::FundingTransactionAlreadyExists);
+        }
+
+        // Remove the existing funding transaction before adding the updated one
+        funding_txs.retain(|tx| tx.tx_id != funding_tx.tx_id);
         funding_txs.push(funding_tx);
 
         self.store.set(&fundings_txs_key, &funding_txs, None)?;
@@ -350,16 +362,35 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn update_tx(
+    fn update_tx_to_dispatched(
         &self,
         tx_id: Txid,
-        tx_state: TransactionState,
+        deliver_block_height: u32,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         //TODO: Implement transaction status transition validation to ensure the correct sequence:
         // Pending -> InProgress -> Completed, and in reorganization scenarios, do the reverse order.
 
         let mut tx = self.get_tx(tx_id)?;
-        tx.state = tx_state;
+        tx.state = TransactionDispatchState::BroadcastPendingConfirmation;
+
+        tx.deliver_block_height = Some(deliver_block_height);
+
+        let key = self.get_key(StoreKey::Transaction(tx_id));
+        self.store.set(key, tx, None)?;
+
+        Ok(())
+    }
+
+    fn update_tx(
+        &self,
+        tx_id: Txid,
+        tx_state: TransactionDispatchState,
+    ) -> Result<(), BitcoinCoordinatorStoreError> {
+        //TODO: Implement transaction status transition validation to ensure the correct sequence:
+        // Pending -> InProgress -> Completed, and in reorganization scenarios, do the reverse order.
+
+        let mut tx = self.get_tx(tx_id)?;
+        tx.state = tx_state.clone();
 
         let key = self.get_key(StoreKey::Transaction(tx_id));
         self.store.set(key, tx, None)?;

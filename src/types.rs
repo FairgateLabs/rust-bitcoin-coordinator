@@ -16,19 +16,13 @@ pub struct FundingTransaction {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub enum TransactionState {
-    // Represents a transaction that has been chosen by the protocol to be sent.
-    ReadyToSend,
-    // Represents a transaction that has been broadcast to the network and is waiting for confirmations.
-    Sent,
-    // Represents a transaction that has been successfully confirmed by the network but a reorganizacion move it out of the chain.
-    Orphan,
-    // Represents a transaction that has been successfully confirmed by the network
-    Confirmed,
-    // Represents when the transaction was confirmed an amount of blocks
+pub enum TransactionDispatchState {
+    // The transaction is ready and queued to be sent.
+    PendingDispatch,
+    // The transaction has been broadcast to the network and is waiting for confirmations.
+    BroadcastPendingConfirmation,
+    // The transaction has been successfully confirmed by the network.
     Finalized,
-    // Represents a transaction that has been acknowledged or recognized by the system.
-    Acknowledged,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -36,11 +30,11 @@ pub struct CoordinatedTransaction {
     pub tx_id: Txid,
     pub tx: Transaction,
     pub deliver_block_height: Option<BlockHeight>,
-    pub state: TransactionState,
+    pub state: TransactionDispatchState,
 }
 
 impl CoordinatedTransaction {
-    pub fn new(tx: Transaction, state: TransactionState) -> Self {
+    pub fn new(tx: Transaction, state: TransactionDispatchState) -> Self {
         Self {
             tx_id: tx.compute_txid(),
             tx,

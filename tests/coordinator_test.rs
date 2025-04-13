@@ -57,16 +57,16 @@ fn tick_method_is_not_ready() -> Result<(), anyhow::Error> {
 fn monitor_instance_test() -> Result<(), anyhow::Error> {
     let (mut mock_monitor, store, account, mock_dispatcher) = get_mocks();
 
-    let (monitor, _, _) = get_mock_data();
+    let (tx_to_monitor, _, _, _, _) = get_mock_data();
 
     mock_monitor
         .expect_monitor()
-        .with(eq(monitor.clone()))
+        .with(eq(tx_to_monitor.clone()))
         .returning(|_| Ok(()));
 
     let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
 
-    coordinator.monitor(monitor)?;
+    coordinator.monitor(tx_to_monitor)?;
 
     clear_output();
 

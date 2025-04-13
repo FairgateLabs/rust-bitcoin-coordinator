@@ -5,7 +5,7 @@ use crate::{
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{
         AckNews, BitcoinCoordinatorType, CoordinatedTransaction, FundingTransaction, News,
-        SpeedUpTx, TransactionState,
+        SpeedUpTx, TransactionDispatchState,
     },
 };
 
@@ -95,6 +95,12 @@ where
     D: TransactionDispatcherApi,
     B: BitcoinCoordinatorStoreApi,
 {
+    const SPEED_UP_CHILD_TXID_PREFIX: &str = "speed_up_child_txid:";
+
+    // Stop monitoring a transaction after 100 confirmations.
+    // In case of a reorganization bigger than 100 blocks, we have to do a rework in the coordinator.
+    const MAX_MONITORING_CONFIRMATIONS: u32 = 100;
+
     pub fn new(monitor: M, store: B, dispatcher: D, account: Account) -> Self {
         Self {
             monitor,
@@ -105,11 +111,13 @@ where
     }
 
     fn process_pending_txs(&self) -> Result<(), BitcoinCoordinatorError> {
-        // Get pending instance transactions to be send to the blockchain
-        let pending_txs = self.store.get_tx(TransactionState::ReadyToSend)?;
+        // Get pending transactions to be send to the blockchain
+        let pending_txs = self
+            .store
+            .get_txs(TransactionDispatchState::PendingDispatch)?;
 
         info!(
-            "transactions pending to be sent #{}",
+            "transactions pending to be dispatch #{}",
             style(pending_txs.len()).yellow()
         );
 
@@ -124,7 +132,9 @@ where
 
             self.dispatcher.send(pending_tx.tx)?;
 
-            self.store.update_tx(tx_id, TransactionState::Sent)?;
+            let deliver_block_height = self.monitor.get_monitor_height()?;
+            self.store
+                .update_tx_to_dispatched(tx_id, deliver_block_height)?;
         }
 
         Ok(())
@@ -134,7 +144,9 @@ where
         //TODO: THIS COULD BE IMPROVED.
         // If transaction still in sent means it should be speed up, and is not confirmed.
         // otherwise it should be moved as confirmed in the previous validations for news.
-        let txs = self.store.get_tx(TransactionState::Sent)?;
+        let txs = self
+            .store
+            .get_txs(TransactionDispatchState::BroadcastPendingConfirmation)?;
 
         for tx in txs {
             info!(
@@ -148,33 +160,23 @@ where
 
             match tx_status {
                 Ok(tx_status) => {
-                    if tx_status.confirmations == 1 {
-                        // If the transaction has only one confirmation
-                        // This means it has been included in a block but not yet deeply confirmed.
+                    if tx_status.confirmations >= Self::MAX_MONITORING_CONFIRMATIONS {
                         self.store
-                            .update_tx(tx_status.tx_id, TransactionState::Confirmed)?;
-
-                        return Ok(());
-                    }
-
-                    let confirmation_threshold = self.monitor.get_confirmation_threshold();
-
-                    if tx_status.is_finalized(confirmation_threshold) {
-                        // Transaction was mined and has sufficient confirmations to mark it as finalized.
-                        // Update the transaction to completed given that transaction has more than the threshold confirmations
-                        self.store
-                            .update_tx(tx_status.tx_id, TransactionState::Finalized)?;
+                            .update_tx(tx_status.tx_id, TransactionDispatchState::Finalized)?;
 
                         return Ok(());
                     }
 
                     if tx_status.is_orphan() {
+                        // THIS IS A BORDER CASE.
+                        // If the transaction is orphan, it means it has been removed from the blockchain.
+                        // We should speed up the transaction.
                         self.process_unseen_transaction(&tx)?;
                         return Ok(());
                     }
                 }
                 Err(MonitorError::TransactionNotFound(_)) => {
-                    self.process_unseen_transaction(&tx)?
+                    self.process_unseen_transaction(&tx)?;
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -187,22 +189,36 @@ where
         let list_news = self.monitor.get_news()?;
 
         for news in list_news {
-            if let TransactionNews::Transaction(tx_id, tx_status, tx_id_data) = news {
-                info!(
-                    "Transaction Speed-up with id: {} for child {}",
-                    style(tx_id).red(),
-                    style(tx_id_data.clone()).red()
-                );
+            if let TransactionNews::Transaction(tx_id, tx_status, context_data) = news {
+                // Check if context_data contains the string "speed_up"
+                if !context_data.starts_with(Self::SPEED_UP_CHILD_TXID_PREFIX) {
+                    // Skip processing this news as it's a speed-up transaction
 
-                let tx_child_id = match Txid::from_str(&tx_id_data) {
+                    // TODO:
+                    // Since there could be reorganizations larger than 6 blocks, we set 100 blocks,
+                    // we could check if a transaction was at some point meant to be sent,
+                    // and it became orphaned, in that case we should try to speed it up and move the state to BroadcastPendingConfirmation.
+                    // This is because at some point we move it to finalized status, which means we stop monitoring it.
+                    continue;
+                }
+
+                // Remove the "speed_up_txid:" prefix from context_data
+                let tx_id_child = context_data.replace(Self::SPEED_UP_CHILD_TXID_PREFIX, "");
+                let tx_child_id = match Txid::from_str(&tx_id_child) {
                     Ok(txid) => txid,
                     Err(e) => {
                         return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(format!(
-                            "Failed to parse transaction ID: {}",
+                            "Failed to parse speed up transaction child id: {}",
                             e
                         )))
                     }
                 };
+
+                info!(
+                    "Transaction Speed-up with id: {} for child {}",
+                    style(tx_id).red(),
+                    style(tx_child_id).red()
+                );
 
                 self.process_speed_up(&tx_status, tx_child_id)?;
                 let ack = AckTransactionNews::Transaction(tx_id);
@@ -249,10 +265,13 @@ where
 
             self.store.save_speedup_tx(&speed_up_tx)?;
 
-            let monitor_data = TransactionMonitor::Transactions(
-                vec![speed_up_tx_id],
-                tx.compute_txid().to_string(), // child txid
+            let context_data = format!(
+                "{:?}{}",
+                Self::SPEED_UP_CHILD_TXID_PREFIX,
+                tx.compute_txid()
             );
+
+            let monitor_data = TransactionMonitor::Transactions(vec![speed_up_tx_id], context_data);
 
             self.monitor.monitor(monitor_data)?;
         }
@@ -282,9 +301,6 @@ where
                     utxo_output: speed_up_tx.utxo_output.clone(),
                 };
 
-                //TODO: There is something missing here. We are moving a speed-up transaction to a funding transaction.
-                // The inverse should also be supported.
-
                 self.store.update_funding(child_txid, funding_info)?;
             }
 
@@ -296,7 +312,7 @@ where
 
         if !tx_status.is_confirmed() {
             // If a speed-up transaction has not been seen (it has not been mined), no action is required.
-            // The responsibility for creating a new speed-up transaction lies with the instance transaction that is delivered.
+            // The responsibility for creating a new speed-up transaction lies with the transaction that is delivered.
         }
 
         // In the event of a reorganization, we would need to do the opposite.
@@ -310,6 +326,20 @@ where
         &self,
         tx_data: &CoordinatedTransaction,
     ) -> Result<(), BitcoinCoordinatorError> {
+        const SPEED_UP_THRESHOLD_BLOCKS: u32 = 1;
+
+        // We do not speed up the transaction if it has not been delivered yet.
+        if tx_data.deliver_block_height.is_none() {
+            return Ok(());
+        }
+
+        let current_block_height = self.monitor.get_monitor_height()?;
+
+        if current_block_height - tx_data.deliver_block_height.unwrap() < SPEED_UP_THRESHOLD_BLOCKS
+        {
+            return Ok(());
+        }
+
         // We get all the existing speed up transaction for tx_id. Then we figure out if we should speed it up again.
         let speed_up_txs = self.store.get_last_speedup_tx(&tx_data.tx_id)?;
 
@@ -395,6 +425,7 @@ where
 
     fn dispatch(&self, tx: Transaction, context: String) -> Result<(), BitcoinCoordinatorError> {
         // First we monitor the transaction if does not exist.
+
         let to_monitor = TransactionMonitor::Transactions(vec![tx.compute_txid()], context);
         self.monitor.monitor(to_monitor)?;
 
@@ -402,7 +433,7 @@ where
         self.store.save_tx(tx.clone())?;
 
         info!(
-            "{} Transaction ID {} ready to be sent.",
+            "{} Transaction ID {} ready to be dispatch.",
             style("Coordinator").green(),
             style(tx.compute_txid()).yellow()
         );
@@ -430,6 +461,18 @@ where
 
     fn get_news(&self) -> Result<News, BitcoinCoordinatorError> {
         let txs = self.monitor.get_news()?;
+
+        //TODO: Remove transactions new that are speed up transactions.
+        let txs = txs
+            .into_iter()
+            .filter(|tx| {
+                if let TransactionNews::Transaction(_, _, context_data) = tx {
+                    !context_data.starts_with(Self::SPEED_UP_CHILD_TXID_PREFIX)
+                } else {
+                    true
+                }
+            })
+            .collect();
 
         let insufficient_funds = self.store.get_insufficient_funds_news()?;
 
