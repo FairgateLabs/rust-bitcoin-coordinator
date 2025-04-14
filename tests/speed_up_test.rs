@@ -11,13 +11,25 @@ use utils::{clear_output, get_mock_data, get_mocks};
 mod utils;
 /*
     Test Summary: speed_up_tx
+    First Tick:
+    - A transaction is submitted for monitoring.
+    - The transaction is dispatched to the network.
 
-    This test verifies the bitcoin coordinator's ability to monitor a Bitcoin transaction within an instance, dispatch it for
-    mining, and attempt a "speed-up" if the transaction remains unmined. The process involves sequentially dispatching
-    and tracking the transaction status with each tick. If unmined, the bitcoin coordinator initiates a speed-up and continues
-    monitoring. On the fourth tick, the transaction is confirmed (mined), and a final tick simulates additional block
-    confirmations, marking the transaction as finalized. The test includes acknowledgment of status updates received
-    from the monitor at each step.
+    Second Tick:
+    - The transaction is detected as unmined.
+    - A speed-up action is initiated.
+
+    Third Tick:
+    - The transaction remains unmined.
+    - A second speed-up action is triggered with even higher fees.
+
+    Fourth Tick:
+    - The transaction is successfully mined.
+    - The speed-up transaction replaces the original transaction as the new funding transaction.
+
+    Fifth Tick:
+    - Additional confirmations are observed.
+    - The transaction is marked as finalized.
 */
 #[test]
 fn speed_up_tx() -> Result<(), anyhow::Error> {
@@ -156,7 +168,6 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         )
         .returning(move |_, _, _, _| Ok((tx_speed_up_id_2, Amount::default())));
 
-    // Configure monitor to begin tracking the instance containing the transaction.
     let speed_up_2_to_monitor =
         TransactionMonitor::Transactions(vec![tx_speed_up_id_2], context_child_txid.clone());
 
@@ -282,7 +293,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .with(eq(ack_news.clone()))
         .returning(|_| Ok(()));
 
-    // Initialize the bitcoin coordinator with mocks and begin monitoring the instance.
+    // Initialize the bitcoin coordinator with mocks and begin monitoring the txs.
     let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
     coordinator.monitor(tx_to_monitor)?;
 

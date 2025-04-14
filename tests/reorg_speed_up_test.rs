@@ -1,6 +1,5 @@
 use bitcoin::{Amount, BlockHash, Txid};
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
-use bitcoin_coordinator::types::AckNews;
 use bitcoin_coordinator::{AckTransactionNews, TransactionMonitor};
 use bitvmx_transaction_monitor::errors::MonitorError;
 use bitvmx_transaction_monitor::types::{
@@ -252,7 +251,7 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
         .times(1)
         .returning(move |_| Ok(false));
 
-    // Initialize the bitcoin coordinator with mocks and begin monitoring the instance.
+    // Initialize the bitcoin coordinator with mocks and begin monitoring the txs.
     let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
     coordinator.monitor(tx_to_monitor)?;
 

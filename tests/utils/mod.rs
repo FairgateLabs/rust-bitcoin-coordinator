@@ -8,10 +8,7 @@ use bitcoin_coordinator::errors::TxBuilderHelperError;
 use bitcoin_coordinator::{storage::BitcoinCoordinatorStore, types::FundingTransaction};
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
-use bitvmx_transaction_monitor::{
-    monitor::MockMonitorApi,
-    types::{TransactionMonitor, TransactionNews},
-};
+use bitvmx_transaction_monitor::{monitor::MockMonitorApi, types::TransactionMonitor};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
@@ -19,7 +16,6 @@ use storage_backend::storage::Storage;
 use transaction_dispatcher::dispatcher::MockTransactionDispatcherApi;
 use transaction_dispatcher::signer::Account;
 use transaction_dispatcher::signer::AccountApi;
-use uuid::Uuid;
 
 pub fn clear_output() {
     let _ = std::fs::remove_dir_all("test_output");
