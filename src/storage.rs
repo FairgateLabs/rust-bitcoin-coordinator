@@ -53,7 +53,7 @@ pub trait BitcoinCoordinatorStoreApi {
         &self,
         child_tx_id: &Txid,
         tx_id: &Txid,
-    ) -> Result<Option<SpeedUpTx>, BitcoinCoordinatorStoreError>;
+    ) -> Result<SpeedUpTx, BitcoinCoordinatorStoreError>;
 
     // FUNDING TRANSACTIONS
     // Funding transactions are used to provide capital to speed-up transactions
@@ -78,7 +78,7 @@ pub trait BitcoinCoordinatorStoreApi {
 
     fn update_funding(
         &self,
-        tx_id: Txid,
+        child_tx_id: Txid,
         funding_tx: FundingTransaction,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
@@ -266,10 +266,10 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn update_funding(
         &self,
-        tx_id: Txid,
+        child_tx_id: Txid,
         funding_tx: FundingTransaction,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
-        let funding_txs_id = self.get_fundings_key(tx_id)?;
+        let funding_txs_id = self.get_fundings_key(child_tx_id)?;
 
         if funding_txs_id.is_none() {
             return Err(BitcoinCoordinatorStoreError::FundingTransactionNotFound);
@@ -298,9 +298,9 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn get_speedup_tx(
         &self,
-        tx_id: &Txid,
         child_tx_id: &Txid,
-    ) -> Result<Option<SpeedUpTx>, BitcoinCoordinatorStoreError> {
+        tx_id: &Txid,
+    ) -> Result<SpeedUpTx, BitcoinCoordinatorStoreError> {
         let speed_up_tx_key = self.get_key(StoreKey::TransactionSpeedUpList(*child_tx_id));
 
         // Retrieve the list of speed up transactions from storage
@@ -312,7 +312,11 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         // Find the specific speed up transaction that matches the given tx_id
         let speed_up_tx = speed_up_txs.into_iter().find(|t| t.tx_id == *tx_id);
 
-        Ok(speed_up_tx)
+        if speed_up_tx.is_none() {
+            return Err(BitcoinCoordinatorStoreError::SpeedUpTransactionNotFound);
+        }
+
+        Ok(speed_up_tx.unwrap())
     }
 
     fn get_last_speedup_tx(
@@ -340,17 +344,10 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
     fn save_speedup_tx(&self, speed_up_tx: &SpeedUpTx) -> Result<(), BitcoinCoordinatorStoreError> {
         let speed_up_tx_key =
             self.get_key(StoreKey::TransactionSpeedUpList(speed_up_tx.child_tx_id));
-
         // Retrieve the current list of speed up transactions for the instance from storage.
         let mut speed_up_txs = self
             .store
-            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)
-            .map_err(|e| {
-                BitcoinCoordinatorStoreError::BitcoinCoordinatorStoreError(
-                    "Failed to retrieve funding transaction".to_string(),
-                    e,
-                )
-            })?
+            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)?
             .unwrap_or_default();
 
         // Add the newly created speed up transaction to the end of the list.

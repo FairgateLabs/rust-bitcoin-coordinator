@@ -192,8 +192,7 @@ where
             if let TransactionNews::Transaction(tx_id, tx_status, context_data) = news {
                 // Check if context_data contains the string "speed_up"
                 if !context_data.starts_with(Self::SPEED_UP_CHILD_TXID_PREFIX) {
-                    // Skip processing this news as it's a speed-up transaction
-
+                    // Skip processing this news as it is not a speed-up transaction
                     // TODO:
                     // Since there could be reorganizations larger than 6 blocks, we set 100 blocks,
                     // we could check if a transaction was at some point meant to be sent,
@@ -265,11 +264,7 @@ where
 
             self.store.save_speedup_tx(&speed_up_tx)?;
 
-            let context_data = format!(
-                "{:?}{}",
-                Self::SPEED_UP_CHILD_TXID_PREFIX,
-                tx.compute_txid()
-            );
+            let context_data = format!("{}{}", Self::SPEED_UP_CHILD_TXID_PREFIX, tx.compute_txid());
 
             let monitor_data = TransactionMonitor::Transactions(vec![speed_up_tx_id], context_data);
 
@@ -288,11 +283,7 @@ where
         // which means it should be treated as the new funding transaction.
         if tx_status.is_confirmed() {
             if tx_status.confirmations == 1 {
-                let speed_up_tx = self
-                    .store
-                    .get_speedup_tx(&child_txid, &tx_status.tx_id)?
-                    .unwrap();
-
+                let speed_up_tx = self.store.get_speedup_tx(&child_txid, &tx_status.tx_id)?;
                 //Confirmation in 1 means the transaction is already included in the block.
                 //The new transaction funding is gonna be this a speed-up transaction.
                 let funding_info = FundingTransaction {

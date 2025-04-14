@@ -1,13 +1,13 @@
 use bitcoin::{Amount, BlockHash, Txid};
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
-use bitcoin_coordinator::TransactionMonitor;
+use bitcoin_coordinator::{AckTransactionNews, TransactionMonitor};
 use bitvmx_transaction_monitor::errors::MonitorError;
 use bitvmx_transaction_monitor::types::{
     BlockInfo, TransactionBlockchainStatus, TransactionNews, TransactionStatus,
 };
 use mockall::predicate::eq;
 use std::str::FromStr;
-use utils::{get_mock_data, get_mocks};
+use utils::{clear_output, get_mock_data, get_mocks};
 mod utils;
 /*
     Test Summary: speed_up_tx
@@ -94,7 +94,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         )
         .returning(move |_, _, _, _| Ok((tx_speed_up_id_1, Amount::default())));
 
-    let context_child_txid = format!("{:?}{}", "speed_up_child_txid:", tx.compute_txid());
+    let context_child_txid = format!("{}{}", "speed_up_child_txid:", tx.compute_txid());
 
     let speed_up_1_to_monitor =
         TransactionMonitor::Transactions(vec![tx_speed_up_id_1], context_child_txid.clone());
@@ -231,7 +231,14 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .with(eq(tx_id))
         .returning(move |_| Ok(tx_status.clone()));
 
-    // Fifth tick >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    let ack_news = AckTransactionNews::Transaction(tx_speed_up_id_2.clone());
+    mock_monitor
+        .expect_ack_news()
+        .times(1)
+        .with(eq(ack_news.clone()))
+        .returning(|_| Ok(()));
+
+    // FIFTH TICK >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     let tx_status = TransactionStatus {
         tx_id: tx_id.clone(),
@@ -268,6 +275,13 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .with(eq(tx_id))
         .returning(move |_| Ok(tx_status.clone()));
 
+    let ack_news = AckTransactionNews::Transaction(tx_speed_up_id_2.clone());
+    mock_monitor
+        .expect_ack_news()
+        .times(1)
+        .with(eq(ack_news.clone()))
+        .returning(|_| Ok(()));
+
     // Initialize the bitcoin coordinator with mocks and begin monitoring the instance.
     let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
     coordinator.monitor(tx_to_monitor)?;
@@ -279,11 +293,14 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     coordinator.fund_for_speedup(vec![tx_id], funding_tx, context_data.clone())?;
 
     // Simulate ticks to monitor and adjust transaction status with each blockchain height update.
+
     coordinator.tick()?; // Dispatch and observe unmined status.
     coordinator.tick()?; // First speed-up after unconfirmed status persists.
     coordinator.tick()?; // Second speed-up due to continued unmined status.
     coordinator.tick()?; // Confirmation observed, transaction is now mined.
     coordinator.tick()?; // Simulate further blocks, marking the transaction as finalized.
+
+    clear_output();
 
     Ok(())
 }

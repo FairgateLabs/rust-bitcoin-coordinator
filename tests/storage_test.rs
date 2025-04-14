@@ -1,5 +1,6 @@
 use bitcoin::{absolute::LockTime, hashes::Hash, Amount, Transaction, Txid};
 use bitcoin_coordinator::{
+    errors::BitcoinCoordinatorStoreError,
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{FundingTransaction, SpeedUpTx, TransactionDispatchState},
 };
@@ -209,12 +210,10 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(retrieved.deliver_fee_rate, Amount::from_sat(1000));
 
     // Test get_speedup_tx to retrieve a specific speed-up transaction
-    let specific_speed_up = store.get_speedup_tx(&speed_up_tx_id, &tx_id)?;
-    assert!(specific_speed_up.is_some());
-    let specific = specific_speed_up.unwrap();
-    assert_eq!(specific.tx_id, speed_up_tx_id);
-    assert_eq!(specific.child_tx_id, tx_id);
-    assert_eq!(specific.deliver_fee_rate, Amount::from_sat(1000));
+    let specific_speed_up = store.get_speedup_tx(&tx_id, &speed_up_tx_id)?;
+    assert_eq!(specific_speed_up.tx_id, speed_up_tx_id);
+    assert_eq!(specific_speed_up.child_tx_id, tx_id);
+    assert_eq!(specific_speed_up.deliver_fee_rate, Amount::from_sat(1000));
 
     // Create another speed-up transaction with higher fee
     let second_speed_up_tx_id =
@@ -242,20 +241,12 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(latest.deliver_fee_rate, Amount::from_sat(1500));
 
     // Test get_speedup_tx with the first transaction
-    let first_specific = store.get_speedup_tx(&speed_up_tx_id, &tx_id)?;
-    assert!(first_specific.is_some());
-    assert_eq!(
-        first_specific.unwrap().deliver_fee_rate,
-        Amount::from_sat(1000)
-    );
+    let first_specific = store.get_speedup_tx(&tx_id, &speed_up_tx_id)?;
+    assert_eq!(first_specific.deliver_fee_rate, Amount::from_sat(1000));
 
     // Test get_speedup_tx with the second transaction
-    let second_specific = store.get_speedup_tx(&second_speed_up_tx_id, &tx_id)?;
-    assert!(second_specific.is_some());
-    assert_eq!(
-        second_specific.unwrap().deliver_fee_rate,
-        Amount::from_sat(1500)
-    );
+    let second_specific = store.get_speedup_tx(&tx_id, &second_speed_up_tx_id)?;
+    assert_eq!(second_specific.deliver_fee_rate, Amount::from_sat(1500));
 
     // Test with a non-existent transaction ID
     let non_existent_tx_id = Txid::from_slice(&[3; 32]).unwrap();
@@ -263,8 +254,11 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
     assert!(non_existent_speed_up.is_none());
 
     // Test get_speedup_tx with non-existent IDs
-    let non_existent_specific = store.get_speedup_tx(&non_existent_tx_id, &tx_id)?;
-    assert!(non_existent_specific.is_none());
+    let non_existent_specific = store.get_speedup_tx(&non_existent_tx_id, &tx_id);
+    assert!(matches!(
+        non_existent_specific,
+        Err(BitcoinCoordinatorStoreError::SpeedUpTransactionNotFound)
+    ));
 
     clear_output();
     Ok(())
