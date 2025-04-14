@@ -1,7 +1,8 @@
 use bitcoin::{absolute::LockTime, hashes::Hash, Amount, Transaction, Txid};
 use bitcoin_coordinator::{
+    errors::BitcoinCoordinatorStoreError,
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
-    types::{FundingTransaction, SpeedUpTx, TransactionState},
+    types::{FundingTransaction, SpeedUpTx, TransactionDispatchState},
 };
 use std::{path::PathBuf, rc::Rc, str::FromStr};
 use storage_backend::storage::Storage;
@@ -18,16 +19,13 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     let store = BitcoinCoordinatorStore::new(storage)?;
 
     // Storage is empty, so all states should return empty vectors
-    let empty_txs = store.get_tx(TransactionState::ReadyToSend)?;
+    let empty_txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
     assert_eq!(empty_txs.len(), 0);
 
-    let empty_sent_txs = store.get_tx(TransactionState::Sent)?;
+    let empty_sent_txs = store.get_txs(TransactionDispatchState::BroadcastPendingConfirmation)?;
     assert_eq!(empty_sent_txs.len(), 0);
 
-    let empty_confirmed_txs = store.get_tx(TransactionState::Confirmed)?;
-    assert_eq!(empty_confirmed_txs.len(), 0);
-
-    let empty_finalized_txs = store.get_tx(TransactionState::Finalized)?;
+    let empty_finalized_txs = store.get_txs(TransactionDispatchState::Finalized)?;
     assert_eq!(empty_finalized_txs.len(), 0);
 
     let tx = Transaction {
@@ -43,41 +41,38 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     store.save_tx(tx.clone())?;
 
     // Get transactions by state
-    let txs = store.get_tx(TransactionState::ReadyToSend)?;
+    let txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
     assert_eq!(txs.len(), 1);
     assert_eq!(txs[0].tx_id, tx_id);
-    assert_eq!(txs[0].state, TransactionState::ReadyToSend);
+    assert_eq!(txs[0].state, TransactionDispatchState::PendingDispatch);
 
     // Update transaction state
-    store.update_tx(tx_id, TransactionState::Sent)?;
+    store.update_tx(
+        tx_id,
+        TransactionDispatchState::BroadcastPendingConfirmation,
+    )?;
 
     // Verify state was updated
-    let sent_txs = store.get_tx(TransactionState::Sent)?;
+    let sent_txs = store.get_txs(TransactionDispatchState::BroadcastPendingConfirmation)?;
     assert_eq!(sent_txs.len(), 1);
     assert_eq!(sent_txs[0].tx_id, tx_id);
-    assert_eq!(sent_txs[0].state, TransactionState::Sent);
+    assert_eq!(
+        sent_txs[0].state,
+        TransactionDispatchState::BroadcastPendingConfirmation
+    );
 
     // Verify no transactions in ReadyToSend state
-    let ready_txs = store.get_tx(TransactionState::ReadyToSend)?;
+    let ready_txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
     assert_eq!(ready_txs.len(), 0);
 
     // Update to confirmed state
-    store.update_tx(tx_id, TransactionState::Confirmed)?;
+    store.update_tx(tx_id, TransactionDispatchState::Finalized)?;
 
     // Verify state was updated
-    let confirmed_txs = store.get_tx(TransactionState::Confirmed)?;
-    assert_eq!(confirmed_txs.len(), 1);
-    assert_eq!(confirmed_txs[0].tx_id, tx_id);
-    assert_eq!(confirmed_txs[0].state, TransactionState::Confirmed);
-
-    // Update to finalized state
-    store.update_tx(tx_id, TransactionState::Finalized)?;
-
-    // Verify state was updated
-    let finalized_txs = store.get_tx(TransactionState::Finalized)?;
+    let finalized_txs = store.get_txs(TransactionDispatchState::Finalized)?;
     assert_eq!(finalized_txs.len(), 1);
     assert_eq!(finalized_txs[0].tx_id, tx_id);
-    assert_eq!(finalized_txs[0].state, TransactionState::Finalized);
+    assert_eq!(finalized_txs[0].state, TransactionDispatchState::Finalized);
 
     clear_output();
 
@@ -130,7 +125,7 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
     store.save_tx(tx3.clone())?;
 
     // Get all transactions in ReadyToSend state (should be all three)
-    let ready_txs = store.get_tx(TransactionState::ReadyToSend)?;
+    let ready_txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
     assert_eq!(ready_txs.len(), 3);
 
     // Verify all transactions are in the list
@@ -140,25 +135,24 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
     assert!(tx_ids.contains(&tx3_id));
 
     // Update states of transactions to different states
-    store.update_tx(tx_id, TransactionState::Finalized)?;
-    store.update_tx(tx2_id, TransactionState::Sent)?;
-    store.update_tx(tx3_id, TransactionState::Confirmed)?;
+    store.update_tx(tx_id, TransactionDispatchState::Finalized)?;
+    store.update_tx(
+        tx2_id,
+        TransactionDispatchState::BroadcastPendingConfirmation,
+    )?;
+    store.update_tx(tx3_id, TransactionDispatchState::Finalized)?;
 
     // Verify each state has the correct transactions
-    let sent_txs = store.get_tx(TransactionState::Sent)?;
+    let sent_txs = store.get_txs(TransactionDispatchState::BroadcastPendingConfirmation)?;
     assert_eq!(sent_txs.len(), 1);
     assert_eq!(sent_txs[0].tx_id, tx2_id);
 
-    let confirmed_txs = store.get_tx(TransactionState::Confirmed)?;
-    assert_eq!(confirmed_txs.len(), 1);
-    assert_eq!(confirmed_txs[0].tx_id, tx3_id);
-
-    let finalized_txs = store.get_tx(TransactionState::Finalized)?;
-    assert_eq!(finalized_txs.len(), 1);
+    let finalized_txs = store.get_txs(TransactionDispatchState::Finalized)?;
+    assert_eq!(finalized_txs.len(), 2);
     assert_eq!(finalized_txs[0].tx_id, tx_id);
-
-    // Verify no transactions in ReadyToSend state
-    let ready_txs = store.get_tx(TransactionState::ReadyToSend)?;
+    assert_eq!(finalized_txs[1].tx_id, tx3_id);
+    // Verify no transactions in PendingDispatch state
+    let ready_txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
     assert_eq!(ready_txs.len(), 0);
 
     clear_output();
@@ -188,7 +182,6 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initially, there should be no speed-up transactions
     let speed_up_tx = store.get_last_speedup_tx(&tx_id)?;
-    println!("speed_up_tx: {:?}", speed_up_tx);
     assert!(speed_up_tx.is_none());
 
     let speed_up_tx_id =
@@ -217,12 +210,10 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(retrieved.deliver_fee_rate, Amount::from_sat(1000));
 
     // Test get_speedup_tx to retrieve a specific speed-up transaction
-    let specific_speed_up = store.get_speedup_tx(&speed_up_tx_id, &tx_id)?;
-    assert!(specific_speed_up.is_some());
-    let specific = specific_speed_up.unwrap();
-    assert_eq!(specific.tx_id, speed_up_tx_id);
-    assert_eq!(specific.child_tx_id, tx_id);
-    assert_eq!(specific.deliver_fee_rate, Amount::from_sat(1000));
+    let specific_speed_up = store.get_speedup_tx(&tx_id, &speed_up_tx_id)?;
+    assert_eq!(specific_speed_up.tx_id, speed_up_tx_id);
+    assert_eq!(specific_speed_up.child_tx_id, tx_id);
+    assert_eq!(specific_speed_up.deliver_fee_rate, Amount::from_sat(1000));
 
     // Create another speed-up transaction with higher fee
     let second_speed_up_tx_id =
@@ -250,20 +241,12 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(latest.deliver_fee_rate, Amount::from_sat(1500));
 
     // Test get_speedup_tx with the first transaction
-    let first_specific = store.get_speedup_tx(&speed_up_tx_id, &tx_id)?;
-    assert!(first_specific.is_some());
-    assert_eq!(
-        first_specific.unwrap().deliver_fee_rate,
-        Amount::from_sat(1000)
-    );
+    let first_specific = store.get_speedup_tx(&tx_id, &speed_up_tx_id)?;
+    assert_eq!(first_specific.deliver_fee_rate, Amount::from_sat(1000));
 
     // Test get_speedup_tx with the second transaction
-    let second_specific = store.get_speedup_tx(&second_speed_up_tx_id, &tx_id)?;
-    assert!(second_specific.is_some());
-    assert_eq!(
-        second_specific.unwrap().deliver_fee_rate,
-        Amount::from_sat(1500)
-    );
+    let second_specific = store.get_speedup_tx(&tx_id, &second_speed_up_tx_id)?;
+    assert_eq!(second_specific.deliver_fee_rate, Amount::from_sat(1500));
 
     // Test with a non-existent transaction ID
     let non_existent_tx_id = Txid::from_slice(&[3; 32]).unwrap();
@@ -271,8 +254,11 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
     assert!(non_existent_speed_up.is_none());
 
     // Test get_speedup_tx with non-existent IDs
-    let non_existent_specific = store.get_speedup_tx(&non_existent_tx_id, &tx_id)?;
-    assert!(non_existent_specific.is_none());
+    let non_existent_specific = store.get_speedup_tx(&non_existent_tx_id, &tx_id);
+    assert!(matches!(
+        non_existent_specific,
+        Err(BitcoinCoordinatorStoreError::SpeedUpTransactionNotFound)
+    ));
 
     clear_output();
     Ok(())
