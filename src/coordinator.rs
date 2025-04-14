@@ -40,14 +40,35 @@ where
 }
 
 pub trait BitcoinCoordinatorApi {
+    /// Checks if the coordinator is ready to process transactions
+    /// Returns true if the coordinator is ready, false otherwise
     fn is_ready(&self) -> Result<bool, BitcoinCoordinatorError>;
 
+    /// Processes pending transactions and updates their status
+    /// This method should be called periodically to keep the coordinator state up-to-date
     fn tick(&self) -> Result<(), BitcoinCoordinatorError>;
 
+    /// Registers a transaction to be monitored by the coordinator
+    /// The transaction will be tracked for confirmations and status changes
+    ///
+    /// # Arguments
+    /// * `tx_data` - Transaction data to be monitored
     fn monitor(&self, tx_data: TransactionMonitor) -> Result<(), BitcoinCoordinatorError>;
 
+    /// Dispatches a transaction to the Bitcoin network
+    ///
+    /// # Arguments
+    /// * `tx` - The Bitcoin transaction to dispatch
+    /// * `context` - Additional context information for the transaction to be returned in news
     fn dispatch(&self, tx: Transaction, context: String) -> Result<(), BitcoinCoordinatorError>;
 
+    /// Registers funding information for potential transaction speed-ups
+    /// This allows the coordinator to create RBF (Replace-By-Fee) transactions when needed
+    ///
+    /// # Arguments
+    /// * `txs` - List of transaction IDs that may need speed-up
+    /// * `funding_tx` - Funding transaction information to use for speed-ups
+    /// * `context` - Additional context information to be returned in news
     fn fund_for_speedup(
         &self,
         txs: Vec<Txid>,
@@ -55,8 +76,15 @@ pub trait BitcoinCoordinatorApi {
         context: String,
     ) -> Result<(), BitcoinCoordinatorError>;
 
+    /// Retrieves news about monitored transactions
+    /// Returns information about transaction confirmations.
     fn get_news(&self) -> Result<News, BitcoinCoordinatorError>;
 
+    /// Acknowledges that news has been processed
+    /// This prevents the same news from being returned in subsequent calls to get_news()
+    ///
+    /// # Arguments
+    /// * `news` - The news items to acknowledge
     fn ack_news(&self, news: AckNews) -> Result<(), BitcoinCoordinatorError>;
 }
 
