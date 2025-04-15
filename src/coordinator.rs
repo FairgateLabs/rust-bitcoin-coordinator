@@ -15,7 +15,7 @@ use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::{
     errors::MonitorError,
     monitor::{Monitor, MonitorApi},
-    types::{AckTransactionNews, TransactionMonitor, TransactionNews, TransactionStatus},
+    types::{AckMonitorNews, MonitorNews, TransactionStatus, TypesToMonitor},
 };
 use console::style;
 use key_manager::{key_manager::KeyManager, keystorage::database::DatabaseKeyStore};
@@ -53,7 +53,7 @@ pub trait BitcoinCoordinatorApi {
     ///
     /// # Arguments
     /// * `tx_data` - Transaction data to be monitored
-    fn monitor(&self, tx_data: TransactionMonitor) -> Result<(), BitcoinCoordinatorError>;
+    fn monitor(&self, tx_data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError>;
 
     /// Dispatches a transaction to the Bitcoin network
     ///
@@ -213,11 +213,11 @@ where
         Ok(())
     }
 
-    fn process_speedup_news(&self) -> Result<(), BitcoinCoordinatorError> {
+    fn process_monitor_news(&self) -> Result<(), BitcoinCoordinatorError> {
         let list_news = self.monitor.get_news()?;
 
         for news in list_news {
-            if let TransactionNews::Transaction(tx_id, tx_status, context_data) = news {
+            if let MonitorNews::Transaction(tx_id, tx_status, context_data) = news {
                 // Check if context_data contains the string "speed_up"
                 if !context_data.starts_with(Self::SPEED_UP_CHILD_TXID_PREFIX) {
                     // Skip processing this news as it is not a speed-up transaction
@@ -248,7 +248,7 @@ where
                 );
 
                 self.process_speed_up(&tx_status, tx_child_id)?;
-                let ack = AckTransactionNews::Transaction(tx_id);
+                let ack = AckMonitorNews::Transaction(tx_id);
                 self.monitor.ack_news(ack)?;
             }
         }
@@ -294,7 +294,7 @@ where
 
             let context_data = format!("{}{}", Self::SPEED_UP_CHILD_TXID_PREFIX, tx.compute_txid());
 
-            let monitor_data = TransactionMonitor::Transactions(vec![speed_up_tx_id], context_data);
+            let monitor_data = TypesToMonitor::Transactions(vec![speed_up_tx_id], context_data);
 
             self.monitor.monitor(monitor_data)?;
         }
@@ -415,14 +415,14 @@ where
         }
 
         self.process_pending_txs()?;
-        self.process_speedup_news()?;
+        self.process_monitor_news()?;
         self.process_in_progress_txs()?;
 
         Ok(())
     }
 
-    fn monitor(&self, data: TransactionMonitor) -> Result<(), BitcoinCoordinatorError> {
-        if let TransactionMonitor::Transactions(txs, _) = data.clone() {
+    fn monitor(&self, data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError> {
+        if let TypesToMonitor::Transactions(txs, _) = data.clone() {
             if txs.is_empty() {
                 return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(
                     "transactions array is empty".to_string(),
@@ -445,7 +445,7 @@ where
     fn dispatch(&self, tx: Transaction, context: String) -> Result<(), BitcoinCoordinatorError> {
         // First we monitor the transaction if does not exist.
 
-        let to_monitor = TransactionMonitor::Transactions(vec![tx.compute_txid()], context);
+        let to_monitor = TypesToMonitor::Transactions(vec![tx.compute_txid()], context);
         self.monitor.monitor(to_monitor)?;
 
         // Save the transaction to be dispatched.
@@ -485,7 +485,7 @@ where
         let txs = txs
             .into_iter()
             .filter(|tx| {
-                if let TransactionNews::Transaction(_, _, context_data) = tx {
+                if let MonitorNews::Transaction(_, _, context_data) = tx {
                     !context_data.starts_with(Self::SPEED_UP_CHILD_TXID_PREFIX)
                 } else {
                     true
@@ -502,6 +502,7 @@ where
         match news {
             AckNews::Transaction(news) => self.monitor.ack_news(news)?,
             AckNews::InsufficientFunds(tx_id) => self.store.ack_insufficient_funds_news(tx_id)?,
+            AckNews::NewBlock => self.monitor.ack_news(AckMonitorNews::NewBlock)?,
         }
         Ok(())
     }
