@@ -1,9 +1,9 @@
 use bitcoin::{Amount, BlockHash, Txid};
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
-use bitcoin_coordinator::{AckTransactionNews, TransactionMonitor};
+use bitcoin_coordinator::{AckMonitorNews, MonitorNews, TypesToMonitor};
 use bitvmx_transaction_monitor::errors::MonitorError;
 use bitvmx_transaction_monitor::types::{
-    BlockInfo, TransactionBlockchainStatus, TransactionNews, TransactionStatus,
+    BlockInfo, TransactionBlockchainStatus, TransactionStatus,
 };
 use mockall::predicate::eq;
 use std::str::FromStr;
@@ -105,7 +105,7 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
     let context_child_txid = format!("speed_up_child_txid:{}", tx.compute_txid());
 
     let speed_up_1_to_monitor =
-        TransactionMonitor::Transactions(vec![tx_speed_up_id_1], context_child_txid.clone());
+        TypesToMonitor::Transactions(vec![tx_speed_up_id_1], context_child_txid.clone());
 
     // Save both speed-up transactions in the monitor for tracking purposes.
     mock_monitor
@@ -138,7 +138,7 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
         status: TransactionBlockchainStatus::Confirmed,
     };
 
-    let tx_news = TransactionNews::Transaction(tx_id.clone(), tx_status, context_data.clone());
+    let tx_news = MonitorNews::Transaction(tx_id.clone(), tx_status, context_data.clone());
 
     // Create a transaction news for the second speed up transaction
     let tx_speed_up_1_status = TransactionStatus {
@@ -155,7 +155,7 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
         status: TransactionBlockchainStatus::Confirmed,
     };
 
-    let tx_speed_up_1_news = TransactionNews::Transaction(
+    let tx_speed_up_1_news = MonitorNews::Transaction(
         tx_speed_up_id_1.clone(),
         tx_speed_up_1_status,
         context_child_txid.clone(),
@@ -174,7 +174,7 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
         status: TransactionBlockchainStatus::Confirmed,
     };
 
-    let ack_news = AckTransactionNews::Transaction(tx_speed_up_id_1.clone());
+    let ack_news = AckMonitorNews::Transaction(tx_speed_up_id_1.clone());
 
     mock_monitor
         .expect_ack_news()
@@ -202,8 +202,7 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
         confirmations: 0,
         status: TransactionBlockchainStatus::Orphan,
     };
-    let tx_news =
-        TransactionNews::Transaction(tx_id.clone(), tx_status.clone(), context_data.clone());
+    let tx_news = MonitorNews::Transaction(tx_id.clone(), tx_status.clone(), context_data.clone());
 
     let tx_speed_up_1_status = TransactionStatus {
         tx_id: tx_speed_up_id_1.clone(),
@@ -218,7 +217,7 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
         status: TransactionBlockchainStatus::Orphan,
     };
 
-    let tx_speed_up_1_news = TransactionNews::Transaction(
+    let tx_speed_up_1_news = MonitorNews::Transaction(
         tx_speed_up_id_1.clone(),
         tx_speed_up_1_status.clone(),
         context_child_txid.clone(),

@@ -1,7 +1,7 @@
 use bitcoin::{Amount, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::types::{
-    AckTransactionNews, BlockInfo, MonitorType, TransactionBlockchainStatus, TransactionNews,
+    AckMonitorNews, BlockInfo, MonitorNews, MonitorType, TransactionBlockchainStatus,
 };
 use serde::{Deserialize, Serialize};
 use transaction_dispatcher::DispatcherType;
@@ -91,25 +91,26 @@ pub struct TransactionFullInfo {
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct News {
-    pub txs: Vec<TransactionNews>,
+    pub monitor_news: Vec<MonitorNews>,
     pub insufficient_funds: Vec<(Txid, String)>,
 }
 
 impl News {
-    pub fn new(txs: Vec<TransactionNews>, insufficient_funds: Vec<(Txid, String)>) -> Self {
+    pub fn new(txs: Vec<MonitorNews>, insufficient_funds: Vec<(Txid, String)>) -> Self {
         Self {
-            txs,
+            monitor_news: txs,
             insufficient_funds,
         }
     }
 }
 
 pub enum AckNews {
-    Transaction(AckTransactionNews),
+    Transaction(AckMonitorNews),
     InsufficientFunds(Txid),
+    NewBlock,
 }
 
 pub type BitcoinCoordinatorType =
     BitcoinCoordinator<MonitorType, DispatcherType, BitcoinCoordinatorStore>;
 
-pub type TransactionNewsType = TransactionNews;
+pub type TransactionNewsType = MonitorNews;

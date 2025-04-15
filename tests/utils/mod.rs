@@ -5,10 +5,11 @@ use bitcoin::{
 use bitcoin::{Network, Txid};
 use bitcoin_coordinator::config::DispatcherConfig;
 use bitcoin_coordinator::errors::TxBuilderHelperError;
+use bitcoin_coordinator::TypesToMonitor;
 use bitcoin_coordinator::{storage::BitcoinCoordinatorStore, types::FundingTransaction};
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
-use bitvmx_transaction_monitor::{monitor::MockMonitorApi, types::TransactionMonitor};
+use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
@@ -48,7 +49,7 @@ pub fn get_mocks() -> (
 }
 
 pub fn get_mock_data() -> (
-    TransactionMonitor,
+    TypesToMonitor,
     Transaction,
     FundingTransaction,
     Txid,
@@ -75,7 +76,7 @@ pub fn get_mock_data() -> (
 
     let tx_id = tx.compute_txid();
     let context_data = "My context monitor".to_string();
-    let to_monitor = TransactionMonitor::Transactions(vec![tx_id], context_data.clone());
+    let to_monitor = TypesToMonitor::Transactions(vec![tx_id], context_data.clone());
 
     (to_monitor, tx, funding_tx, tx_id, context_data)
 }

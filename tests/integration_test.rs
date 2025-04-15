@@ -1,5 +1,6 @@
 use bitcoin::{Transaction, Txid};
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
+use bitcoin_coordinator::{AckMonitorNews, MonitorNews, TypesToMonitor};
 use key_manager::{create_database_key_store_from_config, create_key_manager_from_config};
 use std::{path::PathBuf, rc::Rc};
 use storage_backend::storage::Storage;
@@ -13,7 +14,6 @@ use bitcoin_coordinator::types::AckNews;
 use bitcoind::bitcoind::Bitcoind;
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_transaction_monitor::monitor::Monitor;
-use bitvmx_transaction_monitor::types::{AckTransactionNews, TransactionMonitor, TransactionNews};
 use console::style;
 use std::sync::mpsc::{channel, Receiver};
 use transaction_dispatcher::dispatcher::TransactionDispatcher;
@@ -127,7 +127,7 @@ fn integration_test() -> Result<(), anyhow::Error> {
 
     let context_data = "MY context".to_string();
 
-    let txs_to_monitor = TransactionMonitor::Transactions(
+    let txs_to_monitor = TypesToMonitor::Transactions(
         txs.iter().map(|tx| tx.compute_txid()).collect(),
         context_data,
     );
@@ -154,12 +154,15 @@ fn integration_test() -> Result<(), anyhow::Error> {
 
     coordinator.monitor(txs_to_monitor)?;
 
+    coordinator.monitor(TypesToMonitor::NewBlock)?;
+
     let bitcoin_client = BitcoinClient::new_from_config(&config.rpc)?;
 
     let rx = handle_contro_c();
 
     for i in 0..1000 {
         if i % 20 == 0 {
+            println!("Mine new block");
             bitcoin_client.mine_blocks_to_address(1, &wallet).unwrap();
         }
 
@@ -174,9 +177,9 @@ fn integration_test() -> Result<(), anyhow::Error> {
 
         let news_list = coordinator.get_news()?;
 
-        for news in news_list.txs {
+        for news in news_list.monitor_news {
             match news {
-                TransactionNews::Transaction(tx_id, _, data) => {
+                MonitorNews::Transaction(tx_id, _, data) => {
                     println!("Context Data: {:?}", data);
 
                     println!(
@@ -197,28 +200,37 @@ fn integration_test() -> Result<(), anyhow::Error> {
                             style(tx_1_id).blue(),
                             style(data).green()
                         );
-                        return Ok(());
+
+                        continue;
                     }
 
                     let tx: Transaction = tx.unwrap();
                     coordinator.dispatch(tx, "my_context".to_string())?;
 
-                    let ack_news = AckNews::Transaction(AckTransactionNews::Transaction(tx_1_id));
+                    let ack_news = AckNews::Transaction(AckMonitorNews::Transaction(tx_1_id));
                     coordinator.ack_news(ack_news)?;
                 }
-                TransactionNews::RskPeginTransaction(tx_id, _) => {
+                MonitorNews::RskPeginTransaction(tx_id, _) => {
                     println!(
                         "{} RSK Pegin transaction with ID: {} detected",
                         style("Bitcoin Coordinator").green(),
                         style(tx_id).yellow(),
                     );
                 }
-                TransactionNews::SpendingUTXOTransaction(tx_id, utxo_txid, _, _) => {
+                MonitorNews::SpendingUTXOTransaction(tx_id, utxo_txid, _, _) => {
                     println!(
                         "{} Insufficient funds for transaction: {} - UTXO {} was spent",
                         style("Bitcoin Coordinator").red(),
                         style(tx_id).red(),
                         style(utxo_txid).yellow()
+                    );
+                }
+                MonitorNews::NewBlock(block_height, block_hash) => {
+                    println!(
+                        "{} New block detected: {} - {}",
+                        style("Bitcoin Coordinator").green(),
+                        style(block_height).yellow(),
+                        style(block_hash).yellow()
                     );
                 }
             }
