@@ -1,7 +1,7 @@
 use bitcoin::{Amount, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::types::{
-    AckTransactionNews, BlockInfo, MonitorType, TransactionBlockchainStatus, TransactionNews,
+    AckMonitorNews, BlockInfo, MonitorNews, MonitorType, TransactionBlockchainStatus,
 };
 use serde::{Deserialize, Serialize};
 use transaction_dispatcher::DispatcherType;
@@ -16,19 +16,13 @@ pub struct FundingTransaction {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub enum TransactionState {
-    // Represents a transaction that has been chosen by the protocol to be sent.
-    ReadyToSend,
-    // Represents a transaction that has been broadcast to the network and is waiting for confirmations.
-    Sent,
-    // Represents a transaction that has been successfully confirmed by the network but a reorganizacion move it out of the chain.
-    Orphan,
-    // Represents a transaction that has been successfully confirmed by the network
-    Confirmed,
-    // Represents when the transaction was confirmed an amount of blocks
+pub enum TransactionDispatchState {
+    // The transaction is ready and queued to be sent.
+    PendingDispatch,
+    // The transaction has been broadcast to the network and is waiting for confirmations.
+    BroadcastPendingConfirmation,
+    // The transaction has been successfully confirmed by the network.
     Finalized,
-    // Represents a transaction that has been acknowledged or recognized by the system.
-    Acknowledged,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -36,11 +30,11 @@ pub struct CoordinatedTransaction {
     pub tx_id: Txid,
     pub tx: Transaction,
     pub deliver_block_height: Option<BlockHeight>,
-    pub state: TransactionState,
+    pub state: TransactionDispatchState,
 }
 
 impl CoordinatedTransaction {
-    pub fn new(tx: Transaction, state: TransactionState) -> Self {
+    pub fn new(tx: Transaction, state: TransactionDispatchState) -> Self {
         Self {
             tx_id: tx.compute_txid(),
             tx,
@@ -97,25 +91,26 @@ pub struct TransactionFullInfo {
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct News {
-    pub txs: Vec<TransactionNews>,
+    pub monitor_news: Vec<MonitorNews>,
     pub insufficient_funds: Vec<(Txid, String)>,
 }
 
 impl News {
-    pub fn new(txs: Vec<TransactionNews>, insufficient_funds: Vec<(Txid, String)>) -> Self {
+    pub fn new(txs: Vec<MonitorNews>, insufficient_funds: Vec<(Txid, String)>) -> Self {
         Self {
-            txs,
+            monitor_news: txs,
             insufficient_funds,
         }
     }
 }
 
 pub enum AckNews {
-    Transaction(AckTransactionNews),
+    Transaction(AckMonitorNews),
     InsufficientFunds(Txid),
+    NewBlock,
 }
 
 pub type BitcoinCoordinatorType =
     BitcoinCoordinator<MonitorType, DispatcherType, BitcoinCoordinatorStore>;
 
-pub type TransactionNewsType = TransactionNews;
+pub type TransactionNewsType = MonitorNews;

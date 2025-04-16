@@ -1,14 +1,12 @@
 use bitcoin::{Transaction, Txid};
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
-use key_manager::{
-    create_database_key_store_from_config, create_file_key_store_from_config,
-    create_key_manager_from_config,
-};
+use bitcoin_coordinator::{AckMonitorNews, MonitorNews, TypesToMonitor};
+use key_manager::{create_database_key_store_from_config, create_key_manager_from_config};
 use std::{path::PathBuf, rc::Rc};
 use storage_backend::storage::Storage;
 use utils::{clear_db, generate_tx};
 mod utils;
-use anyhow::{Context, Ok, Result};
+use anyhow::{Ok, Result};
 use bitcoin::Network;
 use bitcoin_coordinator::config::Config;
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
@@ -16,7 +14,6 @@ use bitcoin_coordinator::types::AckNews;
 use bitcoind::bitcoind::Bitcoind;
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_transaction_monitor::monitor::Monitor;
-use bitvmx_transaction_monitor::types::{AckTransactionNews, TransactionMonitor, TransactionNews};
 use console::style;
 use std::sync::mpsc::{channel, Receiver};
 use transaction_dispatcher::dispatcher::TransactionDispatcher;
@@ -26,7 +23,7 @@ use uuid::Uuid;
 
 #[test]
 #[ignore]
-fn main_test() -> Result<(), anyhow::Error> {
+fn integration_test() -> Result<(), anyhow::Error> {
     let config = Config::load()?;
 
     let log_level = match config.log_level {
@@ -88,9 +85,9 @@ fn main_test() -> Result<(), anyhow::Error> {
     // This is the storage for the protocol, for this porpouse will be a different storage
     let store = BitcoinCoordinatorStore::new(store.clone())?;
 
-    // Step 1: Create an instance with 2 transactions for different operators
+    // Step 1: Create an  array with 2 transactions for different operators
     println!(
-        "\n{} Step 1: Creating an instance with 2 transactions for different operators...\n",
+        "\n{} Step 1: Creating an array with 2 transactions for different operators...\n",
         style("Step 1").blue()
     );
 
@@ -128,11 +125,11 @@ fn main_test() -> Result<(), anyhow::Error> {
         style(tx_2_id).blue(),
     );
 
-    let extra_data = "MY context".to_string();
+    let context_data = "MY context".to_string();
 
-    let txs_to_monitor = TransactionMonitor::Transactions(
+    let txs_to_monitor = TypesToMonitor::Transactions(
         txs.iter().map(|tx| tx.compute_txid()).collect(),
-        extra_data,
+        context_data,
     );
 
     // Step 2: Send the first transaction for operator one
@@ -147,17 +144,17 @@ fn main_test() -> Result<(), anyhow::Error> {
     let mut tx_to_answer: (Uuid, Txid, Option<Transaction>) =
         (group_id, txs[0].compute_txid(), Some(txs[1].clone()));
 
-    // Step 2: Make the Bitcoin Coordinator monitor the instance
+    // Step 2: Make the Bitcoin Coordinator monitor the txs
     println!(
-        "\n{} Step 2: Bitcoin Coordinator monitor the instance...\n",
+        "\n{} Step 2: Bitcoin Coordinator monitor the txs...\n",
         style("Bitcoin Coordinator").cyan()
     );
 
     let coordinator = BitcoinCoordinator::new(monitor, store, dispatcher, account.clone());
 
-    coordinator
-        .monitor(txs_to_monitor)
-        .context("Error monitoring instance")?;
+    coordinator.monitor(txs_to_monitor)?;
+
+    coordinator.monitor(TypesToMonitor::NewBlock)?;
 
     let bitcoin_client = BitcoinClient::new_from_config(&config.rpc)?;
 
@@ -165,6 +162,7 @@ fn main_test() -> Result<(), anyhow::Error> {
 
     for i in 0..1000 {
         if i % 20 == 0 {
+            println!("Mine new block");
             bitcoin_client.mine_blocks_to_address(1, &wallet).unwrap();
         }
 
@@ -179,13 +177,13 @@ fn main_test() -> Result<(), anyhow::Error> {
 
         let news_list = coordinator.get_news()?;
 
-        for news in news_list.txs {
+        for news in news_list.monitor_news {
             match news {
-                TransactionNews::Transaction(tx_id, _, data) => {
-                    println!("Extra data: {:?}", data);
+                MonitorNews::Transaction(tx_id, _, data) => {
+                    println!("Context Data: {:?}", data);
 
                     println!(
-                        "{} Transaction ID {} for Instance ID {} CONFIRMED!!! \n",
+                        "{} Transaction ID {} for group ID {} CONFIRMED!!! \n",
                         style("Bitcoin Coordinator").green(),
                         style(tx_id).blue(),
                         style(data.clone()).green()
@@ -197,33 +195,42 @@ fn main_test() -> Result<(), anyhow::Error> {
 
                     if tx.is_none() {
                         println!(
-                            "{} Transaction ID {} for Instance ID {} NO ANSWER FOUND \n",
+                            "{} Transaction ID {} for group ID {} NO ANSWER FOUND \n",
                             style("Info").green(),
                             style(tx_1_id).blue(),
                             style(data).green()
                         );
-                        return Ok(());
+
+                        continue;
                     }
 
                     let tx: Transaction = tx.unwrap();
                     coordinator.dispatch(tx, "my_context".to_string())?;
 
-                    let ack_news = AckNews::Transaction(AckTransactionNews::Transaction(tx_1_id));
+                    let ack_news = AckNews::Transaction(AckMonitorNews::Transaction(tx_1_id));
                     coordinator.ack_news(ack_news)?;
                 }
-                TransactionNews::RskPeginTransaction(tx_id, _) => {
+                MonitorNews::RskPeginTransaction(tx_id, _) => {
                     println!(
                         "{} RSK Pegin transaction with ID: {} detected",
                         style("Bitcoin Coordinator").green(),
                         style(tx_id).yellow(),
                     );
                 }
-                TransactionNews::SpendingUTXOTransaction(tx_id, utxo_txid, _, _) => {
+                MonitorNews::SpendingUTXOTransaction(tx_id, utxo_txid, _, _) => {
                     println!(
                         "{} Insufficient funds for transaction: {} - UTXO {} was spent",
                         style("Bitcoin Coordinator").red(),
                         style(tx_id).red(),
                         style(utxo_txid).yellow()
+                    );
+                }
+                MonitorNews::NewBlock(block_height, block_hash) => {
+                    println!(
+                        "{} New block detected: {} - {}",
+                        style("Bitcoin Coordinator").green(),
+                        style(block_height).yellow(),
+                        style(block_hash).yellow()
                     );
                 }
             }
