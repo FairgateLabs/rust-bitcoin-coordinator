@@ -55,6 +55,8 @@ pub trait BitcoinCoordinatorApi {
         context: String,
     ) -> Result<(), BitcoinCoordinatorError>;
 
+    fn get_transaction(&self, txid: Txid) -> Result<TransactionStatus, BitcoinCoordinatorError>;
+
     fn get_news(&self) -> Result<News, BitcoinCoordinatorError>;
 
     fn ack_news(&self, news: AckNews) -> Result<(), BitcoinCoordinatorError>;
@@ -145,12 +147,17 @@ where
 
             // Get updated transaction status from monitor
             let tx_status = self.monitor.get_tx_status(&tx.tx_id);
-
             match tx_status {
                 Ok(tx_status) => {
                     if tx_status.confirmations == 1 {
                         // If the transaction has only one confirmation
                         // This means it has been included in a block but not yet deeply confirmed.
+                        info!(
+                            "{} Transaction {} confirmed with 1 confirmation", 
+                            style("Coordinator").green(),
+                            style(tx_status.tx_id).blue()
+                        );
+                        
                         self.store
                             .update_tx(tx_status.tx_id, TransactionState::Confirmed)?;
 
@@ -162,6 +169,13 @@ where
                     if tx_status.is_finalized(confirmation_threshold) {
                         // Transaction was mined and has sufficient confirmations to mark it as finalized.
                         // Update the transaction to completed given that transaction has more than the threshold confirmations
+                        info!(
+                            "{} Transaction {} finalized with {} confirmations",
+                            style("Coordinator").green(),
+                            style(tx_status.tx_id).blue(),
+                            style(tx_status.confirmations).yellow()
+                        );
+
                         self.store
                             .update_tx(tx_status.tx_id, TransactionState::Finalized)?;
 
@@ -169,11 +183,21 @@ where
                     }
 
                     if tx_status.is_orphan() {
+                        info!(
+                            "{} Transaction {} is orphaned, reprocessing",
+                            style("Coordinator").green(),
+                            style(tx_status.tx_id).red()
+                        );
                         self.process_unseen_transaction(&tx)?;
                         return Ok(());
                     }
                 }
                 Err(MonitorError::TransactionNotFound(_)) => {
+                    info!(
+                        "{} Transaction {} not found, reprocessing",
+                        style("Coordinator").green(),
+                        style(tx.tx_id).red()
+                    );
                     self.process_unseen_transaction(&tx)?
                 }
                 Err(e) => return Err(e.into()),
@@ -408,6 +432,11 @@ where
         );
 
         Ok(())
+    }
+
+    fn get_transaction(&self, txid: Txid) -> Result<TransactionStatus, BitcoinCoordinatorError> {
+        let tx_status = self.monitor.get_tx_status(&txid)?;
+        Ok(tx_status)
     }
 
     fn fund_for_speedup(
