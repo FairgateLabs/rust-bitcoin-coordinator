@@ -297,7 +297,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     coordinator.monitor(tx_to_monitor)?;
 
     // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.dispatch(tx, context_data.clone())?;
+    coordinator.dispatch(tx, context_data.clone(), None)?;
 
     // Add funding for speed up transaction
     coordinator.fund_for_speedup(vec![tx_id], funding_tx, context_data.clone())?;

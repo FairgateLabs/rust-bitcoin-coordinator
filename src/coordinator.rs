@@ -60,7 +60,13 @@ pub trait BitcoinCoordinatorApi {
     /// # Arguments
     /// * `tx` - The Bitcoin transaction to dispatch
     /// * `context` - Additional context information for the transaction to be returned in news
-    fn dispatch(&self, tx: Transaction, context: String) -> Result<(), BitcoinCoordinatorError>;
+    /// * `block_height` - Block height to dispatch the transaction (None means now)
+    fn dispatch(
+        &self,
+        tx: Transaction,
+        context: String,
+        block_height: Option<BlockHeight>,
+    ) -> Result<(), BitcoinCoordinatorError>;
 
     /// Registers funding information for potential transaction speed-ups
     /// This allows the coordinator to create RBF (Replace-By-Fee) transactions when needed
@@ -349,13 +355,14 @@ where
         const SPEED_UP_THRESHOLD_BLOCKS: u32 = 1;
 
         // We do not speed up the transaction if it has not been delivered yet.
-        if tx_data.deliver_block_height.is_none() {
+        if tx_data.broadcast_block_height.is_none() {
             return Ok(());
         }
 
         let current_block_height = self.monitor.get_monitor_height()?;
 
-        if current_block_height - tx_data.deliver_block_height.unwrap() < SPEED_UP_THRESHOLD_BLOCKS
+        if current_block_height - tx_data.broadcast_block_height.unwrap()
+            < SPEED_UP_THRESHOLD_BLOCKS
         {
             return Ok(());
         }
@@ -443,14 +450,19 @@ where
         Ok(result)
     }
 
-    fn dispatch(&self, tx: Transaction, context: String) -> Result<(), BitcoinCoordinatorError> {
+    fn dispatch(
+        &self,
+        tx: Transaction,
+        context: String,
+        block_height: Option<BlockHeight>,
+    ) -> Result<(), BitcoinCoordinatorError> {
         // First we monitor the transaction if does not exist.
 
         let to_monitor = TypesToMonitor::Transactions(vec![tx.compute_txid()], context);
         self.monitor.monitor(to_monitor)?;
 
         // Save the transaction to be dispatched.
-        self.store.save_tx(tx.clone())?;
+        self.store.save_tx(tx.clone(), block_height)?;
 
         info!(
             "{} Transaction ID {} ready to be dispatch.",

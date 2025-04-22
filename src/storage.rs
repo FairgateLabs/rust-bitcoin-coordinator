@@ -4,6 +4,7 @@ use crate::{
 };
 
 use bitcoin::{Transaction, Txid};
+use bitvmx_bitcoin_rpc::types::BlockHeight;
 use mockall::automock;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
@@ -22,7 +23,11 @@ enum StoreKey {
 
 #[automock]
 pub trait BitcoinCoordinatorStoreApi {
-    fn save_tx(&self, tx: Transaction) -> Result<(), BitcoinCoordinatorStoreError>;
+    fn save_tx(
+        &self,
+        tx: Transaction,
+        target_block_height: Option<BlockHeight>,
+    ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn get_txs(
         &self,
@@ -162,11 +167,18 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
         Ok(txs_filter)
     }
-    fn save_tx(&self, tx: Transaction) -> Result<(), BitcoinCoordinatorStoreError> {
+    fn save_tx(
+        &self,
+        tx: Transaction,
+        target_block_height: Option<BlockHeight>,
+    ) -> Result<(), BitcoinCoordinatorStoreError> {
         let key = self.get_key(StoreKey::Transaction(tx.compute_txid()));
 
-        let tx_info =
-            CoordinatedTransaction::new(tx.clone(), TransactionDispatchState::PendingDispatch);
+        let tx_info = CoordinatedTransaction::new(
+            tx.clone(),
+            TransactionDispatchState::PendingDispatch,
+            target_block_height,
+        );
 
         self.store.set(&key, &tx_info, None)?;
 
@@ -368,7 +380,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
         tx.state = TransactionDispatchState::BroadcastPendingConfirmation;
 
-        tx.deliver_block_height = Some(deliver_block_height);
+        tx.broadcast_block_height = Some(deliver_block_height);
 
         let key = self.get_key(StoreKey::Transaction(tx_id));
         self.store.set(key, tx, None)?;

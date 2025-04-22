@@ -38,7 +38,7 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     let tx_id = tx.compute_txid();
 
     // Save transaction
-    store.save_tx(tx.clone())?;
+    store.save_tx(tx.clone(), None)?;
 
     // Get transactions by state
     let txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
@@ -98,7 +98,7 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
     let tx_id = tx.compute_txid();
 
     // Save transaction
-    store.save_tx(tx.clone())?;
+    store.save_tx(tx.clone(), None)?;
 
     // Test adding multiple transactions and verifying transaction list
 
@@ -121,8 +121,8 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
     let tx3_id = tx3.compute_txid();
 
     // Save additional transactions
-    store.save_tx(tx2.clone())?;
-    store.save_tx(tx3.clone())?;
+    store.save_tx(tx2.clone(), None)?;
+    store.save_tx(tx3.clone(), None)?;
 
     // Get all transactions in ReadyToSend state (should be all three)
     let ready_txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
@@ -178,7 +178,7 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
     let tx_id = tx_to_speedup.compute_txid();
 
     // Save the transaction first
-    store.save_tx(tx_to_speedup.clone())?;
+    store.save_tx(tx_to_speedup.clone(), None)?;
 
     // Initially, there should be no speed-up transactions
     let speed_up_tx = store.get_last_speedup_tx(&tx_id)?;
