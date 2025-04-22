@@ -192,22 +192,19 @@ where
 
         let was_already_broadcasted = pending_tx.broadcast_block_height.is_some();
 
-        if !was_already_broadcasted {
+        if was_already_broadcasted {
             warn!(
-                "Transaction {} was not broadcasted but target block height is set.",
+                "Transaction {} has a target block height set but was already broadcasted.",
                 pending_tx.tx_id
             );
-            // should not reach this point because, when ever is delivered it should be mark as BroadcastPendingConfirmation.
+            // This code path should not be reached because once a transaction is broadcast,
+            // it should be marked as BroadcastPendingConfirmation.
             return Ok(false);
         }
 
         let current_block_height = self.monitor.get_monitor_height()?;
 
-        if current_block_height > pending_tx.target_block_height.unwrap() {
-            return Ok(false);
-        }
-
-        Ok(true)
+        Ok(current_block_height >= pending_tx.target_block_height.unwrap())
     }
 
     fn process_in_progress_txs(&self) -> Result<(), BitcoinCoordinatorError> {
@@ -490,8 +487,6 @@ where
         context: String,
         block_height: Option<BlockHeight>,
     ) -> Result<(), BitcoinCoordinatorError> {
-        // First we monitor the transaction if does not exist.
-
         let to_monitor = TypesToMonitor::Transactions(vec![tx.compute_txid()], context);
         self.monitor.monitor(to_monitor)?;
 
