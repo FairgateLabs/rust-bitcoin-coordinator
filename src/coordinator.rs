@@ -20,7 +20,7 @@ use bitvmx_transaction_monitor::{
 use console::style;
 use key_manager::{key_manager::KeyManager, keystorage::database::DatabaseKeyStore};
 use storage_backend::storage::Storage;
-use tracing::info;
+use tracing::{info, warn};
 use transaction_dispatcher::{
     dispatcher::{TransactionDispatcher, TransactionDispatcherApi},
     errors::DispatcherError,
@@ -158,6 +158,10 @@ where
         );
 
         for pending_tx in pending_txs {
+            if !self.should_be_dispatched(&pending_tx)? {
+                continue;
+            }
+
             let tx_id = pending_tx.tx.compute_txid();
 
             info!(
@@ -174,6 +178,36 @@ where
         }
 
         Ok(())
+    }
+
+    fn should_be_dispatched(
+        &self,
+        pending_tx: &CoordinatedTransaction,
+    ) -> Result<bool, BitcoinCoordinatorError> {
+        let should_be_dispatched_now = pending_tx.target_block_height.is_none();
+
+        if should_be_dispatched_now {
+            return Ok(true);
+        }
+
+        let was_already_broadcasted = pending_tx.broadcast_block_height.is_some();
+
+        if !was_already_broadcasted {
+            warn!(
+                "Transaction {} was not broadcasted but target block height is set.",
+                pending_tx.tx_id
+            );
+            // should not reach this point because, when ever is delivered it should be mark as BroadcastPendingConfirmation.
+            return Ok(false);
+        }
+
+        let current_block_height = self.monitor.get_monitor_height()?;
+
+        if current_block_height > pending_tx.target_block_height.unwrap() {
+            return Ok(false);
+        }
+
+        Ok(true)
     }
 
     fn process_in_progress_txs(&self) -> Result<(), BitcoinCoordinatorError> {
