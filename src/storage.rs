@@ -29,6 +29,8 @@ pub trait BitcoinCoordinatorStoreApi {
         target_block_height: Option<BlockHeight>,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
+    fn remove_tx(&self, tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
+
     fn get_txs(
         &self,
         state: TransactionDispatchState,
@@ -188,6 +190,22 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             .get::<&str, Vec<Txid>>(&txs_key)?
             .unwrap_or_default();
         txs.push(tx.compute_txid());
+        self.store.set(&txs_key, &txs, None)?;
+
+        Ok(())
+    }
+
+    fn remove_tx(&self, tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
+        let tx_key = self.get_key(StoreKey::Transaction(tx_id));
+        self.store.delete(&tx_key)?;
+
+        let txs_key = self.get_key(StoreKey::TransactionList);
+        let mut txs = self
+            .store
+            .get::<&str, Vec<Txid>>(&txs_key)?
+            .unwrap_or_default();
+
+        txs.retain(|id| *id != tx_id);
         self.store.set(&txs_key, &txs, None)?;
 
         Ok(())

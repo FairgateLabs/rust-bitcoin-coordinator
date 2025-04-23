@@ -48,12 +48,12 @@ pub trait BitcoinCoordinatorApi {
     /// This method should be called periodically to keep the coordinator state up-to-date
     fn tick(&self) -> Result<(), BitcoinCoordinatorError>;
 
-    /// Registers a transaction to be monitored by the coordinator
-    /// The transaction will be tracked for confirmations and status changes
+    /// Registers a type of data to be monitored by the coordinator
+    /// The data will be tracked for confirmations and status changes, and updates will be reported through the news.
     ///
     /// # Arguments
-    /// * `tx_data` - Transaction data to be monitored
-    fn monitor(&self, tx_data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError>;
+    /// * `data` - The data to monitors
+    fn monitor(&self, data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError>;
 
     /// Dispatches a transaction to the Bitcoin network
     ///
@@ -67,6 +67,14 @@ pub trait BitcoinCoordinatorApi {
         context: String,
         block_height: Option<BlockHeight>,
     ) -> Result<(), BitcoinCoordinatorError>;
+
+    /// Cancels the monitor and the dispatch of a type of data
+    /// This method removes the monitor and the dispatch from the coordinator's store.
+    /// Which means that the data will no longer be monitored.
+    ///
+    /// # Arguments
+    /// * `data` - The data to cancel
+    fn cancel(&self, data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError>;
 
     /// Registers funding information for potential transaction speed-ups
     /// This allows the coordinator to create RBF (Replace-By-Fee) transactions when needed
@@ -498,6 +506,18 @@ where
             style("Coordinator").green(),
             style(tx.compute_txid()).yellow()
         );
+
+        Ok(())
+    }
+
+    fn cancel(&self, data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError> {
+        self.monitor.cancel(data.clone())?;
+
+        if let TypesToMonitor::Transactions(txs, _) = data {
+            for tx in txs {
+                self.store.remove_tx(tx)?;
+            }
+        }
 
         Ok(())
     }
