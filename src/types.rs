@@ -29,17 +29,23 @@ pub enum TransactionDispatchState {
 pub struct CoordinatedTransaction {
     pub tx_id: Txid,
     pub tx: Transaction,
-    pub deliver_block_height: Option<BlockHeight>,
+    pub broadcast_block_height: Option<BlockHeight>,
     pub state: TransactionDispatchState,
+    pub target_block_height: Option<BlockHeight>,
 }
 
 impl CoordinatedTransaction {
-    pub fn new(tx: Transaction, state: TransactionDispatchState) -> Self {
+    pub fn new(
+        tx: Transaction,
+        state: TransactionDispatchState,
+        target_block_height: Option<BlockHeight>,
+    ) -> Self {
         Self {
             tx_id: tx.compute_txid(),
             tx,
-            deliver_block_height: None,
+            broadcast_block_height: None,
             state,
+            target_block_height,
         }
     }
 }

@@ -254,8 +254,8 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
     let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
     coordinator.monitor(tx_to_monitor)?;
 
-    // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.dispatch(tx, context_data.clone())?;
+    // Dispatch the transaction through the bitcoin coordinator at the current block height
+    coordinator.dispatch(tx, context_data.clone(), None)?;
 
     // Add funding for speed up transaction
     coordinator.fund_for_speedup(vec![tx_id], funding_tx, context_data.clone())?;

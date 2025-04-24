@@ -20,7 +20,7 @@ use bitvmx_transaction_monitor::{
 use console::style;
 use key_manager::{key_manager::KeyManager, keystorage::database::DatabaseKeyStore};
 use storage_backend::storage::Storage;
-use tracing::info;
+use tracing::{info, warn};
 use transaction_dispatcher::{
     dispatcher::{TransactionDispatcher, TransactionDispatcherApi},
     errors::DispatcherError,
@@ -48,19 +48,33 @@ pub trait BitcoinCoordinatorApi {
     /// This method should be called periodically to keep the coordinator state up-to-date
     fn tick(&self) -> Result<(), BitcoinCoordinatorError>;
 
-    /// Registers a transaction to be monitored by the coordinator
-    /// The transaction will be tracked for confirmations and status changes
+    /// Registers a type of data to be monitored by the coordinator
+    /// The data will be tracked for confirmations and status changes, and updates will be reported through the news.
     ///
     /// # Arguments
-    /// * `tx_data` - Transaction data to be monitored
-    fn monitor(&self, tx_data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError>;
+    /// * `data` - The data to monitors
+    fn monitor(&self, data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError>;
 
     /// Dispatches a transaction to the Bitcoin network
     ///
     /// # Arguments
     /// * `tx` - The Bitcoin transaction to dispatch
     /// * `context` - Additional context information for the transaction to be returned in news
-    fn dispatch(&self, tx: Transaction, context: String) -> Result<(), BitcoinCoordinatorError>;
+    /// * `block_height` - Block height to dispatch the transaction (None means now)
+    fn dispatch(
+        &self,
+        tx: Transaction,
+        context: String,
+        block_height: Option<BlockHeight>,
+    ) -> Result<(), BitcoinCoordinatorError>;
+
+    /// Cancels the monitor and the dispatch of a type of data
+    /// This method removes the monitor and the dispatch from the coordinator's store.
+    /// Which means that the data will no longer be monitored.
+    ///
+    /// # Arguments
+    /// * `data` - The data to cancel
+    fn cancel(&self, data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError>;
 
     /// Registers funding information for potential transaction speed-ups
     /// This allows the coordinator to create RBF (Replace-By-Fee) transactions when needed
@@ -152,6 +166,10 @@ where
         );
 
         for pending_tx in pending_txs {
+            if !self.should_be_dispatched(&pending_tx)? {
+                continue;
+            }
+
             let tx_id = pending_tx.tx.compute_txid();
 
             info!(
@@ -168,6 +186,33 @@ where
         }
 
         Ok(())
+    }
+
+    fn should_be_dispatched(
+        &self,
+        pending_tx: &CoordinatedTransaction,
+    ) -> Result<bool, BitcoinCoordinatorError> {
+        let should_be_dispatched_now = pending_tx.target_block_height.is_none();
+
+        if should_be_dispatched_now {
+            return Ok(true);
+        }
+
+        let was_already_broadcasted = pending_tx.broadcast_block_height.is_some();
+
+        if was_already_broadcasted {
+            warn!(
+                "Transaction {} has a target block height set but was already broadcasted.",
+                pending_tx.tx_id
+            );
+            // This code path should not be reached because once a transaction is broadcast,
+            // it should be marked as BroadcastPendingConfirmation.
+            return Ok(false);
+        }
+
+        let current_block_height = self.monitor.get_monitor_height()?;
+
+        Ok(current_block_height >= pending_tx.target_block_height.unwrap())
     }
 
     fn process_in_progress_txs(&self) -> Result<(), BitcoinCoordinatorError> {
@@ -349,13 +394,14 @@ where
         const SPEED_UP_THRESHOLD_BLOCKS: u32 = 1;
 
         // We do not speed up the transaction if it has not been delivered yet.
-        if tx_data.deliver_block_height.is_none() {
+        if tx_data.broadcast_block_height.is_none() {
             return Ok(());
         }
 
         let current_block_height = self.monitor.get_monitor_height()?;
 
-        if current_block_height - tx_data.deliver_block_height.unwrap() < SPEED_UP_THRESHOLD_BLOCKS
+        if current_block_height - tx_data.broadcast_block_height.unwrap()
+            < SPEED_UP_THRESHOLD_BLOCKS
         {
             return Ok(());
         }
@@ -443,20 +489,35 @@ where
         Ok(result)
     }
 
-    fn dispatch(&self, tx: Transaction, context: String) -> Result<(), BitcoinCoordinatorError> {
-        // First we monitor the transaction if does not exist.
-
+    fn dispatch(
+        &self,
+        tx: Transaction,
+        context: String,
+        block_height: Option<BlockHeight>,
+    ) -> Result<(), BitcoinCoordinatorError> {
         let to_monitor = TypesToMonitor::Transactions(vec![tx.compute_txid()], context);
         self.monitor.monitor(to_monitor)?;
 
         // Save the transaction to be dispatched.
-        self.store.save_tx(tx.clone())?;
+        self.store.save_tx(tx.clone(), block_height)?;
 
         info!(
             "{} Transaction ID {} ready to be dispatch.",
             style("Coordinator").green(),
             style(tx.compute_txid()).yellow()
         );
+
+        Ok(())
+    }
+
+    fn cancel(&self, data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError> {
+        self.monitor.cancel(data.clone())?;
+
+        if let TypesToMonitor::Transactions(txs, _) = data {
+            for tx in txs {
+                self.store.remove_tx(tx)?;
+            }
+        }
 
         Ok(())
     }

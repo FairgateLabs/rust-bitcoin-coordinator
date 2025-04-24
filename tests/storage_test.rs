@@ -38,7 +38,7 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     let tx_id = tx.compute_txid();
 
     // Save transaction
-    store.save_tx(tx.clone())?;
+    store.save_tx(tx.clone(), None)?;
 
     // Get transactions by state
     let txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
@@ -98,7 +98,7 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
     let tx_id = tx.compute_txid();
 
     // Save transaction
-    store.save_tx(tx.clone())?;
+    store.save_tx(tx.clone(), None)?;
 
     // Test adding multiple transactions and verifying transaction list
 
@@ -121,8 +121,8 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
     let tx3_id = tx3.compute_txid();
 
     // Save additional transactions
-    store.save_tx(tx2.clone())?;
-    store.save_tx(tx3.clone())?;
+    store.save_tx(tx2.clone(), None)?;
+    store.save_tx(tx3.clone(), None)?;
 
     // Get all transactions in ReadyToSend state (should be all three)
     let ready_txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
@@ -178,7 +178,7 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
     let tx_id = tx_to_speedup.compute_txid();
 
     // Save the transaction first
-    store.save_tx(tx_to_speedup.clone())?;
+    store.save_tx(tx_to_speedup.clone(), None)?;
 
     // Initially, there should be no speed-up transactions
     let speed_up_tx = store.get_last_speedup_tx(&tx_id)?;
@@ -266,20 +266,18 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
-    clear_output();
-
     // Create a temporary directory for testing
     let store = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
         "test_output/test/{}",
         generate_random_string()
     )))?);
-    let bitcoin_store = BitcoinCoordinatorStore::new(store)?;
+    let store = BitcoinCoordinatorStore::new(store)?;
 
     let funding_tx_id_1 =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2001")?;
 
     // Test that get_funding returns None for a transaction ID that hasn't been added yet
-    let initial_funding = bitcoin_store.get_funding(funding_tx_id_1)?;
+    let initial_funding = store.get_funding(funding_tx_id_1)?;
     assert!(initial_funding.is_none());
 
     // Test add_funding
@@ -303,10 +301,10 @@ fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
 
     let tx_ids = vec![tx_id_1, tx_id_2];
     let context = "Test funding context".to_string();
-    bitcoin_store.add_funding(tx_ids, funding_tx.clone(), context.clone())?;
+    store.add_funding(tx_ids, funding_tx.clone(), context.clone())?;
 
     // Test get_funding
-    let retrieved_funding = bitcoin_store.get_funding(tx_id_1)?;
+    let retrieved_funding = store.get_funding(tx_id_1)?;
     assert!(retrieved_funding.is_some());
     let retrieved = retrieved_funding.unwrap();
     assert_eq!(retrieved.tx_id, funding_tx_id_1);
@@ -317,26 +315,71 @@ fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
     let mut updated_funding = funding_tx.clone();
     updated_funding.utxo_index = 1;
     updated_funding.tx_id = funding_tx_id_2;
-    bitcoin_store.update_funding(tx_id_1, updated_funding)?;
+    store.update_funding(tx_id_1, updated_funding)?;
 
     // Verify the update
-    let updated_retrieved = bitcoin_store.get_funding(tx_id_1)?.unwrap();
+    let updated_retrieved = store.get_funding(tx_id_1)?.unwrap();
     assert_eq!(updated_retrieved.utxo_index, 1);
     assert_eq!(updated_retrieved.tx_id, funding_tx_id_2);
 
     // Test remove_funding
-    bitcoin_store.remove_funding(funding_tx_id_1, tx_id_1)?;
+    store.remove_funding(funding_tx_id_1, tx_id_1)?;
 
     // Verify the funding was removed
-    let removed_funding = bitcoin_store.get_funding(funding_tx_id_1)?;
+    let removed_funding = store.get_funding(funding_tx_id_1)?;
     assert!(removed_funding.is_none());
 
     // Test with non-existent transaction ID
     let non_existent_tx_id = Txid::from_slice(&[4; 32]).unwrap();
-    let non_existent_funding = bitcoin_store.get_funding(non_existent_tx_id)?;
+    let non_existent_funding = store.get_funding(non_existent_tx_id)?;
     assert!(non_existent_funding.is_none());
 
     // Clean up
     clear_output();
+    Ok(())
+}
+
+#[test]
+fn test_cancel_monitor() -> Result<(), Box<dyn std::error::Error>> {
+    let store = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
+        "test_output/test_cancel_monitor/{}",
+        generate_random_string()
+    )))?);
+
+    let store = BitcoinCoordinatorStore::new(store)?;
+    // Create first transaction
+    let tx1 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+    let tx_id_1 = tx1.compute_txid();
+
+    // Create second transaction
+    let tx2 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195700).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+    let tx_id_2 = tx2.compute_txid();
+
+    // Save transaction to be monitored, this will be mark as pending dispatch
+    store.save_tx(tx1.clone(), None)?;
+    store.save_tx(tx2.clone(), None)?;
+
+    // Remove one of the transactions
+    store.remove_tx(tx_id_1)?;
+    let txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
+    assert_eq!(txs.len(), 1);
+
+    // Remove the last transaction
+    store.remove_tx(tx_id_2)?;
+    let txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
+    assert_eq!(txs.len(), 0);
+
+    clear_output();
+
     Ok(())
 }
