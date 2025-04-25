@@ -38,7 +38,7 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     let tx_id = tx.compute_txid();
 
     // Save transaction
-    store.save_tx(tx.clone(), None)?;
+    store.save_tx(tx.clone(), None, "context_tx".to_string())?;
 
     // Get transactions by state
     let txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
@@ -98,7 +98,7 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
     let tx_id = tx.compute_txid();
 
     // Save transaction
-    store.save_tx(tx.clone(), None)?;
+    store.save_tx(tx.clone(), None, "context_tx".to_string())?;
 
     // Test adding multiple transactions and verifying transaction list
 
@@ -121,8 +121,8 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
     let tx3_id = tx3.compute_txid();
 
     // Save additional transactions
-    store.save_tx(tx2.clone(), None)?;
-    store.save_tx(tx3.clone(), None)?;
+    store.save_tx(tx2.clone(), None, "context_tx2".to_string())?;
+    store.save_tx(tx3.clone(), None, "context_tx3".to_string())?;
 
     // Get all transactions in ReadyToSend state (should be all three)
     let ready_txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
@@ -178,7 +178,7 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
     let tx_id = tx_to_speedup.compute_txid();
 
     // Save the transaction first
-    store.save_tx(tx_to_speedup.clone(), None)?;
+    store.save_tx(tx_to_speedup.clone(), None, "context_speedup".to_string())?;
 
     // Initially, there should be no speed-up transactions
     let speed_up_tx = store.get_last_speedup_tx(&tx_id)?;
@@ -306,11 +306,11 @@ fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
     // Test get_funding
     let retrieved_funding = store.get_funding(tx_id_1)?;
     assert!(retrieved_funding.is_some());
-    let retrieved = retrieved_funding.unwrap();
-    assert_eq!(retrieved.tx_id, funding_tx_id_1);
-    assert_eq!(retrieved.utxo_index, 3);
-    assert_eq!(retrieved.utxo_output.value, Amount::from_sat(10000));
-
+    let (funding_tx, funding_context) = retrieved_funding.unwrap();
+    assert_eq!(funding_tx.tx_id, funding_tx_id_1);
+    assert_eq!(funding_tx.utxo_index, 3);
+    assert_eq!(funding_tx.utxo_output.value, Amount::from_sat(10000));
+    assert_eq!(funding_context, context);
     // Test update_funding
     let mut updated_funding = funding_tx.clone();
     updated_funding.utxo_index = 1;
@@ -318,9 +318,10 @@ fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
     store.update_funding(tx_id_1, updated_funding)?;
 
     // Verify the update
-    let updated_retrieved = store.get_funding(tx_id_1)?.unwrap();
-    assert_eq!(updated_retrieved.utxo_index, 1);
-    assert_eq!(updated_retrieved.tx_id, funding_tx_id_2);
+    let (updated_funding, updated_context) = store.get_funding(tx_id_1)?.unwrap();
+    assert_eq!(updated_funding.utxo_index, 1);
+    assert_eq!(updated_funding.tx_id, funding_tx_id_2);
+    assert_eq!(updated_context, context);
 
     // Test remove_funding
     store.remove_funding(funding_tx_id_1, tx_id_1)?;
@@ -366,8 +367,8 @@ fn test_cancel_monitor() -> Result<(), Box<dyn std::error::Error>> {
     let tx_id_2 = tx2.compute_txid();
 
     // Save transaction to be monitored, this will be mark as pending dispatch
-    store.save_tx(tx1.clone(), None)?;
-    store.save_tx(tx2.clone(), None)?;
+    store.save_tx(tx1.clone(), None, "context_tx1".to_string())?;
+    store.save_tx(tx2.clone(), None, "context_tx2".to_string())?;
 
     // Remove one of the transactions
     store.remove_tx(tx_id_1)?;

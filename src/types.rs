@@ -32,6 +32,7 @@ pub struct CoordinatedTransaction {
     pub broadcast_block_height: Option<BlockHeight>,
     pub state: TransactionDispatchState,
     pub target_block_height: Option<BlockHeight>,
+    pub context: String,
 }
 
 impl CoordinatedTransaction {
@@ -39,6 +40,7 @@ impl CoordinatedTransaction {
         tx: Transaction,
         state: TransactionDispatchState,
         target_block_height: Option<BlockHeight>,
+        context: String,
     ) -> Self {
         Self {
             tx_id: tx.compute_txid(),
@@ -46,6 +48,7 @@ impl CoordinatedTransaction {
             broadcast_block_height: None,
             state,
             target_block_height,
+            context,
         }
     }
 }
@@ -95,25 +98,59 @@ pub struct TransactionFullInfo {
     pub tx: Transaction,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct News {
     pub monitor_news: Vec<MonitorNews>,
-    pub insufficient_funds: Vec<(Txid, String)>,
+    pub coordinator_news: Vec<CoordinatorNews>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CoordinatorNews {
+    /// Error when dispatching a transaction
+    /// - Txid: The transaction ID that failed to dispatch
+    /// - String: Context information about the transaction
+    /// - String: Error message describing what went wrong
+    DispatchTransactionError(Txid, String, String),
+
+    /// Error when attempting to speed up a transaction
+    /// - Txid: The transaction ID that failed to speed up
+    /// - String: Context information about the transaction
+    /// - String: Error message describing what went wrong
+    DispatchSpeedUpError(Txid, String, String),
+
+    /// Indicates insufficient funds for a transaction
+    /// - Txid: The transaction ID that needs funds
+    /// - String: Context information about the transaction
+    /// - Txid: The funding transaction ID that was insufficient
+    /// - String: Context information about the funding transaction
+    InsufficientFunds(Txid, String, Txid, String),
+
+    /// Notification of a new speed-up transaction
+    /// - Txid: The transaction ID that was sped up
+    /// - String: Context information about the transaction
+    /// - u32: Counter indicating how many times this transaction has been sped up
+    NewSpeedUp(Txid, String, u32),
 }
 
 impl News {
-    pub fn new(txs: Vec<MonitorNews>, insufficient_funds: Vec<(Txid, String)>) -> Self {
+    pub fn new(monitor_news: Vec<MonitorNews>, coordinator_news: Vec<CoordinatorNews>) -> Self {
         Self {
-            monitor_news: txs,
-            insufficient_funds,
+            monitor_news,
+            coordinator_news,
         }
     }
 }
 
-pub enum AckNews {
-    Transaction(AckMonitorNews),
+pub enum AckCoordinatorNews {
     InsufficientFunds(Txid),
-    NewBlock,
+    NewSpeedUp(Txid),
+    DispatchTransactionError(Txid),
+    DispatchSpeedUpError(Txid),
+}
+
+pub enum AckNews {
+    Monitor(AckMonitorNews),
+    Coordinator(AckCoordinatorNews),
 }
 
 pub type BitcoinCoordinatorType =
