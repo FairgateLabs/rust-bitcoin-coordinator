@@ -1,11 +1,7 @@
-use bitcoin::Transaction;
 use bitcoin_coordinator::{
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
-    storage::BitcoinCoordinatorStoreApi,
-    types::{CoordinatedTransaction, TransactionDispatchState},
     TypesToMonitor,
 };
-use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::errors::MonitorError;
 use mockall::predicate::{self, eq};
 use utils::{clear_output, get_mock_data, get_mocks};

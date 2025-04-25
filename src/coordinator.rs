@@ -400,11 +400,11 @@ where
                 let speed_up_tx = self.store.get_speedup_tx(&child_txid, &tx_status.tx_id)?;
                 //Confirmation in 1 means the transaction is already included in the block.
                 //The new transaction funding is gonna be this a speed-up transaction.
-                let funding_info = FundingTransaction {
-                    tx_id: speed_up_tx.tx_id,
-                    utxo_index: speed_up_tx.utxo_index,
-                    utxo_output: speed_up_tx.utxo_output.clone(),
-                };
+                let funding_info = FundingTransaction::new(
+                    speed_up_tx.tx_id,
+                    speed_up_tx.utxo_index,
+                    speed_up_tx.utxo_output.clone(),
+                );
 
                 self.store.update_funding(child_txid, funding_info)?;
             }

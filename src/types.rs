@@ -15,6 +15,16 @@ pub struct FundingTransaction {
     pub utxo_output: TxOut,
 }
 
+impl FundingTransaction {
+    pub fn new(tx_id: Txid, utxo_index: u32, utxo_output: TxOut) -> Self {
+        Self {
+            tx_id,
+            utxo_index,
+            utxo_output,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum TransactionDispatchState {
     // The transaction is ready and queued to be sent.
