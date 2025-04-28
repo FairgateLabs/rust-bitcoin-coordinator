@@ -4,12 +4,12 @@ use crate::{
     errors::BitcoinCoordinatorError,
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{
-        AckNews, BitcoinCoordinatorType, CoordinatedTransaction, FundingTransaction, News,
-        SpeedUpTx, TransactionDispatchState,
+        AckNews, BitcoinCoordinatorType, CoordinatedTransaction, CoordinatorNews,
+        FundingTransaction, News, SpeedUpTx, TransactionDispatchState,
     },
 };
 
-use bitcoin::{Network, PublicKey, Transaction, TxOut, Txid};
+use bitcoin::{Network, Transaction, Txid};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::{
@@ -178,7 +178,18 @@ where
                 style(tx_id).blue(),
             );
 
-            self.dispatcher.send(pending_tx.tx)?;
+            let dispatch_result = self.dispatcher.send(pending_tx.tx);
+
+            if let Err(error) = dispatch_result {
+                let news = CoordinatorNews::DispatchTransactionError(
+                    tx_id,
+                    pending_tx.context,
+                    error.to_string(),
+                );
+                self.store.add_news(news)?;
+            }
+
+            // Error here should be handled. And saved the error in news if needed.
 
             let deliver_block_height = self.monitor.get_monitor_height()?;
             self.store
@@ -232,6 +243,7 @@ where
 
             // Get updated transaction status from monitor
             let tx_status = self.monitor.get_tx_status(&tx.tx_id);
+
             match tx_status {
                 Ok(tx_status) => {
                     if tx_status.confirmations >= Self::MAX_MONITORING_CONFIRMATIONS {
@@ -245,12 +257,12 @@ where
                         // THIS IS A BORDER CASE.
                         // If the transaction is orphan, it means it has been removed from the blockchain.
                         // We should speed up the transaction.
-                        self.process_unseen_transaction(&tx)?;
+                        self.process_unseen_transaction(tx)?;
                         return Ok(());
                     }
                 }
                 Err(MonitorError::TransactionNotFound(_)) => {
-                    self.process_unseen_transaction(&tx)?;
+                    self.process_unseen_transaction(tx)?;
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -304,22 +316,46 @@ where
 
     fn speed_up(
         &self,
-        tx: &Transaction,
-        funding_txid: Txid,
-        tx_public_key: PublicKey,
-        funding_utxo: (u32, TxOut, PublicKey),
+        tx_to_speedup: CoordinatedTransaction,
+        funding_tx: FundingTransaction,
+        funding_context: String,
     ) -> Result<(), BitcoinCoordinatorError> {
-        let dispatch_result =
-            self.dispatcher
-                .speed_up(tx, tx_public_key, funding_txid, funding_utxo.clone());
+        let dispatch_result = self.dispatcher.speed_up(
+            &tx_to_speedup.tx,
+            self.account.pk,
+            funding_tx.tx_id,
+            (
+                funding_tx.utxo_index,
+                funding_tx.utxo_output.clone(),
+                self.account.pk,
+            ),
+        );
 
         if let Err(error) = dispatch_result {
             match error {
                 DispatcherError::InsufficientFunds => {
-                    self.store.add_insufficient_funds_news(tx.compute_txid())?;
+                    let news = CoordinatorNews::InsufficientFunds(
+                        tx_to_speedup.tx_id,
+                        tx_to_speedup.context,
+                        funding_tx.tx_id,
+                        funding_context,
+                    );
+
+                    self.store.add_news(news)?;
+
                     return Ok(());
                 }
-                e => return Err(e.into()),
+                e => {
+                    let news = CoordinatorNews::DispatchSpeedUpError(
+                        tx_to_speedup.tx_id,
+                        tx_to_speedup.context,
+                        e.to_string(),
+                    );
+
+                    self.store.add_news(news)?;
+
+                    return Ok(());
+                }
             }
         }
 
@@ -331,14 +367,18 @@ where
                 speed_up_tx_id,
                 deliver_block_height,
                 deliver_fee_rate,
-                tx.compute_txid(),
-                funding_utxo.0,
-                funding_utxo.1,
+                tx_to_speedup.tx_id,
+                funding_tx.utxo_index,
+                funding_tx.utxo_output,
             );
 
             self.store.save_speedup_tx(&speed_up_tx)?;
 
-            let context_data = format!("{}{}", Self::SPEED_UP_CHILD_TXID_PREFIX, tx.compute_txid());
+            let context_data = format!(
+                "{}{}",
+                Self::SPEED_UP_CHILD_TXID_PREFIX,
+                tx_to_speedup.tx_id
+            );
 
             let monitor_data = TypesToMonitor::Transactions(vec![speed_up_tx_id], context_data);
 
@@ -360,11 +400,11 @@ where
                 let speed_up_tx = self.store.get_speedup_tx(&child_txid, &tx_status.tx_id)?;
                 //Confirmation in 1 means the transaction is already included in the block.
                 //The new transaction funding is gonna be this a speed-up transaction.
-                let funding_info = FundingTransaction {
-                    tx_id: speed_up_tx.tx_id,
-                    utxo_index: speed_up_tx.utxo_index,
-                    utxo_output: speed_up_tx.utxo_output.clone(),
-                };
+                let funding_info = FundingTransaction::new(
+                    speed_up_tx.tx_id,
+                    speed_up_tx.utxo_index,
+                    speed_up_tx.utxo_output.clone(),
+                );
 
                 self.store.update_funding(child_txid, funding_info)?;
             }
@@ -389,25 +429,25 @@ where
 
     fn process_unseen_transaction(
         &self,
-        tx_data: &CoordinatedTransaction,
+        tx_data_to_speedup: CoordinatedTransaction,
     ) -> Result<(), BitcoinCoordinatorError> {
         const SPEED_UP_THRESHOLD_BLOCKS: u32 = 1;
 
         // We do not speed up the transaction if it has not been delivered yet.
-        if tx_data.broadcast_block_height.is_none() {
+        if tx_data_to_speedup.broadcast_block_height.is_none() {
             return Ok(());
         }
 
         let current_block_height = self.monitor.get_monitor_height()?;
 
-        if current_block_height - tx_data.broadcast_block_height.unwrap()
+        if current_block_height - tx_data_to_speedup.broadcast_block_height.unwrap()
             < SPEED_UP_THRESHOLD_BLOCKS
         {
             return Ok(());
         }
 
         // We get all the existing speed up transaction for tx_id. Then we figure out if we should speed it up again.
-        let speed_up_txs = self.store.get_last_speedup_tx(&tx_data.tx_id)?;
+        let speed_up_txs = self.store.get_last_speedup_tx(&tx_data_to_speedup.tx_id)?;
 
         // In case there are an existing speed up we have to check if a new speed up is needed.
         // Otherwise we always speed up the transaction
@@ -423,25 +463,16 @@ where
 
         // Prepare to speed up the transaction using its associated funding transaction.
         // This will create a new transaction with a higher fee rate to replace the original one.
-        let funding_tx = self.store.get_funding(tx_data.tx_id)?;
+        let funding_tx = self.store.get_funding(tx_data_to_speedup.tx_id)?;
 
         if funding_tx.is_none() {
             //In case there is no funding transaction, we can't speed up the transaction.
             return Ok(());
         }
 
-        let funding_tx = funding_tx.unwrap();
+        let funding_data = funding_tx.unwrap();
 
-        self.speed_up(
-            &tx_data.tx,
-            funding_tx.tx_id,
-            self.account.pk,
-            (
-                funding_tx.utxo_index,
-                funding_tx.utxo_output,
-                self.account.pk,
-            ),
-        )?;
+        self.speed_up(tx_data_to_speedup, funding_data.0, funding_data.1)?;
 
         Ok(())
     }
@@ -495,11 +526,11 @@ where
         context: String,
         block_height: Option<BlockHeight>,
     ) -> Result<(), BitcoinCoordinatorError> {
-        let to_monitor = TypesToMonitor::Transactions(vec![tx.compute_txid()], context);
+        let to_monitor = TypesToMonitor::Transactions(vec![tx.compute_txid()], context.clone());
         self.monitor.monitor(to_monitor)?;
 
         // Save the transaction to be dispatched.
-        self.store.save_tx(tx.clone(), block_height)?;
+        self.store.save_tx(tx.clone(), block_height, context)?;
 
         info!(
             "{} Transaction ID {} ready to be dispatch.",
@@ -546,10 +577,10 @@ where
     }
 
     fn get_news(&self) -> Result<News, BitcoinCoordinatorError> {
-        let txs = self.monitor.get_news()?;
+        let list_monitor_news = self.monitor.get_news()?;
 
         //TODO: Remove transactions new that are speed up transactions.
-        let txs = txs
+        let monitor_news = list_monitor_news
             .into_iter()
             .filter(|tx| {
                 if let MonitorNews::Transaction(_, _, context_data) = tx {
@@ -560,16 +591,15 @@ where
             })
             .collect();
 
-        let insufficient_funds = self.store.get_insufficient_funds_news()?;
+        let coordinator_news = self.store.get_news()?;
 
-        Ok(News::new(txs, insufficient_funds))
+        Ok(News::new(monitor_news, coordinator_news))
     }
 
     fn ack_news(&self, news: AckNews) -> Result<(), BitcoinCoordinatorError> {
         match news {
-            AckNews::Transaction(news) => self.monitor.ack_news(news)?,
-            AckNews::InsufficientFunds(tx_id) => self.store.ack_insufficient_funds_news(tx_id)?,
-            AckNews::NewBlock => self.monitor.ack_news(AckMonitorNews::NewBlock)?,
+            AckNews::Monitor(news) => self.monitor.ack_news(news)?,
+            AckNews::Coordinator(news) => self.store.ack_news(news)?,
         }
         Ok(())
     }

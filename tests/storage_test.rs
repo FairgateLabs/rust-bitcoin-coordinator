@@ -38,7 +38,7 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     let tx_id = tx.compute_txid();
 
     // Save transaction
-    store.save_tx(tx.clone(), None)?;
+    store.save_tx(tx.clone(), None, "context_tx".to_string())?;
 
     // Get transactions by state
     let txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
@@ -80,7 +80,7 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
 }
 
 #[test]
-fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
+fn test_multiple_transactions() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
         "test_output/test/{}",
         generate_random_string()
@@ -98,7 +98,7 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
     let tx_id = tx.compute_txid();
 
     // Save transaction
-    store.save_tx(tx.clone(), None)?;
+    store.save_tx(tx.clone(), None, "context_tx".to_string())?;
 
     // Test adding multiple transactions and verifying transaction list
 
@@ -121,8 +121,8 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
     let tx3_id = tx3.compute_txid();
 
     // Save additional transactions
-    store.save_tx(tx2.clone(), None)?;
-    store.save_tx(tx3.clone(), None)?;
+    store.save_tx(tx2.clone(), None, "context_tx2".to_string())?;
+    store.save_tx(tx3.clone(), None, "context_tx3".to_string())?;
 
     // Get all transactions in ReadyToSend state (should be all three)
     let ready_txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
@@ -160,7 +160,7 @@ fn test_multiple_transactions() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
+fn test_speed_up_tx_operations() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
         "test_output/test/{}",
         generate_random_string()
@@ -178,7 +178,7 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
     let tx_id = tx_to_speedup.compute_txid();
 
     // Save the transaction first
-    store.save_tx(tx_to_speedup.clone(), None)?;
+    store.save_tx(tx_to_speedup.clone(), None, "context_speedup".to_string())?;
 
     // Initially, there should be no speed-up transactions
     let speed_up_tx = store.get_last_speedup_tx(&tx_id)?;
@@ -265,7 +265,7 @@ fn test_speed_up_tx_operations() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
+fn test_funding_transactions() -> Result<(), anyhow::Error> {
     // Create a temporary directory for testing
     let store = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
         "test_output/test/{}",
@@ -290,14 +290,14 @@ fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2002")?;
 
     // Create a funding transaction
-    let funding_tx = FundingTransaction {
-        tx_id: funding_tx_id_1,
-        utxo_index: 3,
-        utxo_output: bitcoin::TxOut {
+    let funding_tx = FundingTransaction::new(
+        funding_tx_id_1,
+        3,
+        bitcoin::TxOut {
             value: Amount::from_sat(10000),
             script_pubkey: bitcoin::ScriptBuf::new(),
         },
-    };
+    );
 
     let tx_ids = vec![tx_id_1, tx_id_2];
     let context = "Test funding context".to_string();
@@ -306,11 +306,11 @@ fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
     // Test get_funding
     let retrieved_funding = store.get_funding(tx_id_1)?;
     assert!(retrieved_funding.is_some());
-    let retrieved = retrieved_funding.unwrap();
-    assert_eq!(retrieved.tx_id, funding_tx_id_1);
-    assert_eq!(retrieved.utxo_index, 3);
-    assert_eq!(retrieved.utxo_output.value, Amount::from_sat(10000));
-
+    let (funding_tx, funding_context) = retrieved_funding.unwrap();
+    assert_eq!(funding_tx.tx_id, funding_tx_id_1);
+    assert_eq!(funding_tx.utxo_index, 3);
+    assert_eq!(funding_tx.utxo_output.value, Amount::from_sat(10000));
+    assert_eq!(funding_context, context);
     // Test update_funding
     let mut updated_funding = funding_tx.clone();
     updated_funding.utxo_index = 1;
@@ -318,9 +318,10 @@ fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
     store.update_funding(tx_id_1, updated_funding)?;
 
     // Verify the update
-    let updated_retrieved = store.get_funding(tx_id_1)?.unwrap();
-    assert_eq!(updated_retrieved.utxo_index, 1);
-    assert_eq!(updated_retrieved.tx_id, funding_tx_id_2);
+    let (updated_funding, updated_context) = store.get_funding(tx_id_1)?.unwrap();
+    assert_eq!(updated_funding.utxo_index, 1);
+    assert_eq!(updated_funding.tx_id, funding_tx_id_2);
+    assert_eq!(updated_context, context);
 
     // Test remove_funding
     store.remove_funding(funding_tx_id_1, tx_id_1)?;
@@ -340,7 +341,7 @@ fn test_funding_transactions() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn test_cancel_monitor() -> Result<(), Box<dyn std::error::Error>> {
+fn test_cancel_monitor() -> Result<(), anyhow::Error> {
     let store = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
         "test_output/test_cancel_monitor/{}",
         generate_random_string()
@@ -366,8 +367,8 @@ fn test_cancel_monitor() -> Result<(), Box<dyn std::error::Error>> {
     let tx_id_2 = tx2.compute_txid();
 
     // Save transaction to be monitored, this will be mark as pending dispatch
-    store.save_tx(tx1.clone(), None)?;
-    store.save_tx(tx2.clone(), None)?;
+    store.save_tx(tx1.clone(), None, "context_tx1".to_string())?;
+    store.save_tx(tx2.clone(), None, "context_tx2".to_string())?;
 
     // Remove one of the transactions
     store.remove_tx(tx_id_1)?;
@@ -379,6 +380,160 @@ fn test_cancel_monitor() -> Result<(), Box<dyn std::error::Error>> {
     let txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
     assert_eq!(txs.len(), 0);
 
+    clear_output();
+
+    Ok(())
+}
+
+#[test]
+fn test_funding_tx_operations() -> Result<(), anyhow::Error> {
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
+        "test_output/test_funding/{}",
+        generate_random_string()
+    )))?);
+
+    let store = BitcoinCoordinatorStore::new(storage)?;
+
+    // Create a transaction that will need funding
+    let tx = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+    let tx_id = tx.compute_txid();
+
+    // Save the transaction
+    store.save_tx(tx.clone(), None, "transaction_needing_funding".to_string())?;
+
+    // Create a funding transaction
+    let funding_tx = FundingTransaction::new(
+        Txid::from_str("000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f").unwrap(),
+        0,
+        bitcoin::TxOut {
+            value: Amount::from_sat(100000),
+            script_pubkey: bitcoin::ScriptBuf::new(),
+        },
+    );
+
+    // Initially, there should be no funding for the transaction
+    let initial_funding = store.get_funding(tx_id)?;
+    assert!(initial_funding.is_none());
+
+    // Add funding for the transaction
+    store.add_funding(
+        vec![tx_id],
+        funding_tx.clone(),
+        "funding_context".to_string(),
+    )?;
+
+    // Verify funding was added
+    let retrieved_funding = store.get_funding(tx_id)?;
+    assert!(retrieved_funding.is_some());
+    let (retrieved_tx, context) = retrieved_funding.unwrap();
+    assert_eq!(retrieved_tx.tx_id, funding_tx.tx_id);
+    assert_eq!(retrieved_tx.utxo_output.value, funding_tx.utxo_output.value);
+    assert_eq!(context, "funding_context");
+
+    // Remove the funding
+    store.remove_funding(funding_tx.tx_id, tx_id)?;
+
+    // Verify funding was removed
+    let removed_funding = store.get_funding(tx_id)?;
+    assert!(removed_funding.is_none());
+
+    // Test adding funding for multiple transactions
+    let tx2 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195700).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+    let tx2_id = tx2.compute_txid();
+
+    let tx3 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195800).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+    let tx3_id = tx3.compute_txid();
+
+    // Save the transactions
+    store.save_tx(tx2.clone(), None, "second_tx".to_string())?;
+    store.save_tx(tx3.clone(), None, "third_tx".to_string())?;
+
+    // Create a new funding transaction
+    let funding_tx2 = FundingTransaction::new(
+        Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111").unwrap(),
+        1,
+        bitcoin::TxOut {
+            value: Amount::from_sat(200000),
+            script_pubkey: bitcoin::ScriptBuf::new(),
+        },
+    );
+
+    // Add funding for multiple transactions
+    store.add_funding(
+        vec![tx_id, tx2_id, tx3_id],
+        funding_tx2.clone(),
+        "multi_funding".to_string(),
+    )?;
+
+    // Verify funding was added for all transactions
+    for &id in &[tx_id, tx2_id, tx3_id] {
+        let funding = store.get_funding(id)?;
+        assert!(funding.is_some());
+        let (retrieved_tx, context) = funding.unwrap();
+        assert_eq!(retrieved_tx.tx_id, funding_tx2.tx_id);
+        assert_eq!(
+            retrieved_tx.utxo_output.value,
+            funding_tx2.utxo_output.value
+        );
+        assert_eq!(context, "multi_funding");
+    }
+
+    // Test error handling when removing non-existent funding
+    let random_txid =
+        Txid::from_str("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff").unwrap();
+    let result = store.remove_funding(tx_id, random_txid);
+
+    assert!(matches!(
+        result,
+        Err(BitcoinCoordinatorStoreError::FundingTransactionNotFound)
+    ));
+
+    // Test adding a second funding transaction (should replace the first one)
+    let funding_tx3 = FundingTransaction::new(
+        Txid::from_str("2222222222222222222222222222222222222222222222222222222222222222").unwrap(),
+        2,
+        bitcoin::TxOut {
+            value: Amount::from_sat(300000),
+            script_pubkey: bitcoin::ScriptBuf::new(),
+        },
+    );
+
+    store.add_funding(
+        vec![tx_id],
+        funding_tx3.clone(),
+        "replacement_funding".to_string(),
+    )?;
+
+    // Verify the funding was replaced
+    let updated_funding = store.get_funding(tx_id)?;
+    assert!(updated_funding.is_some());
+    let (retrieved_tx, context) = updated_funding.unwrap();
+    assert_eq!(retrieved_tx.tx_id, funding_tx3.tx_id);
+    assert_eq!(retrieved_tx.utxo_output.value, Amount::from_sat(300000));
+    assert_eq!(context, "replacement_funding");
+
+    // Test removing funding for one transaction doesn't affect others
+    store.remove_funding(funding_tx2.tx_id, tx2_id)?;
+
+    // tx2 should have no funding
+    assert!(store.get_funding(tx2_id)?.is_none());
+
+    // Clean up
     clear_output();
 
     Ok(())

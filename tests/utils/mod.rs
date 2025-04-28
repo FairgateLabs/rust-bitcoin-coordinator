@@ -58,14 +58,14 @@ pub fn get_mock_data() -> (
     let new_funding_tx_id =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
 
-    let funding_tx = FundingTransaction {
-        tx_id: new_funding_tx_id,
-        utxo_index: 1,
-        utxo_output: TxOut {
+    let funding_tx = FundingTransaction::new(
+        new_funding_tx_id,
+        1,
+        TxOut {
             value: Amount::default(),
             script_pubkey: ScriptBuf::default(),
         },
-    };
+    );
 
     let tx = Transaction {
         version: transaction::Version::TWO,

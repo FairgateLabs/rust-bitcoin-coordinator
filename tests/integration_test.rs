@@ -207,7 +207,7 @@ fn integration_test() -> Result<(), anyhow::Error> {
                     let tx: Transaction = tx.unwrap();
                     coordinator.dispatch(tx, "my_context".to_string(), None)?;
 
-                    let ack_news = AckNews::Transaction(AckMonitorNews::Transaction(tx_1_id));
+                    let ack_news = AckNews::Monitor(AckMonitorNews::Transaction(tx_1_id));
                     coordinator.ack_news(ack_news)?;
                 }
                 MonitorNews::RskPeginTransaction(tx_id, _) => {

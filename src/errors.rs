@@ -20,6 +20,9 @@ pub enum BitcoinCoordinatorStoreError {
     #[error("Error with Storage Backend: {0}")]
     StorageBackendError(#[from] storage_backend::error::StorageError),
 
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+
     #[error("Error: {0}, {1}")]
     BitcoinCoordinatorStoreError(String, storage_backend::error::StorageError),
 
