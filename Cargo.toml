@@ -39,4 +39,4 @@ features = ["std", "std_rng"]
 
 
 [dev-dependencies]
-bitcoind = { path = "../rust-bitcoind" }
+bitcoind = { path = "../rust-bitcoind" } 
