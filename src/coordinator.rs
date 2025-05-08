@@ -18,7 +18,7 @@ use bitvmx_transaction_monitor::{
     types::{AckMonitorNews, MonitorNews, TransactionStatus, TypesToMonitor},
 };
 use console::style;
-use key_manager::{key_manager::KeyManager, keystorage::database::DatabaseKeyStore};
+use key_manager::key_manager::KeyManager;
 use storage_backend::storage::Storage;
 use tracing::{info, warn};
 use transaction_dispatcher::{
@@ -109,7 +109,7 @@ impl BitcoinCoordinatorType {
     pub fn new_with_paths(
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
-        key_manager: Rc<KeyManager<DatabaseKeyStore>>,
+        key_manager: Rc<KeyManager>,
         checkpoint: Option<BlockHeight>,
         confirmation_threshold: u32,
         network: Network,

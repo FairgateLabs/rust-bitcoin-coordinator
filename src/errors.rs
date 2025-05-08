@@ -71,9 +71,6 @@ pub enum TxBuilderHelperError {
     #[error("Error while converting slice to array: {0}")]
     ConversionError(#[from] std::array::TryFromSliceError),
 
-    #[error("Error while building KeyStore: {0}")]
-    KeyStoreError(#[from] key_manager::errors::KeyStoreError),
-
     #[error("Error while building Dispatcher: {0}")]
     DispatcherError(#[from] transaction_dispatcher::errors::DispatcherError),
 

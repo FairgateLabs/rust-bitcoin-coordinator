@@ -1,8 +1,9 @@
 use bitcoin::{Transaction, Txid};
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::{AckMonitorNews, MonitorNews, TypesToMonitor};
-use key_manager::{create_database_key_store_from_config, create_key_manager_from_config};
-use std::{path::PathBuf, rc::Rc};
+use key_manager::create_key_manager_from_config;
+use key_manager::key_store::KeyStore;
+use std::rc::Rc;
 use storage_backend::storage::Storage;
 use utils::{clear_db, generate_tx};
 mod utils;
@@ -40,7 +41,7 @@ fn integration_test() -> Result<(), anyhow::Error> {
 
     let config = Config::load()?;
 
-    clear_db(&config.storage.db);
+    clear_db(&config.storage.path);
     clear_db(&config.key_storage.path);
 
     let bitcoind = Bitcoind::new(
@@ -60,17 +61,12 @@ fn integration_test() -> Result<(), anyhow::Error> {
     bitcoin_client.mine_blocks_to_address(202, &wallet).unwrap();
 
     let account = Account::new(config.rpc.network);
-    let store = Rc::new(Storage::new_with_path(&PathBuf::from(&config.storage.db))?);
+    let store = Rc::new(Storage::new(&config.storage)?);
 
     println!("Storage Created");
-    // let key_storage =
-    //     create_file_key_store_from_config(&config.key_storage, &config.key_manager.network)?;
-    // let key_manager =
-    //     create_key_manager_from_config(&config.key_manager, key_storage, storage.clone())?;
 
-    let keystore =
-        create_database_key_store_from_config(&config.key_storage, &config.key_manager.network)?;
-
+    let storage = Rc::new(Storage::new(&config.key_storage)?);
+    let keystore = KeyStore::new(storage.clone());
     let key_manager = create_key_manager_from_config(&config.key_manager, keystore, store.clone())?;
 
     let dispatcher = TransactionDispatcher::new(bitcoin_client, Rc::new(key_manager));

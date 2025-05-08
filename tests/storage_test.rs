@@ -5,16 +5,17 @@ use bitcoin_coordinator::{
     types::{FundingTransaction, SpeedUpTx, TransactionDispatchState},
 };
 use std::{path::PathBuf, rc::Rc, str::FromStr};
-use storage_backend::storage::Storage;
+use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use utils::{clear_output, generate_random_string};
 mod utils;
 
 #[test]
 fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
-        "test_output/test/{}",
-        generate_random_string()
-    )))?);
+    let storage_config = StorageConfig::new(
+        format!("test_output/test/{}", generate_random_string()),
+        None,
+    );
+    let storage = Rc::new(Storage::new(&storage_config)?);
 
     let store = BitcoinCoordinatorStore::new(storage)?;
 
@@ -81,10 +82,11 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_multiple_transactions() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
-        "test_output/test/{}",
-        generate_random_string()
-    )))?);
+    let storage_config = StorageConfig::new(
+        format!("test_output/test/{}", generate_random_string()),
+        None,
+    );
+    let storage = Rc::new(Storage::new(&storage_config)?);
     let store = BitcoinCoordinatorStore::new(storage)?;
 
     // Create a transaction
@@ -161,10 +163,11 @@ fn test_multiple_transactions() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_speed_up_tx_operations() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
-        "test_output/test/{}",
-        generate_random_string()
-    )))?);
+    let storage_config = StorageConfig::new(
+        format!("test_output/test/{}", generate_random_string()),
+        None,
+    );
+    let storage = Rc::new(Storage::new(&storage_config)?);
     let store = BitcoinCoordinatorStore::new(storage)?;
 
     // Create a transaction to be used in the test
@@ -267,17 +270,18 @@ fn test_speed_up_tx_operations() -> Result<(), anyhow::Error> {
 #[test]
 fn test_funding_transactions() -> Result<(), anyhow::Error> {
     // Create a temporary directory for testing
-    let store = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
-        "test_output/test/{}",
-        generate_random_string()
-    )))?);
-    let store = BitcoinCoordinatorStore::new(store)?;
+    let storage_config = StorageConfig::new(
+        format!("test_output/test/{}", generate_random_string()),
+        None,
+    );
+    let storage = Rc::new(Storage::new(&storage_config)?);
+    let coordinator = BitcoinCoordinatorStore::new(storage)?;
 
     let funding_tx_id_1 =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2001")?;
 
     // Test that get_funding returns None for a transaction ID that hasn't been added yet
-    let initial_funding = store.get_funding(funding_tx_id_1)?;
+    let initial_funding = coordinator.get_funding(funding_tx_id_1)?;
     assert!(initial_funding.is_none());
 
     // Test add_funding
@@ -301,10 +305,10 @@ fn test_funding_transactions() -> Result<(), anyhow::Error> {
 
     let tx_ids = vec![tx_id_1, tx_id_2];
     let context = "Test funding context".to_string();
-    store.add_funding(tx_ids, funding_tx.clone(), context.clone())?;
+    coordinator.add_funding(tx_ids, funding_tx.clone(), context.clone())?;
 
     // Test get_funding
-    let retrieved_funding = store.get_funding(tx_id_1)?;
+    let retrieved_funding = coordinator.get_funding(tx_id_1)?;
     assert!(retrieved_funding.is_some());
     let (funding_tx, funding_context) = retrieved_funding.unwrap();
     assert_eq!(funding_tx.tx_id, funding_tx_id_1);
@@ -315,24 +319,24 @@ fn test_funding_transactions() -> Result<(), anyhow::Error> {
     let mut updated_funding = funding_tx.clone();
     updated_funding.utxo_index = 1;
     updated_funding.tx_id = funding_tx_id_2;
-    store.update_funding(tx_id_1, updated_funding)?;
+    coordinator.update_funding(tx_id_1, updated_funding)?;
 
     // Verify the update
-    let (updated_funding, updated_context) = store.get_funding(tx_id_1)?.unwrap();
+    let (updated_funding, updated_context) = coordinator.get_funding(tx_id_1)?.unwrap();
     assert_eq!(updated_funding.utxo_index, 1);
     assert_eq!(updated_funding.tx_id, funding_tx_id_2);
     assert_eq!(updated_context, context);
 
     // Test remove_funding
-    store.remove_funding(funding_tx_id_1, tx_id_1)?;
+    coordinator.remove_funding(funding_tx_id_1, tx_id_1)?;
 
     // Verify the funding was removed
-    let removed_funding = store.get_funding(funding_tx_id_1)?;
+    let removed_funding = coordinator.get_funding(funding_tx_id_1)?;
     assert!(removed_funding.is_none());
 
     // Test with non-existent transaction ID
     let non_existent_tx_id = Txid::from_slice(&[4; 32]).unwrap();
-    let non_existent_funding = store.get_funding(non_existent_tx_id)?;
+    let non_existent_funding = coordinator.get_funding(non_existent_tx_id)?;
     assert!(non_existent_funding.is_none());
 
     // Clean up
@@ -342,12 +346,15 @@ fn test_funding_transactions() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_cancel_monitor() -> Result<(), anyhow::Error> {
-    let store = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
-        "test_output/test_cancel_monitor/{}",
-        generate_random_string()
-    )))?);
-
-    let store = BitcoinCoordinatorStore::new(store)?;
+    let storage_config = StorageConfig::new(
+        format!(
+            "test_output/test_cancel_monitor/{}",
+            generate_random_string()
+        ),
+        None,
+    );
+    let storage = Rc::new(Storage::new(&storage_config)?);
+    let coordinator = BitcoinCoordinatorStore::new(storage)?;
     // Create first transaction
     let tx1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -367,17 +374,17 @@ fn test_cancel_monitor() -> Result<(), anyhow::Error> {
     let tx_id_2 = tx2.compute_txid();
 
     // Save transaction to be monitored, this will be mark as pending dispatch
-    store.save_tx(tx1.clone(), None, "context_tx1".to_string())?;
-    store.save_tx(tx2.clone(), None, "context_tx2".to_string())?;
+    coordinator.save_tx(tx1.clone(), None, "context_tx1".to_string())?;
+    coordinator.save_tx(tx2.clone(), None, "context_tx2".to_string())?;
 
     // Remove one of the transactions
-    store.remove_tx(tx_id_1)?;
-    let txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
+    coordinator.remove_tx(tx_id_1)?;
+    let txs = coordinator.get_txs(TransactionDispatchState::PendingDispatch)?;
     assert_eq!(txs.len(), 1);
 
     // Remove the last transaction
-    store.remove_tx(tx_id_2)?;
-    let txs = store.get_txs(TransactionDispatchState::PendingDispatch)?;
+    coordinator.remove_tx(tx_id_2)?;
+    let txs = coordinator.get_txs(TransactionDispatchState::PendingDispatch)?;
     assert_eq!(txs.len(), 0);
 
     clear_output();
@@ -387,10 +394,11 @@ fn test_cancel_monitor() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_funding_tx_operations() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(format!(
-        "test_output/test_funding/{}",
-        generate_random_string()
-    )))?);
+    let storage_config = StorageConfig::new(
+        format!("test_output/test_funding/{}", generate_random_string()),
+        None,
+    );
+    let storage = Rc::new(Storage::new(&storage_config)?);
 
     let store = BitcoinCoordinatorStore::new(storage)?;
 
