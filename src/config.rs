@@ -3,8 +3,9 @@ use std::env;
 use crate::errors::ConfigError;
 use bitvmx_bitcoin_rpc::{rpc_config::RpcConfig, types::BlockHeight};
 use config as settings;
-use key_manager::config::{KeyManagerConfig, KeyStorageConfig};
+use key_manager::config::KeyManagerConfig;
 use serde::Deserialize;
+use storage_backend::storage_config::StorageConfig;
 use tracing::warn;
 
 static DEFAULT_ENV: &str = "development";
@@ -18,14 +19,8 @@ pub struct Config {
     pub monitor: MonitorConfig,
     pub dispatcher: DispatcherConfig,
     pub key_manager: KeyManagerConfig,
-    pub key_storage: KeyStorageConfig,
+    pub key_storage: StorageConfig,
     pub log_level: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct StorageConfig {
-    pub password: String,
-    pub db: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

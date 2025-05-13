@@ -10,10 +10,10 @@ use bitcoin_coordinator::{storage::BitcoinCoordinatorStore, types::FundingTransa
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
 use storage_backend::storage::Storage;
+use storage_backend::storage_config::StorageConfig;
 use transaction_dispatcher::dispatcher::MockTransactionDispatcherApi;
 use transaction_dispatcher::signer::Account;
 use transaction_dispatcher::signer::AccountApi;
@@ -40,7 +40,8 @@ pub fn get_mocks() -> (
 ) {
     let mock_monitor = MockMonitorApi::new();
     let path = format!("test_output/test/{}", generate_random_string());
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(&path)).unwrap());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config).unwrap());
     let store = BitcoinCoordinatorStore::new(storage).unwrap();
     let network = Network::from_str("regtest").unwrap();
     let account = Account::new(network);
