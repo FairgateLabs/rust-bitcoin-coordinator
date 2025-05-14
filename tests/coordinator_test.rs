@@ -85,8 +85,8 @@ fn dispatch_with_target_block_height() -> Result<(), anyhow::Error> {
     let target_block_height = Some(1001);
 
     let tx_to_monitor = TypesToMonitor::Transactions(vec![tx_id], context.clone());
-
     // Always return true for is_ready and empty news for get_news
+    mock_monitor.expect_tick().returning(|| Ok(()));
     mock_monitor.expect_is_ready().returning(|| Ok(true));
     mock_monitor.expect_get_news().returning(move || Ok(vec![]));
 
