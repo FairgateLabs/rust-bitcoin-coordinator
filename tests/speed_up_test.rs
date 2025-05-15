@@ -39,6 +39,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     // Setup a mock data containing a single transaction, marked for dispatch and monitoring.
     let (tx_to_monitor, tx, funding_tx, tx_id, context_data) = get_mock_data();
 
+    mock_monitor.expect_tick().returning(|| Ok(()));
     mock_monitor.expect_is_ready().returning(|| Ok(true));
 
     // FIRST TICK >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
