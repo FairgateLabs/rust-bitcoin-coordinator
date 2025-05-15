@@ -20,7 +20,7 @@ use bitvmx_transaction_monitor::{
 use console::style;
 use key_manager::{key_manager::KeyManager, keystorage::database::DatabaseKeyStore};
 use storage_backend::storage::Storage;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use transaction_dispatcher::{
     dispatcher::{TransactionDispatcher, TransactionDispatcherApi},
     errors::DispatcherError,
@@ -160,7 +160,7 @@ where
             .store
             .get_txs(TransactionDispatchState::PendingDispatch)?;
 
-        info!(
+        debug!(
             "transactions pending to be dispatch #{}",
             style(pending_txs.len()).yellow()
         );
@@ -235,7 +235,7 @@ where
             .get_txs(TransactionDispatchState::BroadcastPendingConfirmation)?;
 
         for tx in txs {
-            info!(
+            debug!(
                 "{} Processing tx id: {}",
                 style("→").cyan(),
                 style(tx.tx_id).blue(),
