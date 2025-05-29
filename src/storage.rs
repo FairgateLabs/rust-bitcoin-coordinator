@@ -56,18 +56,12 @@ pub trait BitcoinCoordinatorStoreApi {
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn save_speedup_tx(&self, speed_up_tx: &SpeedUpTx) -> Result<(), BitcoinCoordinatorStoreError>;
-
     fn get_last_speedup(&self) -> Result<Option<SpeedUpTx>, BitcoinCoordinatorStoreError>;
-
     fn get_speedup_tx(&self, tx_id: &Txid) -> Result<SpeedUpTx, BitcoinCoordinatorStoreError>;
 
     fn get_funding(&self) -> Result<Option<Utxo>, BitcoinCoordinatorStoreError>;
-
     fn add_funding(&self, utxo: Utxo) -> Result<(), BitcoinCoordinatorStoreError>;
-
     fn remove_funding(&self, funding_tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
-
-    fn update_funding(&self, utxo: Utxo) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn add_news(&self, news: CoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError>;
     fn ack_news(&self, news: AckCoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError>;
@@ -227,28 +221,6 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             .unwrap_or_default();
 
         funding_txs.retain(|tx| tx.txid != funding_tx_id);
-
-        self.store.set(&fundings_txs_key, &funding_txs, None)?;
-
-        Ok(())
-    }
-
-    fn update_funding(&self, utxo: Utxo) -> Result<(), BitcoinCoordinatorStoreError> {
-        let fundings_txs_key = self.get_key(StoreKey::FundingList);
-
-        let mut funding_txs = self
-            .store
-            .get::<&str, Vec<Utxo>>(&fundings_txs_key)?
-            .unwrap_or_default();
-
-        // Check if the funding transaction already exists to avoid duplicates
-        if funding_txs.iter().any(|tx| tx.txid == utxo.txid) {
-            return Err(BitcoinCoordinatorStoreError::FundingTransactionAlreadyExists);
-        }
-
-        // Remove the existing funding transaction before adding the updated one
-        funding_txs.retain(|tx| tx.txid != utxo.txid);
-        funding_txs.push(utxo);
 
         self.store.set(&fundings_txs_key, &funding_txs, None)?;
 

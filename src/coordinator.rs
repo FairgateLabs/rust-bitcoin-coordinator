@@ -443,7 +443,7 @@ where
                 // The transaction has received its first confirmation, indicating it is now included in a block.
                 // At this point, the speed-up transaction becomes the new funding transaction for future operations.
                 funding_tx_utxo.txid = tx_status.tx_id;
-                self.store.update_funding(funding_tx_utxo)?;
+                self.store.add_funding(funding_tx_utxo)?;
             }
 
             if tx_status.is_orphan() {

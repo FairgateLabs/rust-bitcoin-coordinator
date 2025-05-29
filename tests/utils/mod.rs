@@ -62,7 +62,7 @@ pub fn get_mock_data() -> (TypesToMonitor, Transaction, Utxo, Txid, String) {
         new_funding_tx_id,
         1,
         Amount::default().to_sat(),
-        &PublicKey::from_str("0202020202020202020202020202020202020202020202020202020202020202")
+        &PublicKey::from_str("032e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af")
             .unwrap(),
     );
 

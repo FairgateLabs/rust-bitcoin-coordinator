@@ -197,7 +197,7 @@ fn test_speed_up_tx_operations() -> Result<(), anyhow::Error> {
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
 
     let pub_key =
-        PublicKey::from_str("0202020202020202020202020202020202020202020202020202020202020202")?;
+        PublicKey::from_str("032e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af")?;
     let funding_utxo = Utxo::new(tx_id, 0, Amount::ZERO.to_sat(), &pub_key);
 
     // Create and add a speed-up transaction
@@ -274,28 +274,22 @@ fn test_funding_transactions() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new(&storage_config)?);
     let coordinator = BitcoinCoordinatorStore::new(storage)?;
 
-    let funding_tx_id_1 =
+    let funding_txid_1 =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2001")?;
 
     // Test that get_funding returns None for a transaction ID that hasn't been added yet
     let initial_funding = coordinator.get_funding()?;
     assert!(initial_funding.is_none());
 
-    // Test add_funding
-    let tx_id_1 =
-        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2003")?;
-    let tx_id_2 =
-        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2004")?;
-
     let funding_tx_id_2 =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2002")?;
 
     // Create a funding transaction
     let funding_tx_utxo = Utxo::new(
-        funding_tx_id_1,
+        funding_txid_1,
         3,
         Amount::from_sat(10000).to_sat(),
-        &PublicKey::from_str("0202020202020202020202020202020202020202020202020202020202020202")?,
+        &PublicKey::from_str("032e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af")?,
     );
 
     coordinator.add_funding(funding_tx_utxo.clone())?;
@@ -304,33 +298,30 @@ fn test_funding_transactions() -> Result<(), anyhow::Error> {
     let retrieved_funding = coordinator.get_funding()?;
     assert!(retrieved_funding.is_some());
     let utxo = retrieved_funding.unwrap();
-    assert_eq!(utxo.txid, funding_tx_id_1);
+    assert_eq!(utxo.txid, funding_txid_1);
     assert_eq!(utxo.vout, 3);
     assert_eq!(utxo.amount, funding_tx_utxo.amount);
     assert_eq!(utxo.pub_key, funding_tx_utxo.pub_key);
 
-    // Test update_funding
+    // Test add_funding & Verify that the new funding is added
     let mut updated_funding = funding_tx_utxo.clone();
     updated_funding.vout = 1;
     updated_funding.txid = funding_tx_id_2;
-    coordinator.update_funding(updated_funding)?;
-
-    // Verify the update
+    coordinator.add_funding(updated_funding)?;
     let updated_funding = coordinator.get_funding()?.unwrap();
     assert_eq!(updated_funding.vout, 1);
     assert_eq!(updated_funding.txid, funding_tx_id_2);
 
-    // Test remove_funding
-    coordinator.remove_funding(funding_tx_id_1)?;
+    // Check that funding_tx_id_2 is removed
+    coordinator.remove_funding(funding_tx_id_2)?;
+    let funding = coordinator.get_funding()?;
+    assert!(funding.is_some());
+    assert_eq!(funding.unwrap().txid, funding_txid_1);
 
-    // Verify the funding was removed
-    let removed_funding = coordinator.get_funding()?;
-    assert!(removed_funding.is_none());
-
-    // Test with non-existent transaction ID
-    let non_existent_tx_id = Txid::from_slice(&[4; 32]).unwrap();
-    let non_existent_funding = coordinator.get_funding()?;
-    assert!(non_existent_funding.is_none());
+    // Check that funding_tx_id_1 is removed
+    coordinator.remove_funding(funding_txid_1)?;
+    let funding = coordinator.get_funding()?;
+    assert!(funding.is_none());
 
     // Clean up
     clear_output();
@@ -417,7 +408,7 @@ fn test_funding_tx_operations() -> Result<(), anyhow::Error> {
         Txid::from_str("000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f").unwrap(),
         0,
         Amount::from_sat(100000).to_sat(),
-        &PublicKey::from_str("0202020202020202020202020202020202020202020202020202020202020202")?,
+        &PublicKey::from_str("032e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af")?,
     );
 
     // Initially, there should be no funding for the transaction
@@ -469,7 +460,7 @@ fn test_funding_tx_operations() -> Result<(), anyhow::Error> {
         Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111").unwrap(),
         1,
         Amount::from_sat(200000).to_sat(),
-        &PublicKey::from_str("0202020202020202020202020202020202020202020202020202020202020202")?,
+        &PublicKey::from_str("032e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af")?,
     );
 
     // Add funding for multiple transactions
@@ -500,7 +491,7 @@ fn test_funding_tx_operations() -> Result<(), anyhow::Error> {
         Txid::from_str("2222222222222222222222222222222222222222222222222222222222222222").unwrap(),
         2,
         Amount::from_sat(300000).to_sat(),
-        &PublicKey::from_str("0202020202020202020202020202020202020202020202020202020202020202")?,
+        &PublicKey::from_str("032e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af")?,
     );
 
     store.add_funding(funding_tx3.clone())?;
