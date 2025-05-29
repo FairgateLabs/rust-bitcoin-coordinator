@@ -98,7 +98,7 @@ fn monitor_test() -> Result<(), anyhow::Error> {
 
 #[test]
 fn dispatch_with_target_block_height() -> Result<(), anyhow::Error> {
-    let (mut mock_monitor, store, bitcoin_client, key_manager) = get_mocks();
+    let (mut mock_monitor, store, mut mock_bitcoin_client, key_manager) = get_mocks();
     let (_, tx, _, _, context) = get_mock_data();
     let tx_id = tx.compute_txid();
     let target_block_height = Some(1001);
@@ -123,12 +123,12 @@ fn dispatch_with_target_block_height() -> Result<(), anyhow::Error> {
 
     // SECOND TICK (dispatch the transaction, it is ready) >>>>>>>>>>>>>>>>>
 
-    // // Mock the dispatcher to send the transaction
-    // mock_dispatcher
-    //     .expect_send()
-    //     .times(1)
-    //     .with(eq(tx.clone()))
-    //     .returning(move |tx_ret| Ok(tx_ret.compute_txid()));
+    // Mock the dispatcher to send the transaction
+    mock_bitcoin_client
+        .expect_send_transaction()
+        .times(1)
+        .with(eq(tx.clone()))
+        .returning(move |tx_ret| Ok(tx_ret.compute_txid()));
 
     // Mock get_monitor_height
     mock_monitor
@@ -146,7 +146,7 @@ fn dispatch_with_target_block_height() -> Result<(), anyhow::Error> {
         mock_monitor,
         store,
         key_manager,
-        bitcoin_client,
+        mock_bitcoin_client,
         Network::Regtest,
     );
 

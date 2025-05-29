@@ -46,8 +46,7 @@ pub fn get_mocks() -> (
     let storage = Rc::new(Storage::new(&config).unwrap());
     let store = BitcoinCoordinatorStore::new(storage.clone()).unwrap();
     let bitcoin_client = MockBitcoinClient::new();
-    let config =
-        KeyManagerConfig::new("test_output/test/key_manager".to_string(), None, None, None);
+    let config = KeyManagerConfig::new(Network::Regtest.to_string(), None, None, None);
     let key_store = KeyStore::new(storage.clone());
     let key_manager =
         Rc::new(KeyManager::new_from_config(&config, key_store, storage.clone()).unwrap());
