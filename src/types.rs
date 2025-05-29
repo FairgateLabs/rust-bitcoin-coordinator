@@ -104,8 +104,9 @@ pub enum CoordinatorNews {
     /// Error when attempting to speed up a transaction
     /// - Txid: The transaction ID that failed to speed up
     /// - String: Context information about the transaction
+    /// - Txid: The funding transaction ID that was insufficient
     /// - String: Error message describing what went wrong
-    DispatchSpeedUpError(Vec<Txid>, Vec<String>, String),
+    DispatchSpeedUpError(Vec<Txid>, Vec<String>, Txid, String),
 
     /// Indicates insufficient funds for a  funding transaction
     /// - Txid: The funding transaction ID that was insufficient

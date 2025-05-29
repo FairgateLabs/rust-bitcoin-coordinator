@@ -37,6 +37,7 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     let speed_up_error_news = CoordinatorNews::DispatchSpeedUpError(
         vec![tx_id_2],
         vec!["tx_2".to_string()],
+        tx_id_1,
         "error".to_string(),
     );
 
@@ -61,7 +62,7 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     assert!(all_news.contains(&speed_up_error_news));
 
     // Acknowledge one news item
-    let ack_news = AckCoordinatorNews::DispatchSpeedUpError(tx_id_2);
+    let ack_news = AckCoordinatorNews::DispatchSpeedUpError(tx_id_1);
     store.ack_news(ack_news)?;
 
     // Verify the news was removed
@@ -70,17 +71,14 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     assert!(remaining_news.contains(&insufficient_funds_news));
     assert!(remaining_news.contains(&transaction_error_news));
     assert!(!remaining_news.contains(&speed_up_error_news));
-
     // Acknowledge another news
     let ack_news = AckCoordinatorNews::InsufficientFunds(tx_id_1);
     store.ack_news(ack_news)?;
-
     // Verify the news was removed
     let remaining_news = store.get_news()?;
     assert_eq!(remaining_news.len(), 2);
     assert!(remaining_news.contains(&transaction_error_news));
     assert!(!remaining_news.contains(&insufficient_funds_news));
-
     // Acknowledge the last news
     let ack_news = AckCoordinatorNews::DispatchTransactionError(tx_id_3);
     store.ack_news(ack_news)?;
@@ -89,11 +87,9 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     let remaining_news = store.get_news()?;
     assert_eq!(remaining_news.len(), 1);
     assert!(remaining_news.contains(&speed_up_news));
-
     // Acknowledge the last news
     let ack_news = AckCoordinatorNews::NewSpeedUp(tx_id_2);
     store.ack_news(ack_news)?;
-
     // Verify all news are removed
     let remaining_news = store.get_news()?;
     assert_eq!(remaining_news.len(), 0);
@@ -131,14 +127,15 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     let speed_up_error_news_1 = CoordinatorNews::DispatchSpeedUpError(
         vec![tx_id_6],
         vec!["Test context 6".to_string()],
+        tx_id_6,
         "Test error 6".to_string(),
     );
     let speed_up_error_news_2 = CoordinatorNews::DispatchSpeedUpError(
         vec![tx_id_8],
         vec!["Test context 8".to_string()],
+        tx_id_8,
         "Test error 8".to_string(),
     );
-
     // Add all news
     store.add_news(insufficient_funds_news_1.clone())?;
     store.add_news(insufficient_funds_news_2.clone())?;

@@ -347,13 +347,13 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 news_list.push((tx_id, context, error));
                 self.store.set(&key, &news_list, None)?;
             }
-            CoordinatorNews::DispatchSpeedUpError(tx_ids, contexts, error) => {
+            CoordinatorNews::DispatchSpeedUpError(tx_ids, contexts, txid, error) => {
                 let key = self.get_key(StoreKey::DispatchSpeedUpErrorNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Vec<Txid>, Vec<String>, String)>>(&key)?
+                    .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String)>>(&key)?
                     .unwrap_or_default();
-                news_list.push((tx_ids, contexts, error));
+                news_list.push((tx_ids, contexts, txid, error));
                 self.store.set(&key, &news_list, None)?;
             }
         }
@@ -364,11 +364,8 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         match news {
             AckCoordinatorNews::InsufficientFunds(tx_id) => {
                 let key = self.get_key(StoreKey::InsufficientFundsNewsList);
-                let mut news_list = self
-                    .store
-                    .get::<&str, Vec<(Txid, String, Txid, String)>>(&key)?
-                    .unwrap_or_default();
-                news_list.retain(|(id, _, _, _)| *id != tx_id);
+                let mut news_list = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
+                news_list.retain(|id| *id != tx_id);
                 self.store.set(&key, &news_list, None)?;
             }
             AckCoordinatorNews::NewSpeedUp(tx_id) => {
@@ -389,13 +386,13 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 news_list.retain(|(id, _, _)| *id != tx_id);
                 self.store.set(&key, &news_list, None)?;
             }
-            AckCoordinatorNews::DispatchSpeedUpError(tx_id) => {
+            AckCoordinatorNews::DispatchSpeedUpError(speedup_txid) => {
                 let key = self.get_key(StoreKey::DispatchSpeedUpErrorNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, String, String)>>(&key)?
+                    .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String)>>(&key)?
                     .unwrap_or_default();
-                news_list.retain(|(id, _, _)| *id != tx_id);
+                news_list.retain(|(_, _, txid, _)| *txid != speedup_txid);
                 self.store.set(&key, &news_list, None)?;
             }
         }
@@ -441,11 +438,11 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let speed_up_error_key = self.get_key(StoreKey::DispatchSpeedUpErrorNewsList);
         if let Some(news_list) = self
             .store
-            .get::<&str, Vec<(Vec<Txid>, Vec<String>, String)>>(&speed_up_error_key)?
+            .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String)>>(&speed_up_error_key)?
         {
-            for (tx_ids, contexts, error) in news_list {
+            for (tx_ids, contexts, txid, error) in news_list {
                 all_news.push(CoordinatorNews::DispatchSpeedUpError(
-                    tx_ids, contexts, error,
+                    tx_ids, contexts, txid, error,
                 ));
             }
         }
