@@ -89,19 +89,11 @@ fn integration_test() -> Result<(), anyhow::Error> {
 
     let group_id = Uuid::from_u128(1);
 
-    let tx_1: Transaction = generate_tx(
-        &account,
-        &config.rpc,
-        config.rpc.network,
-        &config.dispatcher,
-    )?;
+    let tx_1: Transaction =
+        generate_tx(&account, &config.rpc, config.rpc.network, &config.speedup)?;
     let tx_1_id = tx_1.compute_txid();
-    let tx_2: Transaction = generate_tx(
-        &account,
-        &config.rpc,
-        config.rpc.network,
-        &config.dispatcher,
-    )?;
+    let tx_2: Transaction =
+        generate_tx(&account, &config.rpc, config.rpc.network, &config.speedup)?;
 
     let tx_2_id = tx_2.compute_txid();
 

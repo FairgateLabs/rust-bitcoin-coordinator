@@ -97,12 +97,8 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .with(
             eq(tx.clone()),
             eq(account.pk),
-            eq(funding_tx.tx_id),
-            eq((
-                funding_tx.utxo_index,
-                funding_tx.utxo_output.clone(),
-                account.pk,
-            )),
+            eq(funding_tx.txid),
+            eq((funding_tx.vout, funding_tx.utxo_output.clone(), account.pk)),
         )
         .returning(move |_, _, _, _| Ok((tx_speed_up_id_1, Amount::default())));
 
@@ -159,12 +155,8 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         .with(
             eq(tx.clone()),
             eq(account.pk),
-            eq(funding_tx.tx_id),
-            eq((
-                funding_tx.utxo_index,
-                funding_tx.utxo_output.clone(),
-                account.pk,
-            )),
+            eq(funding_tx.txid),
+            eq((funding_tx.vout, funding_tx.utxo_output.clone(), account.pk)),
         )
         .returning(move |_, _, _, _| Ok((tx_speed_up_id_2, Amount::default())));
 
@@ -300,7 +292,7 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     coordinator.dispatch(tx, context_data.clone(), None)?;
 
     // Add funding for speed up transaction
-    coordinator.fund_for_speedup(vec![tx_id], funding_tx, context_data.clone())?;
+    coordinator.add_funding(vec![tx_id], funding_tx, context_data.clone())?;
 
     // Simulate ticks to monitor and adjust transaction status with each blockchain height update.
 

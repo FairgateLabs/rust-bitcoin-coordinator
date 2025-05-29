@@ -184,7 +184,7 @@ fn test_speed_up_tx_operations() -> Result<(), anyhow::Error> {
     store.save_tx(tx_to_speedup.clone(), None, "context_speedup".to_string())?;
 
     // Initially, there should be no speed-up transactions
-    let speed_up_tx = store.get_last_speedup_tx(&tx_id)?;
+    let speed_up_tx = store.get_last_speedup(&tx_id)?;
     assert!(speed_up_tx.is_none());
 
     let speed_up_tx_id =
@@ -206,7 +206,7 @@ fn test_speed_up_tx_operations() -> Result<(), anyhow::Error> {
     store.save_speedup_tx(&speed_up_tx)?;
 
     // Verify the speed-up transaction was added using get_last_speedup_tx
-    let retrieved_speed_up_tx = store.get_last_speedup_tx(&tx_id)?;
+    let retrieved_speed_up_tx = store.get_last_speedup(&tx_id)?;
     assert!(retrieved_speed_up_tx.is_some());
     let retrieved = retrieved_speed_up_tx.unwrap();
     assert_eq!(retrieved.tx_id, speed_up_tx_id);
@@ -237,7 +237,7 @@ fn test_speed_up_tx_operations() -> Result<(), anyhow::Error> {
     store.save_speedup_tx(&speed_up_tx2)?;
 
     // Test get_last_speedup_tx which should return the latest speed-up transaction
-    let latest_speed_up = store.get_last_speedup_tx(&tx_id)?;
+    let latest_speed_up = store.get_last_speedup(&tx_id)?;
     assert!(latest_speed_up.is_some());
     let latest = latest_speed_up.unwrap();
     assert_eq!(latest.tx_id, second_speed_up_tx_id);
@@ -253,7 +253,7 @@ fn test_speed_up_tx_operations() -> Result<(), anyhow::Error> {
 
     // Test with a non-existent transaction ID
     let non_existent_tx_id = Txid::from_slice(&[3; 32]).unwrap();
-    let non_existent_speed_up = store.get_last_speedup_tx(&non_existent_tx_id)?;
+    let non_existent_speed_up = store.get_last_speedup(&non_existent_tx_id)?;
     assert!(non_existent_speed_up.is_none());
 
     // Test get_speedup_tx with non-existent IDs
@@ -439,12 +439,12 @@ fn test_funding_tx_operations() -> Result<(), anyhow::Error> {
     let retrieved_funding = store.get_funding(tx_id)?;
     assert!(retrieved_funding.is_some());
     let (retrieved_tx, context) = retrieved_funding.unwrap();
-    assert_eq!(retrieved_tx.tx_id, funding_tx.tx_id);
+    assert_eq!(retrieved_tx.tx_id, funding_tx.txid);
     assert_eq!(retrieved_tx.utxo_output.value, funding_tx.utxo_output.value);
     assert_eq!(context, "funding_context");
 
     // Remove the funding
-    store.remove_funding(funding_tx.tx_id, tx_id)?;
+    store.remove_funding(funding_tx.txid, tx_id)?;
 
     // Verify funding was removed
     let removed_funding = store.get_funding(tx_id)?;
@@ -493,7 +493,7 @@ fn test_funding_tx_operations() -> Result<(), anyhow::Error> {
         let funding = store.get_funding(id)?;
         assert!(funding.is_some());
         let (retrieved_tx, context) = funding.unwrap();
-        assert_eq!(retrieved_tx.tx_id, funding_tx2.tx_id);
+        assert_eq!(retrieved_tx.tx_id, funding_tx2.txid);
         assert_eq!(
             retrieved_tx.utxo_output.value,
             funding_tx2.utxo_output.value
@@ -531,12 +531,12 @@ fn test_funding_tx_operations() -> Result<(), anyhow::Error> {
     let updated_funding = store.get_funding(tx_id)?;
     assert!(updated_funding.is_some());
     let (retrieved_tx, context) = updated_funding.unwrap();
-    assert_eq!(retrieved_tx.tx_id, funding_tx3.tx_id);
+    assert_eq!(retrieved_tx.tx_id, funding_tx3.txid);
     assert_eq!(retrieved_tx.utxo_output.value, Amount::from_sat(300000));
     assert_eq!(context, "replacement_funding");
 
     // Test removing funding for one transaction doesn't affect others
-    store.remove_funding(funding_tx2.tx_id, tx2_id)?;
+    store.remove_funding(funding_tx2.txid, tx2_id)?;
 
     // tx2 should have no funding
     assert!(store.get_funding(tx2_id)?.is_none());

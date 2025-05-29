@@ -120,7 +120,7 @@ fn integration_test() -> Result<(), anyhow::Error> {
     };
 
     let funding = FundingTransaction::new(tx.compute_txid(), 1, tx_out);
-    coordinator.fund_for_speedup(
+    coordinator.add_funding(
         vec![tx.compute_txid()],
         funding,
         "Funds for speed up tx".to_string(),

@@ -1,4 +1,6 @@
+use bitvmx_bitcoin_rpc::errors::BitcoinClientError;
 use config as settings;
+use protocol_builder::errors::ProtocolBuilderError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -53,11 +55,17 @@ pub enum BitcoinCoordinatorError {
     #[error("Error with Monitor: {0}")]
     MonitorError(#[from] bitvmx_transaction_monitor::errors::MonitorError),
 
-    #[error("Error with Dispatcher: {0}")]
-    DispatcherError(#[from] transaction_dispatcher::errors::DispatcherError),
-
     #[error("Error with Bitcoin Coordinator: {0}")]
     BitcoinCoordinatorError(String),
+
+    #[error("Error with Bitcoin Client: {0}")]
+    BitcoinClientError(#[from] BitcoinClientError),
+
+    #[error("Rpc error: {0}")]
+    RpcError(#[from] bitcoincore_rpc::Error),
+
+    #[error("Protocol builder error: {0}")]
+    ProtocolBuilderError(#[from] ProtocolBuilderError),
 }
 
 #[derive(Error, Debug)]
@@ -70,9 +78,6 @@ pub enum TxBuilderHelperError {
 
     #[error("Error while converting slice to array: {0}")]
     ConversionError(#[from] std::array::TryFromSliceError),
-
-    #[error("Error while building Dispatcher: {0}")]
-    DispatcherError(#[from] transaction_dispatcher::errors::DispatcherError),
 
     #[error("Error while building BitcoinClient: {0}")]
     BitcoinClientError(#[from] bitcoincore_rpc::Error),
