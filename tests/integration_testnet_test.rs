@@ -1,32 +1,26 @@
-use bitcoin::{Amount, OutPoint, PublicKey, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::{OutPoint, PublicKey, Transaction};
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
-use bitcoin_coordinator::{AckMonitorNews, MonitorNews, TypesToMonitor};
+use bitcoin_coordinator::TypesToMonitor;
 use bitvmx_wallet::config::WalletConfig;
-use bitvmx_wallet::errors::WalletError;
 use bitvmx_wallet::wallet::Wallet;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_manager::KeyManager;
 use key_manager::key_store::KeyStore;
-use protocol_builder::builder::{Protocol, ProtocolBuilder};
-use protocol_builder::scripts::{self, ProtocolScript, SignMode};
+use protocol_builder::builder::Protocol;
 use protocol_builder::types::input::SighashType;
 use protocol_builder::types::output::SpendMode;
 use protocol_builder::types::{InputArgs, OutputType};
 use std::rc::Rc;
-use std::str::FromStr;
 use storage_backend::storage::Storage;
-use utils::{clear_db, generate_tx};
+use utils::clear_db;
 mod utils;
 use anyhow::{Ok, Result};
 use bitcoin::Network;
 use bitcoin_coordinator::config::Config;
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
-use bitcoin_coordinator::types::FundingTransaction;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_transaction_monitor::monitor::Monitor;
 use console::style;
-use transaction_dispatcher::dispatcher::TransactionDispatcher;
-use transaction_dispatcher::signer::Account;
 
 // 1) We crete a wallet with funds
 // 2) We create a transaction protocol fund with wallet
@@ -55,20 +49,17 @@ fn integration_test() -> Result<(), anyhow::Error> {
     clear_db(&config.key_storage.path);
 
     let bitcoin_client = BitcoinClient::new_from_config(&config.rpc)?;
-    let account = Account::new(config.rpc.network);
     let store = Rc::new(Storage::new(&config.storage)?);
 
     println!("Storage Created");
 
     let storage = Rc::new(Storage::new(&config.key_storage)?);
     let keystore = KeyStore::new(storage.clone());
-    let funding_key_manager = Rc::new(create_key_manager_from_config(
+    let key_manager = Rc::new(create_key_manager_from_config(
         &config.key_manager,
         keystore,
         store.clone(),
     )?);
-
-    let dispatcher = TransactionDispatcher::new(bitcoin_client, funding_key_manager.clone());
 
     let monitor = Monitor::new_with_paths(
         &config.rpc,
@@ -83,7 +74,7 @@ fn integration_test() -> Result<(), anyhow::Error> {
     let wallet = create_wallet(&config)?;
     let pubkey = wallet.create_wallet("fund_speedup")?;
     let (_, pk) = wallet.export_wallet("fund_speedup")?;
-    funding_key_manager.import_secret_key(&pk.to_string(), Network::Testnet)?;
+    key_manager.import_secret_key(&pk.to_string(), Network::Testnet)?;
 
     // Create funds for tx to speed up
     let funding_txid = wallet.fund_address(
@@ -103,30 +94,34 @@ fn integration_test() -> Result<(), anyhow::Error> {
             vout: 0,
         },
         pubkey,
-        funding_key_manager,
+        key_manager.clone(),
         pubkey,
     )?;
 
     let context = "My Transaction to speed up".to_string();
     let tx_to_monitor = TypesToMonitor::Transactions(vec![tx.compute_txid()], context.clone());
 
-    let coordinator = BitcoinCoordinator::new(monitor, store, dispatcher, account.clone());
+    let coordinator = BitcoinCoordinator::new(
+        monitor,
+        store,
+        key_manager.clone(),
+        bitcoin_client,
+        Network::Testnet,
+    );
 
     coordinator.monitor(tx_to_monitor)?;
 
-    let tx_out = TxOut {
-        value: Amount::from_sat(500),
-        script_pubkey: ScriptBuf::new_p2wpkh(&pubkey.wpubkey_hash().unwrap()),
-    };
+    // let funding = Utxo::new(tx.compute_txid(), 1, 500, &pubkey.wpubkey_hash().unwrap());
 
-    let funding = FundingTransaction::new(tx.compute_txid(), 1, tx_out);
-    coordinator.add_funding(
-        vec![tx.compute_txid()],
-        funding,
-        "Funds for speed up tx".to_string(),
-    )?;
+    // let funding = Utxo::new(
+    //     tx.compute_txid(),
+    //     1,
+    //     500,
+    //     ScriptBuf::new_p2wpkh(&pubkey.wpubkey_hash().unwrap()),
+    // );
+    // coordinator.add_funding(funding)?;
 
-    coordinator.dispatch(tx, context.clone(), None)?;
+    coordinator.dispatch(tx, None, context.clone(), None)?;
 
     loop {
         coordinator.tick()?;

@@ -1,22 +1,24 @@
+use bitcoin::secp256k1::{All, SecretKey};
 use bitcoin::{
     absolute, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction, Amount,
     EcdsaSighashType, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
 };
-use bitcoin::{Network, Txid};
-use bitcoin_coordinator::config::DispatcherConfig;
+use bitcoin::{address, Address, CompressedPublicKey, Network, PublicKey, Txid, WPubkeyHash};
 use bitcoin_coordinator::errors::TxBuilderHelperError;
+use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::TypesToMonitor;
-use bitcoin_coordinator::{storage::BitcoinCoordinatorStore, types::FundingTransaction};
 use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
+use bitvmx_bitcoin_rpc::bitcoin_client::MockBitcoinClient;
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
+use key_manager::config::KeyManagerConfig;
+use key_manager::key_manager::KeyManager;
+use key_manager::key_store::KeyStore;
+use protocol_builder::types::Utxo;
 use std::rc::Rc;
 use std::str::FromStr;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
-use transaction_dispatcher::dispatcher::MockTransactionDispatcherApi;
-use transaction_dispatcher::signer::Account;
-use transaction_dispatcher::signer::AccountApi;
 
 pub fn clear_output() {
     let _ = std::fs::remove_dir_all("test_output");
@@ -35,37 +37,33 @@ pub fn generate_random_string() -> String {
 pub fn get_mocks() -> (
     MockMonitorApi,
     BitcoinCoordinatorStore,
-    Account,
-    MockTransactionDispatcherApi,
+    MockBitcoinClient,
+    Rc<KeyManager>,
 ) {
     let mock_monitor = MockMonitorApi::new();
     let path = format!("test_output/test/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config).unwrap());
-    let store = BitcoinCoordinatorStore::new(storage).unwrap();
-    let network = Network::from_str("regtest").unwrap();
-    let account = Account::new(network);
-    let mock_dispatcher = MockTransactionDispatcherApi::new();
-    (mock_monitor, store, account, mock_dispatcher)
+    let store = BitcoinCoordinatorStore::new(storage.clone()).unwrap();
+    let bitcoin_client = MockBitcoinClient::new();
+    let config =
+        KeyManagerConfig::new("test_output/test/key_manager".to_string(), None, None, None);
+    let key_store = KeyStore::new(storage.clone());
+    let key_manager =
+        Rc::new(KeyManager::new_from_config(&config, key_store, storage.clone()).unwrap());
+    (mock_monitor, store, bitcoin_client, key_manager)
 }
 
-pub fn get_mock_data() -> (
-    TypesToMonitor,
-    Transaction,
-    FundingTransaction,
-    Txid,
-    String,
-) {
+pub fn get_mock_data() -> (TypesToMonitor, Transaction, Utxo, Txid, String) {
     let new_funding_tx_id =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
 
-    let funding_tx = FundingTransaction::new(
+    let funding_utxo = Utxo::new(
         new_funding_tx_id,
         1,
-        TxOut {
-            value: Amount::default(),
-            script_pubkey: ScriptBuf::default(),
-        },
+        Amount::default().to_sat(),
+        &PublicKey::from_str("0202020202020202020202020202020202020202020202020202020202020202")
+            .unwrap(),
     );
 
     let tx = Transaction {
@@ -79,24 +77,30 @@ pub fn get_mock_data() -> (
     let context_data = "My context monitor".to_string();
     let to_monitor = TypesToMonitor::Transactions(vec![tx_id], context_data.clone());
 
-    (to_monitor, tx, funding_tx, tx_id, context_data)
+    (to_monitor, tx, funding_utxo, tx_id, context_data)
 }
 
 pub fn generate_tx(
-    user: &Account,
     rpc_config: &RpcConfig,
     network: Network,
-    dispatcher: &DispatcherConfig,
 ) -> Result<Transaction, TxBuilderHelperError> {
+    let secp: Secp256k1<All> = Secp256k1::new();
+    let sk = SecretKey::new(&mut rand::thread_rng());
+    let pk = bitcoin::PublicKey::new(sk.public_key(&secp));
+    let wpkh = pk.wpubkey_hash().expect("key is compressed");
+    let compressed = CompressedPublicKey::try_from(pk).unwrap();
+    let address = Address::p2wpkh(&compressed, network).as_unchecked().clone();
+    let address_checked = address.require_network(network).unwrap();
+
     // build and send a mock transaction that we can spend in our drp transaction
-    let tx_info = make_mock_output(rpc_config, user, network)?;
+    let tx_info = make_mock_output(rpc_config, &address_checked)?;
     let spent_amount = tx_info.amount.unsigned_abs();
-    let fee = Amount::from_sat(dispatcher.cpfp_fee);
-    //Child Pays For Parent Amount
-    let cpfp_amount = Amount::from_sat(dispatcher.cpfp_amount);
+
+    let cpfp_fee = Amount::from_sat(100);
+    let cpfp_amount = Amount::from_sat(100);
 
     // reciduo.
-    let drp_amount = spent_amount - fee - cpfp_amount;
+    let drp_amount = spent_amount - cpfp_fee - cpfp_amount;
 
     // The input for the transaction we are constructing.
     let input = TxIn {
@@ -116,24 +120,23 @@ pub fn generate_tx(
     // The drp output. For this example, we just pay back to the user.
     let drp = TxOut {
         value: drp_amount,
-        script_pubkey: user.address_checked(network)?.script_pubkey(),
+        script_pubkey: address_checked.script_pubkey(),
     };
 
     // The cpfp output is locked to a key controlled by the user.
     let cpfp = TxOut {
         value: cpfp_amount,
-        script_pubkey: ScriptBuf::new_p2wpkh(&user.wpkh),
+        script_pubkey: ScriptBuf::new_p2wpkh(&wpkh),
     };
 
-    let tx = build_transaction(vec![input], vec![drp, cpfp], user.clone(), spent_amount)?;
+    let tx = build_transaction(vec![input], vec![drp, cpfp], spent_amount, &wpkh, &sk)?;
 
     Ok(tx)
 }
 
 pub fn make_mock_output(
     rpc_config: &RpcConfig,
-    user: &Account,
-    network: Network,
+    address: &Address,
 ) -> Result<GetTransactionResult, TxBuilderHelperError> {
     let client = Client::new(
         rpc_config.url.as_str(),
@@ -145,7 +148,7 @@ pub fn make_mock_output(
 
     // fund the user address
     let txid = client.send_to_address(
-        &user.address_checked(network)?,
+        address,
         Amount::from_sat(100_000_000), // 1 BTC
         None,
         None,
@@ -163,8 +166,9 @@ pub fn make_mock_output(
 pub fn build_transaction(
     inputs: Vec<TxIn>,
     outputs: Vec<TxOut>,
-    account: Account,
     spent_amount: Amount,
+    wpkh: &WPubkeyHash,
+    sk: &SecretKey,
 ) -> Result<Transaction, TxBuilderHelperError> {
     // TODO support multiple inputs and accounts (we only support one input, for now)
     // The transaction we want to sign and broadcast.
@@ -182,7 +186,7 @@ pub fn build_transaction(
     let sighash = sighasher
         .p2wpkh_signature_hash(
             input_index,
-            &ScriptBuf::new_p2wpkh(&account.wpkh),
+            &ScriptBuf::new_p2wpkh(&wpkh),
             spent_amount,
             sighash_type,
         )
@@ -191,14 +195,14 @@ pub fn build_transaction(
     // Sign the sighash using the secp256k1 library (exported by rust-bitcoin).
     let msg = Message::from(sighash);
     let secp = Secp256k1::new();
-    let signature = secp.sign_ecdsa(&msg, &account.sk);
+    let signature = secp.sign_ecdsa(&msg, sk);
 
     // Update the witness stack.
     let signature = bitcoin::ecdsa::Signature {
         signature,
         sighash_type,
     };
-    let pk = account.sk.public_key(&secp);
+    let pk = sk.public_key(&secp);
     *sighasher.witness_mut(input_index).unwrap() = Witness::p2wpkh(&signature, &pk);
 
     // Get the signed transaction.

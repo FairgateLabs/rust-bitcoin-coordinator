@@ -1,6 +1,6 @@
 use crate::{coordinator::BitcoinCoordinator, storage::BitcoinCoordinatorStore};
 use bitcoin::{Transaction, Txid};
-use bitvmx_bitcoin_rpc::types::BlockHeight;
+use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, types::BlockHeight};
 use bitvmx_transaction_monitor::types::{
     AckMonitorNews, BlockInfo, MonitorNews, MonitorType, TransactionBlockchainStatus,
 };
@@ -139,6 +139,7 @@ pub enum AckNews {
     Coordinator(AckCoordinatorNews),
 }
 
-pub type BitcoinCoordinatorType = BitcoinCoordinator<MonitorType, BitcoinCoordinatorStore>;
+pub type BitcoinCoordinatorType =
+    BitcoinCoordinator<MonitorType, BitcoinCoordinatorStore, BitcoinClient>;
 
 pub type TransactionNewsType = MonitorNews;

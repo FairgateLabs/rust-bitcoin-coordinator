@@ -17,9 +17,6 @@ use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_transaction_monitor::monitor::Monitor;
 use console::style;
 use std::sync::mpsc::{channel, Receiver};
-use transaction_dispatcher::dispatcher::TransactionDispatcher;
-use transaction_dispatcher::dispatcher::TransactionDispatcherApi;
-use transaction_dispatcher::signer::Account;
 use uuid::Uuid;
 
 #[test]
@@ -60,7 +57,6 @@ fn integration_test() -> Result<(), anyhow::Error> {
     println!("Mine 101 blocks to address {:?}", wallet);
     bitcoin_client.mine_blocks_to_address(202, &wallet).unwrap();
 
-    let account = Account::new(config.rpc.network);
     let store = Rc::new(Storage::new(&config.storage)?);
 
     println!("Storage Created");
@@ -68,8 +64,6 @@ fn integration_test() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new(&config.key_storage)?);
     let keystore = KeyStore::new(storage.clone());
     let key_manager = create_key_manager_from_config(&config.key_manager, keystore, store.clone())?;
-
-    let dispatcher = TransactionDispatcher::new(bitcoin_client, Rc::new(key_manager));
 
     let monitor = Monitor::new_with_paths(
         &config.rpc,
@@ -89,11 +83,9 @@ fn integration_test() -> Result<(), anyhow::Error> {
 
     let group_id = Uuid::from_u128(1);
 
-    let tx_1: Transaction =
-        generate_tx(&account, &config.rpc, config.rpc.network, &config.speedup)?;
+    let tx_1: Transaction = generate_tx(&config.rpc, Network::Regtest)?;
     let tx_1_id = tx_1.compute_txid();
-    let tx_2: Transaction =
-        generate_tx(&account, &config.rpc, config.rpc.network, &config.speedup)?;
+    let tx_2: Transaction = generate_tx(&config.rpc, Network::Regtest)?;
 
     let tx_2_id = tx_2.compute_txid();
 
@@ -127,7 +119,7 @@ fn integration_test() -> Result<(), anyhow::Error> {
         style(txs[0].compute_txid()).red(),
     );
 
-    dispatcher.send(txs[0].clone()).unwrap();
+    // dispatcher.send(txs[0].clone()).unwrap();
 
     let mut tx_to_answer: (Uuid, Txid, Option<Transaction>) =
         (group_id, txs[0].compute_txid(), Some(txs[1].clone()));
@@ -138,7 +130,13 @@ fn integration_test() -> Result<(), anyhow::Error> {
         style("Bitcoin Coordinator").cyan()
     );
 
-    let coordinator = BitcoinCoordinator::new(monitor, store, dispatcher, account.clone());
+    let coordinator = BitcoinCoordinator::new(
+        monitor,
+        store,
+        Rc::new(key_manager),
+        bitcoin_client,
+        Network::Regtest,
+    );
 
     coordinator.monitor(txs_to_monitor)?;
 
@@ -193,7 +191,7 @@ fn integration_test() -> Result<(), anyhow::Error> {
                     }
 
                     let tx: Transaction = tx.unwrap();
-                    coordinator.dispatch(tx, "my_context".to_string(), None)?;
+                    coordinator.dispatch(tx, None, "my_context".to_string(), None)?;
 
                     let ack_news = AckNews::Monitor(AckMonitorNews::Transaction(tx_1_id));
                     coordinator.ack_news(ack_news)?;

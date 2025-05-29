@@ -6,8 +6,7 @@ use crate::{
         TransactionDispatchState,
     },
 };
-use bitcoin::{consensus, Address, Amount, Network, Transaction, Txid};
-use bitcoincore_rpc::{json::EstimateMode, RpcApi};
+use bitcoin::{Address, Amount, Network, Transaction, Txid};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, rpc_config::RpcConfig};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClientApi, types::BlockHeight};
 use bitvmx_transaction_monitor::{
@@ -22,15 +21,16 @@ use std::{rc::Rc, str::FromStr};
 use storage_backend::storage::Storage;
 use tracing::{info, warn};
 
-pub struct BitcoinCoordinator<M, B>
+pub struct BitcoinCoordinator<M, B, C>
 where
     M: MonitorApi,
     B: BitcoinCoordinatorStoreApi,
+    C: BitcoinClientApi,
 {
     monitor: M,
     store: B,
     key_manager: Rc<KeyManager>,
-    bitcoin_client: BitcoinClient,
+    client: C,
     network: Network,
 }
 
@@ -103,9 +103,6 @@ impl BitcoinCoordinatorType {
         checkpoint: Option<BlockHeight>,
         confirmation_threshold: u32,
     ) -> Result<Self, BitcoinCoordinatorError> {
-        // We should pass node_rpc_url and that is all. Client should be removed.
-        // The only one that connects with the blockchain is the dispatcher and the indexer.
-        // So here should be initialized the BitcoinClient
         let monitor = Monitor::new_with_paths(
             rpc_config,
             storage.clone(),
@@ -123,10 +120,11 @@ impl BitcoinCoordinatorType {
     }
 }
 
-impl<M, B> BitcoinCoordinator<M, B>
+impl<M, B, C> BitcoinCoordinator<M, B, C>
 where
     M: MonitorApi,
     B: BitcoinCoordinatorStoreApi,
+    C: BitcoinClientApi,
 {
     const SPEED_UP_CHILD_TXID_PREFIX: &str = "speed_up_child_txid:";
 
@@ -138,14 +136,14 @@ where
         monitor: M,
         store: B,
         key_manager: Rc<KeyManager>,
-        client: BitcoinClient,
+        client: C,
         network: Network,
     ) -> Self {
         Self {
             monitor,
             store,
             key_manager,
-            bitcoin_client: client,
+            client,
             network,
         }
     }
@@ -174,7 +172,7 @@ where
                 style(tx_id).blue(),
             );
 
-            let dispatch_result = self.send_tx(pending_tx.tx);
+            let dispatch_result = self.client.send_transaction(&pending_tx.tx);
 
             if let Err(error) = dispatch_result {
                 let news = CoordinatorNews::DispatchTransactionError(
@@ -221,17 +219,6 @@ where
         let current_block_height = self.monitor.get_monitor_height()?;
 
         Ok(current_block_height >= pending_tx.target_block_height.unwrap())
-    }
-
-    fn send_tx(&self, tx: Transaction) -> Result<Txid, BitcoinCoordinatorError> {
-        let serialized_tx = consensus::encode::serialize_hex(&tx);
-
-        let tx_id = self
-            .bitcoin_client
-            .client
-            .send_raw_transaction(serialized_tx)?;
-
-        Ok(tx_id)
     }
 
     fn process_in_progress_txs(&self) -> Result<(), BitcoinCoordinatorError> {
@@ -394,13 +381,13 @@ where
         funding_tx_utxo: Utxo,
     ) -> Result<u64, BitcoinCoordinatorError> {
         let tx_out = self
-            .bitcoin_client
+            .client
             .get_tx_out(&funding_tx_utxo.txid, funding_tx_utxo.vout)?;
 
         let _funding_amount = tx_out.value; // TODO: This should be the amount of the funding transaction.
                                             // TODO define fee bumping strategy
         let porcentage_increase = 1.1;
-        let fee_rate = self.get_current_fee_rate()?;
+        let fee_rate = self.client.estimate_smart_fee()?;
 
         let _target_feerate =
             Amount::from_sat((fee_rate.to_sat() as f64 * porcentage_increase) as u64);
@@ -520,48 +507,13 @@ where
         // If we get here, we should speed up the transaction
         Ok(true)
     }
-
-    fn get_current_fee_rate(&self) -> Result<Amount, BitcoinCoordinatorError> {
-        const DEFAULT_FEE_RATE: Amount = Amount::from_sat(100); // 100 sat/vB
-        match self
-            .bitcoin_client
-            .client
-            .estimate_smart_fee(1, Some(EstimateMode::Conservative))
-        {
-            Ok(estimate) => {
-                // Returns estimate fee rate in BTC/vkB
-                match estimate.fee_rate {
-                    Some(fee_rate) => {
-                        // convert fee_rate to sat/vB
-                        let fee_rate = Amount::from_sat(fee_rate.to_sat() / 1000);
-                        return Ok(fee_rate);
-                    }
-                    None => {
-                        // Couldn't get fee_rate from estimate_smart_fee
-                        warn!(
-                            "Failed to get fee_rate from estimate_smart_fee: {:?}",
-                            estimate
-                        );
-                        warn!("Defaulting to {:?} sat/vB", DEFAULT_FEE_RATE);
-
-                        return Ok(DEFAULT_FEE_RATE);
-                    }
-                }
-            }
-            Err(error) => {
-                // Handle the error returned by estimate_smart_fee
-                return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(
-                    error.to_string(),
-                ));
-            }
-        }
-    }
 }
 
-impl<M, B> BitcoinCoordinatorApi for BitcoinCoordinator<M, B>
+impl<M, B, C> BitcoinCoordinatorApi for BitcoinCoordinator<M, B, C>
 where
     M: MonitorApi,
     B: BitcoinCoordinatorStoreApi,
+    C: BitcoinClientApi,
 {
     fn tick(&self) -> Result<(), BitcoinCoordinatorError> {
         // The monitor is considered ready when it has fully indexed the blockchain and is up to date with the latest block.

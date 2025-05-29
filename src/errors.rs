@@ -35,13 +35,13 @@ pub enum BitcoinCoordinatorStoreError {
     FundingKeyNotFound,
 
     #[error("Funding transaction not found")]
-    FundingTransactionNotFound,
+    FundingNotFound,
 
     #[error("Funding transaction already exists")]
     FundingTransactionAlreadyExists,
 
     #[error("Speed up transaction not found")]
-    SpeedUpTransactionNotFound,
+    SpeedupNotFound,
 
     #[error("Invalid transaction state")]
     InvalidTransactionState,

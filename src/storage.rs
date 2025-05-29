@@ -268,7 +268,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let speed_up_tx = speed_up_txs.into_iter().find(|t| t.tx_id == *tx_id);
 
         if speed_up_tx.is_none() {
-            return Err(BitcoinCoordinatorStoreError::SpeedUpTransactionNotFound);
+            return Err(BitcoinCoordinatorStoreError::SpeedupNotFound);
         }
 
         Ok(speed_up_tx.unwrap())
@@ -452,11 +452,11 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             }
         }
 
-        // Get dispatcher error news
-        let dispatcher_error_key = self.get_key(StoreKey::DispatchTransactionErrorNewsList);
+        // Get dispatch error news
+        let dispatch_error_key = self.get_key(StoreKey::DispatchTransactionErrorNewsList);
         if let Some(news_list) = self
             .store
-            .get::<&str, Vec<(Txid, String, String)>>(&dispatcher_error_key)?
+            .get::<&str, Vec<(Txid, String, String)>>(&dispatch_error_key)?
         {
             for (tx_id, context, error) in news_list {
                 all_news.push(CoordinatorNews::DispatchTransactionError(
