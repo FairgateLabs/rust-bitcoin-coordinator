@@ -378,19 +378,19 @@ where
     fn calculate_speedup_fee(
         &self,
         _txs: Vec<CoordinatedTransaction>,
-        funding_tx_utxo: Utxo,
+        _funding_tx_utxo: Utxo,
     ) -> Result<u64, BitcoinCoordinatorError> {
-        let tx_out = self
-            .client
-            .get_tx_out(&funding_tx_utxo.txid, funding_tx_utxo.vout)?;
+        // let tx_out = self
+        //     .client
+        //     .get_tx_out(&funding_tx_utxo.txid, funding_tx_utxo.vout)?;
 
-        let _funding_amount = tx_out.value; // TODO: This should be the amount of the funding transaction.
-                                            // TODO define fee bumping strategy
-        let porcentage_increase = 1.1;
-        let fee_rate = self.client.estimate_smart_fee()?;
+        // let _funding_amount = tx_out.value; // TODO: This should be the amount of the funding transaction.
+        // TODO define fee bumping strategy
+        // let porcentage_increase = 1.1;
+        // let fee_rate = self.client.estimate_smart_fee()?;
 
-        let _target_feerate =
-            Amount::from_sat((fee_rate.to_sat() as f64 * porcentage_increase) as u64);
+        // let _target_feerate =
+        //     Amount::from_sat((fee_rate.to_sat() as f64 * porcentage_increase) as u64);
 
         // TODO: This should be the size of the transaction.
         // total_size = size_parents + size_child

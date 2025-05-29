@@ -3,7 +3,7 @@ use bitcoin::{
     absolute, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction, Amount,
     EcdsaSighashType, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
 };
-use bitcoin::{address, Address, CompressedPublicKey, Network, PublicKey, Txid, WPubkeyHash};
+use bitcoin::{Address, CompressedPublicKey, Network, PublicKey, Txid, WPubkeyHash};
 use bitcoin_coordinator::errors::TxBuilderHelperError;
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::TypesToMonitor;

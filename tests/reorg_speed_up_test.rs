@@ -1,4 +1,4 @@
-use bitcoin::{Amount, BlockHash, Network, Txid};
+use bitcoin::{BlockHash, Network, Txid};
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
 use bitcoin_coordinator::{AckMonitorNews, MonitorNews, TypesToMonitor};
 use bitvmx_transaction_monitor::errors::MonitorError;
@@ -30,7 +30,7 @@ mod utils;
 #[test]
 fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
     // Setup mocks for monitor, dispatcher, account, and storage to simulate the environment.
-    let (mut mock_monitor, store, mock_bitcoin_client, key_manager) = get_mocks();
+    let (mut mock_monitor, store, mut mock_bitcoin_client, key_manager) = get_mocks();
 
     // Setup a mock data containing a single transaction, marked for dispatch and monitoring.
     let (tx_to_monitor, tx, funding_tx, tx_id, context_data) = get_mock_data();
@@ -40,11 +40,11 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
     // FIRST TICK >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     // Dispatch the transaction
-    // mock_dispatcher
-    //     .expect_send()
-    //     .times(1)
-    //     .with(eq(tx.clone()))
-    //     .returning(move |tx_ret| Ok(tx_ret.compute_txid()));
+    mock_bitcoin_client
+        .expect_send_transaction()
+        .times(1)
+        .with(eq(tx.clone()))
+        .returning(move |tx_ret| Ok(tx_ret.compute_txid()));
 
     // Monitor the transaction, this will be called twice, once for the monitor method and other for the dispatch method
     mock_monitor
@@ -86,7 +86,7 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
     let tx_speed_up_id_1 =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b").unwrap();
 
-    // First speed-up attempt: Create a new speed-up transaction based on original funding transaction.
+    // // First speed-up attempt: Create a new speed-up transaction based on original funding transaction.
     // mock_dispatcher
     //     .expect_speed_up()
     //     .times(1)
