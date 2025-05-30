@@ -220,7 +220,12 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             .get::<&str, Vec<Utxo>>(&fundings_txs_key)?
             .unwrap_or_default();
 
+        let original_len = funding_txs.len();
         funding_txs.retain(|tx| tx.txid != funding_tx_id);
+
+        if funding_txs.len() == original_len {
+            return Err(BitcoinCoordinatorStoreError::FundingNotFound);
+        }
 
         self.store.set(&fundings_txs_key, &funding_txs, None)?;
 

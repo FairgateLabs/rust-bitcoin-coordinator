@@ -235,7 +235,7 @@ fn test_speed_up_tx_operations() -> Result<(), anyhow::Error> {
     // Add the second speed-up transaction using save_speedup_tx
     store.save_speedup_tx(&speed_up_tx2)?;
 
-    // Test get_last_speedup_tx which should return the latest speed-up transaction
+    // Test get_last_speedup which should return the latest speed-up transaction
     let latest_speed_up = store.get_last_speedup()?;
     assert!(latest_speed_up.is_some());
     let latest = latest_speed_up.unwrap();
@@ -248,12 +248,9 @@ fn test_speed_up_tx_operations() -> Result<(), anyhow::Error> {
     // Test get_speedup_tx with the second transaction
     let second_specific = store.get_speedup_tx(&second_speed_up_tx_id)?;
     assert_eq!(second_specific.tx_id, second_speed_up_tx_id);
+
     // Test with a non-existent transaction ID
     let non_existent_tx_id = Txid::from_slice(&[3; 32]).unwrap();
-    let non_existent_speed_up = store.get_last_speedup()?;
-    assert!(non_existent_speed_up.is_none());
-
-    // Test get_speedup_tx with non-existent IDs
     let non_existent_specific = store.get_speedup_tx(&non_existent_tx_id);
     assert!(matches!(
         non_existent_specific,
@@ -508,7 +505,12 @@ fn test_funding_tx_operations() -> Result<(), anyhow::Error> {
     store.remove_funding(funding_tx2.txid)?;
 
     // tx2 should have no funding
-    assert!(store.get_funding()?.is_none());
+    let funding = store.get_funding()?;
+    assert!(funding.is_some());
+    let retrieved_tx = funding.unwrap();
+    assert_eq!(retrieved_tx.txid, funding_tx3.txid);
+    assert_eq!(retrieved_tx.vout, funding_tx3.vout);
+    assert_eq!(retrieved_tx.amount, funding_tx3.amount);
 
     // Clean up
     clear_output();

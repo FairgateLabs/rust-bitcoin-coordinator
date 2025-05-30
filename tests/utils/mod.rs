@@ -12,6 +12,7 @@ use bitvmx_bitcoin_rpc::bitcoin_client::MockBitcoinClient;
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use key_manager::config::KeyManagerConfig;
+use key_manager::create_key_manager_from_config;
 use key_manager::key_manager::KeyManager;
 use key_manager::key_store::KeyStore;
 use protocol_builder::types::Utxo;
@@ -49,21 +50,20 @@ pub fn get_mocks() -> (
     let config = KeyManagerConfig::new(Network::Regtest.to_string(), None, None, None);
     let key_store = KeyStore::new(storage.clone());
     let key_manager =
-        Rc::new(KeyManager::new_from_config(&config, key_store, storage.clone()).unwrap());
+        Rc::new(create_key_manager_from_config(&config, key_store, storage.clone()).unwrap());
+
     (mock_monitor, store, bitcoin_client, key_manager)
 }
 
-pub fn get_mock_data() -> (TypesToMonitor, Transaction, Utxo, Txid, String) {
+pub fn get_mock_data(
+    key_manager: Rc<KeyManager>,
+) -> (TypesToMonitor, Transaction, Utxo, Txid, String, Utxo) {
+    let public_key = key_manager.derive_keypair(0).unwrap();
+
     let new_funding_tx_id =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
 
-    let funding_utxo = Utxo::new(
-        new_funding_tx_id,
-        1,
-        Amount::default().to_sat(),
-        &PublicKey::from_str("032e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af")
-            .unwrap(),
-    );
+    let funding_utxo = Utxo::new(new_funding_tx_id, 0, 10000000, &public_key);
 
     let tx = Transaction {
         version: transaction::Version::TWO,
@@ -76,7 +76,16 @@ pub fn get_mock_data() -> (TypesToMonitor, Transaction, Utxo, Txid, String) {
     let context_data = "My context monitor".to_string();
     let to_monitor = TypesToMonitor::Transactions(vec![tx_id], context_data.clone());
 
-    (to_monitor, tx, funding_utxo, tx_id, context_data)
+    let speedup_utxo = Utxo::new(tx_id, 0, 10000000, &public_key);
+
+    (
+        to_monitor,
+        tx,
+        funding_utxo,
+        tx_id,
+        context_data,
+        speedup_utxo,
+    )
 }
 
 pub fn generate_tx(

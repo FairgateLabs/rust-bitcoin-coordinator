@@ -74,7 +74,7 @@ fn tick_method_is_not_ready() -> Result<(), anyhow::Error> {
 fn monitor_test() -> Result<(), anyhow::Error> {
     let (mut mock_monitor, store, mock_bitcoin_client, key_manager) = get_mocks();
 
-    let (tx_to_monitor, _, _, _, _) = get_mock_data();
+    let (tx_to_monitor, _, _, _, _, _) = get_mock_data(key_manager.clone());
 
     mock_monitor
         .expect_monitor()
@@ -99,7 +99,7 @@ fn monitor_test() -> Result<(), anyhow::Error> {
 #[test]
 fn dispatch_with_target_block_height() -> Result<(), anyhow::Error> {
     let (mut mock_monitor, store, mut mock_bitcoin_client, key_manager) = get_mocks();
-    let (_, tx, _, _, context) = get_mock_data();
+    let (_, tx, _, _, context, _) = get_mock_data(key_manager.clone());
     let tx_id = tx.compute_txid();
     let target_block_height = Some(1001);
 

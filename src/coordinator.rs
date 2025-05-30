@@ -126,7 +126,7 @@ where
     B: BitcoinCoordinatorStoreApi,
     C: BitcoinClientApi,
 {
-    const SPEED_UP_CHILD_TXID_PREFIX: &str = "speed_up_child_txid:";
+    const SPEED_UP_CHILD_TXID_PREFIX: &str = "speed_up_child_txid";
 
     // Stop monitoring a transaction after 100 confirmations.
     // In case of a reorganization bigger than 100 blocks, we have to do a rework in the coordinator.
@@ -285,6 +285,7 @@ where
         for news in list_news {
             if let MonitorNews::Transaction(tx_id, tx_status, context_data) = news {
                 // Check if context_data contains the string "speed_up"
+
                 if !context_data.starts_with(Self::SPEED_UP_CHILD_TXID_PREFIX) {
                     // Skip processing this news as it is not a speed-up transaction
                     // TODO:
@@ -295,26 +296,16 @@ where
                     continue;
                 }
 
-                // Remove the "speed_up_txid:" prefix from context_data
-                let tx_id_child = context_data.replace(Self::SPEED_UP_CHILD_TXID_PREFIX, "");
-                let tx_child_id = match Txid::from_str(&tx_id_child) {
-                    Ok(txid) => txid,
-                    Err(e) => {
-                        return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(format!(
-                            "Failed to parse speed up transaction child id: {}",
-                            e
-                        )))
-                    }
-                };
+                let speed_up_data = self.store.get_speedup_tx(&tx_id)?;
 
                 info!(
-                    "Transaction Speed-up with id: {} for child {}",
+                    "Transaction Speed-up with ids: {} and {}",
                     style(tx_id).red(),
-                    style(tx_child_id).red()
+                    style(format!("{:?}", speed_up_data.child_tx_ids)).red()
                 );
 
                 self.process_speedup(&tx_status)?;
-                let ack = AckMonitorNews::Transaction(tx_id);
+                let ack = AckMonitorNews::Transaction(speed_up_data.tx_id);
                 self.monitor.ack_news(ack)?;
             }
         }
@@ -353,15 +344,14 @@ where
             &self.key_manager,
         )?;
 
-        let speed_up_tx_context = format!(
-            "{}{}",
-            Self::SPEED_UP_CHILD_TXID_PREFIX,
-            speedup_tx.compute_txid()
-        );
-
         let speedup_tx_id = speedup_tx.compute_txid();
 
-        self.dispatch(speedup_tx, None, speed_up_tx_context, None)?;
+        self.dispatch(
+            speedup_tx,
+            None,
+            Self::SPEED_UP_CHILD_TXID_PREFIX.to_string(),
+            None,
+        )?;
 
         let deliver_block_height = self.monitor.get_monitor_height()?;
 
@@ -495,14 +485,18 @@ where
                 .iter()
                 .any(|tx_id| tx_id == &tx_to_speedup.tx_id);
 
-            if !was_previously_speedup {
-                return Ok(true);
+            if was_previously_speedup {
+                return Ok(false);
             }
 
             if current_block_height - speed_up_tx.deliver_block_height < SPEED_UP_THRESHOLD_BLOCKS {
                 return Ok(false);
             }
-        };
+        }
+
+        if tx_to_speedup.speedup_utxo.is_none() {
+            return Ok(false);
+        }
 
         // If we get here, we should speed up the transaction
         Ok(true)
