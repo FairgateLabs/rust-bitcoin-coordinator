@@ -6,7 +6,7 @@ use crate::{
         TransactionDispatchState,
     },
 };
-use bitcoin::{Address, Network, Transaction, Txid};
+use bitcoin::{Address, CompressedPublicKey, Network, Transaction, Txid};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, rpc_config::RpcConfig};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClientApi, types::BlockHeight};
 use bitvmx_transaction_monitor::{
@@ -156,7 +156,8 @@ where
 
         if !pending_txs.is_empty() {
             info!(
-                "Transactions pending to be dispatch #{}",
+                "{} Transactions to Dispatch #{}",
+                style("Coordinator").green(),
                 style(pending_txs.len()).yellow()
             );
         }
@@ -164,7 +165,8 @@ where
         for pending_tx in pending_txs {
             if !self.should_be_dispatched(&pending_tx)? {
                 info!(
-                    "Transaction {} should not be dispatched.",
+                    "{} Transaction {} should not be dispatched.",
+                    style("Coordinator").green(),
                     style(pending_tx.tx_id).yellow()
                 );
                 continue;
@@ -173,15 +175,19 @@ where
             let tx_id = pending_tx.tx.compute_txid();
 
             info!(
-                "{} Dispatching transaction ID: {}",
+                "{} Dispatching Transaction({})",
                 style("Coordinator").green(),
-                style(tx_id).blue(),
+                style(tx_id).yellow(),
             );
 
             let dispatch_result = self.client.send_transaction(&pending_tx.tx);
 
             if let Err(error) = dispatch_result {
-                info!("Error dispatching transaction ID: {}", style(tx_id).red());
+                info!(
+                    "{} Error Dispatching Transaction({})",
+                    style("Coordinator").green(),
+                    style(tx_id).red()
+                );
                 let news = CoordinatorNews::DispatchTransactionError(
                     tx_id,
                     pending_tx.context,
@@ -240,8 +246,8 @@ where
 
         for tx in txs {
             info!(
-                "{} Processing tx id: {}",
-                style("→").cyan(),
+                "{} Processing Transaction({})",
+                style("Coordinator").green(),
                 style(tx.tx_id).blue(),
             );
 
@@ -306,9 +312,10 @@ where
                 let speed_up_data = self.store.get_speedup_tx(&tx_id)?;
 
                 info!(
-                    "Transaction Speed-up with ids: {} and {}",
-                    style(tx_id).red(),
-                    style(format!("{:?}", speed_up_data.child_tx_ids)).red()
+                    "{} Mined Speedup({}) for Transactions({})",
+                    style("Coordinator").green(),
+                    style(tx_id).yellow(),
+                    style(format!("{:?}", speed_up_data.child_tx_ids)).cyan()
                 );
 
                 self.process_speedup(&tx_status)?;
@@ -338,8 +345,8 @@ where
 
         // TODO: This logic may need to be updated to use OutputType from the protocol builder for greater flexibility.
         // Currently, we derive the change address as a P2PKH address from the funding UTXO's public key.
-        let change_address = Address::p2pkh(funding_tx_utxo.pub_key, self.network);
-
+        let compressed = CompressedPublicKey::try_from(funding_tx_utxo.pub_key).unwrap();
+        let change_address = Address::p2wpkh(&compressed, self.network);
         let speedup_fee = self.calculate_speedup_fee(txs_to_speedup, funding_tx_utxo.clone())?;
 
         // We should not get any error from protocol builder.
@@ -352,6 +359,12 @@ where
         )?;
 
         let speedup_tx_id = speedup_tx.compute_txid();
+
+        info!(
+            "{} New Speedup({})",
+            style("Coordinator").green(),
+            style(speedup_tx_id).blue(),
+        );
 
         self.dispatch(
             speedup_tx,
@@ -465,7 +478,7 @@ where
         &self,
         tx_to_speedup: &CoordinatedTransaction,
     ) -> Result<bool, BitcoinCoordinatorError> {
-        const SPEED_UP_THRESHOLD_BLOCKS: u32 = 1;
+        const SPEED_UP_THRESHOLD_BLOCKS: u32 = 0;
 
         // We do not speed up the transaction if it has not been delivered yet.
         if tx_to_speedup.broadcast_block_height.is_none() {

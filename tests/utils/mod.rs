@@ -96,11 +96,11 @@ pub fn generate_tx(
     origin_amount: u64,
     origin_pubkey: PublicKey,
     key_manager: Rc<KeyManager>,
-) -> Result<Transaction, TxBuilderHelperError> {
+) -> Result<(Transaction, Utxo), TxBuilderHelperError> {
     let amount = 10000;
-    let fee = 141;
+    let fee = 1000;
 
-    let tx = create_transfer_transaction(
+    let (tx, speedup_utxo) = create_tx_to_speedup(
         funding_outpoint,
         origin_amount,
         origin_pubkey,
@@ -110,10 +110,10 @@ pub fn generate_tx(
         key_manager,
     );
 
-    Ok(tx)
+    Ok((tx, speedup_utxo))
 }
 
-fn create_transfer_transaction(
+fn create_tx_to_speedup(
     outpoint: OutPoint,
     origin_amount: u64,
     origin_pubkey: PublicKey,
@@ -121,7 +121,7 @@ fn create_transfer_transaction(
     amount: u64,
     fee: u64,
     key_manager: Rc<KeyManager>,
-) -> Transaction {
+) -> (Transaction, Utxo) {
     // Create the  for funding
     let external_output = OutputType::segwit_key(origin_amount, &origin_pubkey).unwrap();
 
@@ -142,14 +142,22 @@ fn create_transfer_transaction(
         )
         .unwrap();
 
+    // Add the output for the transfer transaction
     let transfer_output = OutputType::segwit_key(amount, &to_pubkey).unwrap();
-
     protocol
         .add_transaction_output("transfer", &transfer_output)
         .unwrap();
 
-    let change = origin_amount - amount - fee;
+    // Add the output for the speed up transaction
+    let speedup_amount = 2000;
+    let speedup_output = OutputType::segwit_key(speedup_amount, &to_pubkey).unwrap();
 
+    protocol
+        .add_transaction_output("transfer", &speedup_output)
+        .unwrap();
+
+    // Add the output for the change
+    let change = origin_amount - amount - fee - speedup_amount;
     if change > 0 {
         let change_output = OutputType::segwit_key(change, &origin_pubkey).unwrap();
         protocol
@@ -171,5 +179,7 @@ fn create_transfer_transaction(
         .transaction_to_send("transfer", &[spending_args])
         .unwrap();
 
-    result
+    let speedup_utxo = Utxo::new(result.compute_txid(), 1, speedup_amount, &to_pubkey);
+
+    (result, speedup_utxo)
 }

@@ -16,6 +16,7 @@ use std::rc::Rc;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 use tracing::info;
+use tracing_subscriber::EnvFilter;
 use utils::{generate_random_string, generate_tx};
 mod utils;
 /*
@@ -39,11 +40,38 @@ mod utils;
     4. Cleanup:
        - Stops the regtest node and completes the test.
 */
+
+fn config_trace_aux() {
+    let default_modules = [
+        "info",
+        "libp2p=off",
+        "bitvmx_transaction_monitor=off",
+        "bitcoin_indexer=off",
+        "bitcoin_coordinator=info",
+        "p2p_protocol=off",
+        "p2p_handler=off",
+        "tarpc=off",
+        "key_manager=off",
+        "memory=off",
+    ];
+
+    let filter = EnvFilter::builder()
+        .parse(default_modules.join(","))
+        .expect("Invalid filter");
+
+    tracing_subscriber::fmt()
+        //.without_time()
+        //.with_ansi(false)
+        .with_target(true)
+        .with_env_filter(filter)
+        .init();
+}
+
 #[test]
 #[ignore = "This test runs in regtest with a bitcoind running, it fails intermittently"]
 fn send_tx_regtest() -> Result<(), anyhow::Error> {
-    let log_level = tracing::Level::INFO;
-    tracing_subscriber::fmt().with_max_level(log_level).init();
+    config_trace_aux();
+
     let network = Network::Regtest;
     let path = format!("test_output/test/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
@@ -70,7 +98,7 @@ fn send_tx_regtest() -> Result<(), anyhow::Error> {
     info!("Starting bitcoind");
     bitcoind.start()?;
 
-    info!("Deriving keypair");
+    info!("Creating keypair in key manager");
     let public_key = key_manager.derive_keypair(0).unwrap();
     let compressed = CompressedPublicKey::try_from(public_key).unwrap();
     let funding_wallet = Address::p2wpkh(&compressed, network);
@@ -81,14 +109,25 @@ fn send_tx_regtest() -> Result<(), anyhow::Error> {
         .mine_blocks_to_address(101, &regtest_wallet)
         .unwrap();
 
-    let amount = Amount::from_sat(234500000);
+    let amount = Amount::from_sat(23450000);
     info!("Funding address {:?}", funding_wallet);
-    let (funding_tx, vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
+
+    info!("Funding main tx address {:?}", funding_wallet);
+    let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
+
+    let (funding_speedup, funding_speedup_vout) =
+        bitcoin_client.fund_address(&funding_wallet, amount)?;
 
     info!(
         "Funding tx: {:?} | vout: {:?}",
         funding_tx.compute_txid(),
-        vout
+        funding_vout
+    );
+
+    info!(
+        "Funding speed up tx: {:?} | vout: {:?}",
+        funding_speedup.compute_txid(),
+        funding_speedup_vout
     );
 
     let coordinator = BitcoinCoordinator::new_with_paths(
@@ -105,37 +144,36 @@ fn send_tx_regtest() -> Result<(), anyhow::Error> {
         coordinator.tick()?;
     }
 
-    let tx = generate_tx(
-        OutPoint::new(funding_tx.compute_txid(), 0),
+    let (tx_to_speedup, speedup_utxo) = generate_tx(
+        OutPoint::new(funding_tx.compute_txid(), funding_vout),
         amount.to_sat(),
         public_key,
         key_manager.clone(),
     )?;
 
     let tx_context = "My tx".to_string();
-    let tx_to_monitor = TypesToMonitor::Transactions(vec![tx.compute_txid()], tx_context.clone());
+    let tx_to_monitor =
+        TypesToMonitor::Transactions(vec![tx_to_speedup.compute_txid()], tx_context.clone());
     coordinator.monitor(tx_to_monitor)?;
 
     // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.dispatch(tx, None, tx_context.clone(), None)?;
+    coordinator.dispatch(tx_to_speedup, Some(speedup_utxo), tx_context.clone(), None)?;
 
     // Add funding for speed up transaction
     coordinator.add_funding(Utxo::new(
-        funding_tx.compute_txid(),
-        vout,
-        10000,
+        funding_speedup.compute_txid(),
+        funding_speedup_vout,
+        amount.to_sat(),
         &public_key,
     ))?;
 
-    info!("Dispatching transaction");
+    coordinator.tick()?;
     coordinator.tick()?;
 
-    info!("Mining transaction");
     bitcoin_client
         .mine_blocks_to_address(1, &funding_wallet)
         .unwrap();
 
-    info!("Detecting transaction");
     coordinator.tick()?;
 
     // Should be news.

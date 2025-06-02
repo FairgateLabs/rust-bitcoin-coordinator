@@ -24,31 +24,23 @@ mod utils;
 fn speed_up_tx() -> Result<(), anyhow::Error> {
     let log_level = tracing::Level::INFO;
     tracing_subscriber::fmt().with_max_level(log_level).init();
-    let network = Network::Regtest;
+    let network = Network::Testnet;
     let path = format!("test_output/test/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config).unwrap());
     let config_bitcoin_client = RpcConfig::new(
         network,
-        "http://127.0.0.1:18443".to_string(),
-        "foo".to_string(),
-        "rpcpassword".to_string(),
+         "https://distinguished-intensive-frost.btc-testnet.quiknode.pro/38d0f064dc8e72fe44d8a9a762d448bc64c54619/".to_string(),
+        "".to_string(),
+        "".to_string(),
         "test_wallet".to_string(),
     );
+
     let config = KeyManagerConfig::new(network.to_string(), None, None, None);
     let key_store = KeyStore::new(storage.clone());
     let key_manager =
         Rc::new(create_key_manager_from_config(&config, key_store, storage.clone()).unwrap());
     let bitcoin_client = BitcoinClient::new_from_config(&config_bitcoin_client)?;
-
-    let bitcoind = Bitcoind::new(
-        "bitcoin-regtest",
-        "ruimarinho/bitcoin-core",
-        config_bitcoin_client.clone(),
-    );
-
-    info!("Starting bitcoind");
-    bitcoind.start()?;
 
     info!("Deriving keypair");
     let public_key = key_manager.derive_keypair(0).unwrap();
@@ -127,8 +119,6 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
     if news.monitor_news.len() > 0 {
         info!("Monitor news: {:?}", news);
     }
-
-    bitcoind.stop()?;
 
     Ok(())
 }
