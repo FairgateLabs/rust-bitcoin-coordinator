@@ -128,24 +128,28 @@ fn speed_up_tx() -> Result<(), anyhow::Error> {
         &public_key,
     ))?;
 
-    for _ in 0..10 {
-        info!("Mining block");
-        bitcoin_client
-            .mine_blocks_to_address(1, &regtest_wallet)
-            .unwrap();
+    info!("Dispatching transaction");
+    coordinator.tick()?;
 
-        info!("Ticking coordinator");
-        coordinator.tick()?;
+    info!("Mining transaction");
+    bitcoin_client
+        .mine_blocks_to_address(1, &funding_wallet)
+        .unwrap();
 
-        info!("Getting news");
-        let news = coordinator.get_news()?;
+    info!("Detecting transaction");
+    coordinator.tick()?;
 
-        if news.monitor_news.len() > 0 {
-            info!("News: {:?}", news);
-        }
+    // Should be news.
+    let news = coordinator.get_news()?;
+    if news.coordinator_news.len() > 0 {
+        info!("Coordinator news: {:?}", news);
     }
 
-    // bitcoind.stop()?;
+    if news.monitor_news.len() > 0 {
+        info!("Monitor news: {:?}", news);
+    }
+
+    bitcoind.stop()?;
 
     Ok(())
 }

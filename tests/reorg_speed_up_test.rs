@@ -43,6 +43,7 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
     let (tx_to_monitor, tx, funding_tx, tx_id, context_data, speedup_utxo) =
         get_mock_data(key_manager.clone());
 
+    mock_monitor.expect_tick().returning(|| Ok(()));
     mock_monitor.expect_is_ready().returning(|| Ok(true));
 
     // FIRST TICK >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>

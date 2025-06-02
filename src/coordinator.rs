@@ -517,11 +517,11 @@ where
     C: BitcoinClientApi,
 {
     fn tick(&self) -> Result<(), BitcoinCoordinatorError> {
+        self.monitor.tick()?;
         // The monitor is considered ready when it has fully indexed the blockchain and is up to date with the latest block.
         // Note that if there is a significant gap in the indexing process, it may take multiple ticks for the monitor to become ready.
+
         if !(self.monitor.is_ready()?) {
-            info!("Monitor is not ready, ticking");
-            self.monitor.tick()?;
             return Ok(());
         }
 
