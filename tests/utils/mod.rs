@@ -98,7 +98,7 @@ pub fn generate_tx(
     key_manager: Rc<KeyManager>,
 ) -> Result<Transaction, TxBuilderHelperError> {
     let amount = 10000;
-    let fee = 1000;
+    let fee = 141;
 
     let tx = create_transfer_transaction(
         funding_outpoint,
