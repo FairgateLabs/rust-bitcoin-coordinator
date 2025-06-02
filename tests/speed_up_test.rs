@@ -1,13 +1,22 @@
-use bitcoin::{BlockHash, Network, Txid};
-use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
-use bitcoin_coordinator::{AckMonitorNews, MonitorNews, TypesToMonitor};
-use bitvmx_transaction_monitor::errors::MonitorError;
-use bitvmx_transaction_monitor::types::{
-    BlockInfo, TransactionBlockchainStatus, TransactionStatus,
+use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
+use bitcoin_coordinator::{
+    coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
+    TypesToMonitor,
 };
-use mockall::predicate::eq;
-use std::str::FromStr;
-use utils::{clear_output, get_mock_data, get_mocks};
+use bitcoind::bitcoind::Bitcoind;
+use bitvmx_bitcoin_rpc::{
+    bitcoin_client::{BitcoinClient, BitcoinClientApi},
+    rpc_config::RpcConfig,
+};
+use key_manager::config::KeyManagerConfig;
+use key_manager::create_key_manager_from_config;
+use key_manager::key_store::KeyStore;
+use protocol_builder::types::Utxo;
+use std::rc::Rc;
+use storage_backend::storage::Storage;
+use storage_backend::storage_config::StorageConfig;
+use tracing::info;
+use utils::{generate_random_string, generate_tx};
 mod utils;
 /*
     Test Summary: speed_up_tx
@@ -32,279 +41,111 @@ mod utils;
     - The transaction is marked as finalized.
 */
 #[test]
-#[ignore = "This test is not working, it should be fixed"]
+#[ignore = "This test runs in regtest with a bitcoind running"]
 fn speed_up_tx() -> Result<(), anyhow::Error> {
-    // Setup mocks for monitor, dispatcher, account, and storage to simulate the environment.
-    let (mut mock_monitor, store, mock_bitcoin_client, key_manager) = get_mocks();
-
-    // Setup a mock data containing a single transaction, marked for dispatch and monitoring.
-    let (tx_to_monitor, tx, funding_tx, tx_id, context_data, _) =
-        get_mock_data(key_manager.clone());
-
-    mock_monitor.expect_is_ready().returning(|| Ok(true));
-
-    // FIRST TICK >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-    // Dispatch the transaction
-    // mock_dispatcher
-    //     .expect_send()
-    //     .times(1)
-    //     .with(eq(tx.clone()))
-    //     .returning(move |tx_ret| Ok(tx_ret.compute_txid()));
-
-    // Monitor the transaction, this will be called twice, once for the monitor method and other for the dispatch method
-    mock_monitor
-        .expect_monitor()
-        .times(2)
-        .with(eq(tx_to_monitor.clone()))
-        .returning(|_| Ok(()));
-
-    mock_monitor
-        .expect_get_tx_status()
-        .times(1)
-        .with(eq(tx_id))
-        .returning(move |_| Err(MonitorError::TransactionNotFound(tx_id.clone().to_string())));
-
-    // Return no news
-    mock_monitor
-        .expect_get_news()
-        .times(1)
-        .returning(move || Ok(vec![]));
-
-    mock_monitor
-        .expect_get_monitor_height()
-        .times(2)
-        .returning(move || Ok(1));
-
-    // SECOND TICK >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-    mock_monitor
-        .expect_get_news()
-        .times(1)
-        .returning(move || Ok(vec![]));
-
-    mock_monitor
-        .expect_get_monitor_height()
-        .times(2)
-        .returning(move || Ok(2));
-
-    // Define unique mock transaction IDs for each speed-up attempt.
-    let tx_speed_up_id_1 =
-        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
-
-    // First speed-up attempt: Create a new speed-up transaction based on original funding transaction.
-    // mock_dispatcher
-    //     .expect_speed_up()
-    //     .times(1)
-    //     .with(
-    //         eq(tx.clone()),
-    //         eq(account.pk),
-    //         eq(funding_tx.txid),
-    //         eq((funding_tx.vout, funding_tx.utxo_output.clone(), account.pk)),
-    //     )
-    //     .returning(move |_, _, _, _| Ok((tx_speed_up_id_1, Amount::default())));
-
-    let context = "speed_up_child_txid";
-
-    let speed_up_1_to_monitor =
-        TypesToMonitor::Transactions(vec![tx_speed_up_id_1], context.to_string());
-
-    // Save both speed-up transactions in the monitor for tracking purposes.
-    mock_monitor
-        .expect_monitor()
-        .times(1)
-        .with(eq(speed_up_1_to_monitor))
-        .returning(|_| Ok(()));
-
-    // Status of transaction is still unmined.
-    mock_monitor
-        .expect_get_tx_status()
-        .times(1)
-        .with(eq(tx_id))
-        .returning(move |_| Err(MonitorError::TransactionNotFound(tx_id.clone().to_string())));
-
-    // THIRD TICK >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-    mock_monitor
-        .expect_get_news()
-        .times(1)
-        .returning(move || Ok(vec![]));
-
-    mock_monitor
-        .expect_get_monitor_height()
-        .times(1)
-        .returning(move || Ok(3));
-
-    mock_monitor
-        .expect_get_monitor_height()
-        .times(1)
-        .returning(move || Ok(3));
-
-    // Mock the dispatcher to check if the transaction needs to be sped up. It should decide "yes."
-    // mock_dispatcher
-    //     .expect_should_speed_up()
-    //     .with(eq(Amount::default()))
-    //     .times(1)
-    //     .returning(|_| Ok(true));
-
-    let tx_speed_up_id_2 =
-        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b").unwrap();
-
-    // Second speed-up attempt: Re-attempt speed-up using the original UTXO data as the transaction is still unmined.
-    // mock_dispatcher
-    //     .expect_speed_up()
-    //     .times(1)
-    //     .with(
-    //         eq(tx.clone()),
-    //         eq(account.pk),
-    //         eq(funding_tx.txid),
-    //         eq((funding_tx.vout, funding_tx.utxo_output.clone(), account.pk)),
-    //     )
-    //     .returning(move |_, _, _, _| Ok((tx_speed_up_id_2, Amount::default())));
-
-    mock_monitor.expect_monitor().returning(|_| Ok(()));
-
-    // Status of transaction is still unmined.
-    mock_monitor
-        .expect_get_tx_status()
-        .times(1)
-        .with(eq(tx_id))
-        .returning(move |_| Err(MonitorError::TransactionNotFound(tx_id.clone().to_string())));
-
-    // FOURTH TICK >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-    // Tx is confirmed and 2nd speed up is confirmed too
-    let tx_status = TransactionStatus {
-        tx_id: tx_id.clone(),
-        tx: tx.clone(),
-        block_info: Some(BlockInfo {
-            block_height: 4,
-            block_hash: BlockHash::from_str(
-                "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
-            )?,
-            is_orphan: false,
-        }),
-        confirmations: 1,
-        status: TransactionBlockchainStatus::Confirmed,
-    };
-
-    let tx_news = MonitorNews::Transaction(tx_id.clone(), tx_status, context_data.clone());
-
-    // Create a transaction news for the second speed up transaction
-    let tx_speed_up_2_status = TransactionStatus {
-        tx_id: tx_speed_up_id_2.clone(),
-        tx: tx.clone(),
-        block_info: Some(BlockInfo {
-            block_height: 4,
-            block_hash: BlockHash::from_str(
-                "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
-            )?,
-            is_orphan: false,
-        }),
-        confirmations: 1,
-        status: TransactionBlockchainStatus::Confirmed,
-    };
-
-    let tx_speed_up_2_news = MonitorNews::Transaction(
-        tx_speed_up_id_2.clone(),
-        tx_speed_up_2_status,
-        context.to_string(),
-    );
-
-    mock_monitor
-        .expect_get_news()
-        .times(1)
-        .returning(move || Ok(vec![tx_news.clone(), tx_speed_up_2_news.clone()]));
-
-    let tx_status = TransactionStatus {
-        tx_id: tx_id.clone(),
-        tx: tx.clone(),
-        block_info: None,
-        confirmations: 1,
-        status: TransactionBlockchainStatus::Confirmed,
-    };
-
-    mock_monitor
-        .expect_get_tx_status()
-        .times(1)
-        .with(eq(tx_id))
-        .returning(move |_| Ok(tx_status.clone()));
-
-    let ack_news = AckMonitorNews::Transaction(tx_speed_up_id_2.clone());
-    mock_monitor
-        .expect_ack_news()
-        .times(1)
-        .with(eq(ack_news.clone()))
-        .returning(|_| Ok(()));
-
-    // FIFTH TICK >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-    let tx_status = TransactionStatus {
-        tx_id: tx_id.clone(),
-        tx: tx.clone(),
-        block_info: None,
-        confirmations: 101,
-        status: TransactionBlockchainStatus::Finalized,
-    };
-    let tx_news = MonitorNews::Transaction(tx_id.clone(), tx_status.clone(), context_data.clone());
-
-    let tx_speed_up_2_status = TransactionStatus {
-        tx_id: tx_speed_up_id_2.clone(),
-        tx: tx.clone(),
-        block_info: None,
-        confirmations: 101,
-        status: TransactionBlockchainStatus::Finalized,
-    };
-
-    let tx_speed_up_2_news = MonitorNews::Transaction(
-        tx_speed_up_id_2.clone(),
-        tx_speed_up_2_status.clone(),
-        context.to_string(),
-    );
-
-    mock_monitor
-        .expect_get_news()
-        .times(1)
-        .returning(move || Ok(vec![tx_news.clone(), tx_speed_up_2_news.clone()]));
-
-    mock_monitor
-        .expect_get_tx_status()
-        .times(1)
-        .with(eq(tx_id))
-        .returning(move |_| Ok(tx_status.clone()));
-
-    let ack_news = AckMonitorNews::Transaction(tx_speed_up_id_2.clone());
-    mock_monitor
-        .expect_ack_news()
-        .times(1)
-        .with(eq(ack_news.clone()))
-        .returning(|_| Ok(()));
-
-    // Initialize the bitcoin coordinator with mocks and begin monitoring the txs.
-    let coordinator = BitcoinCoordinator::new(
-        mock_monitor,
-        store,
-        key_manager,
-        mock_bitcoin_client,
+    let log_level = tracing::Level::INFO;
+    tracing_subscriber::fmt().with_max_level(log_level).init();
+    let network = Network::Regtest;
+    let path = format!("test_output/test/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config).unwrap());
+    let config_bitcoin_client = RpcConfig::new(
         Network::Regtest,
+        "http://127.0.0.1:18443".to_string(),
+        "foo".to_string(),
+        "rpcpassword".to_string(),
+        "test_wallet".to_string(),
     );
+    let config = KeyManagerConfig::new(network.to_string(), None, None, None);
+    let key_store = KeyStore::new(storage.clone());
+    let key_manager =
+        Rc::new(create_key_manager_from_config(&config, key_store, storage.clone()).unwrap());
+    let bitcoin_client = BitcoinClient::new_from_config(&config_bitcoin_client)?;
+
+    let bitcoind = Bitcoind::new(
+        "bitcoin-regtest",
+        "ruimarinho/bitcoin-core",
+        config_bitcoin_client.clone(),
+    );
+
+    info!("Starting bitcoind");
+    bitcoind.start()?;
+
+    info!("Deriving keypair");
+    let public_key = key_manager.derive_keypair(0).unwrap();
+    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
+    let funding_wallet = Address::p2wpkh(&compressed, network);
+    let regtest_wallet = bitcoin_client.init_wallet(network, "test_wallet").unwrap();
+
+    info!("Mine 101 blocks to address {:?}", regtest_wallet);
+    bitcoin_client
+        .mine_blocks_to_address(101, &regtest_wallet)
+        .unwrap();
+
+    let amount = Amount::from_sat(234500000);
+    info!("Funding address {:?}", funding_wallet);
+    let (funding_tx, vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
+
+    info!(
+        "Funding tx: {:?} | vout: {:?}",
+        funding_tx.compute_txid(),
+        vout
+    );
+
+    let coordinator = BitcoinCoordinator::new_with_paths(
+        &config_bitcoin_client,
+        storage.clone(),
+        key_manager.clone(),
+        None,
+        1,
+    )?;
+
+    // Since we've already mined 102 blocks, we need to advance the coordinator by 102 ticks
+    // so the indexer can catch up with the current blockchain height.
+    for _ in 0..105 {
+        coordinator.tick()?;
+    }
+
+    let tx = generate_tx(
+        OutPoint::new(funding_tx.compute_txid(), 0),
+        amount.to_sat(),
+        public_key,
+        key_manager.clone(),
+    )?;
+
+    let tx_context = "My tx".to_string();
+    let tx_to_monitor = TypesToMonitor::Transactions(vec![tx.compute_txid()], tx_context.clone());
     coordinator.monitor(tx_to_monitor)?;
 
     // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.dispatch(tx, None, context_data.clone(), None)?;
+    coordinator.dispatch(tx, None, tx_context.clone(), None)?;
 
     // Add funding for speed up transaction
-    coordinator.add_funding(funding_tx)?;
+    coordinator.add_funding(Utxo::new(
+        funding_tx.compute_txid(),
+        vout,
+        10000,
+        &public_key,
+    ))?;
 
-    // Simulate ticks to monitor and adjust transaction status with each blockchain height update.
+    for _ in 0..10 {
+        info!("Mining block");
+        bitcoin_client
+            .mine_blocks_to_address(1, &regtest_wallet)
+            .unwrap();
 
-    coordinator.tick()?; // Dispatch and observe unmined status.
-    coordinator.tick()?; // First speed-up after unconfirmed status persists.
-    coordinator.tick()?; // Second speed-up due to continued unmined status.
-    coordinator.tick()?; // Confirmation observed, transaction is now mined.
-    coordinator.tick()?; // Simulate further blocks, marking the transaction as finalized.
+        info!("Ticking coordinator");
+        coordinator.tick()?;
 
-    clear_output();
+        info!("Getting news");
+        let news = coordinator.get_news()?;
+
+        if news.monitor_news.len() > 0 {
+            info!("News: {:?}", news);
+        }
+    }
+
+    // bitcoind.stop()?;
 
     Ok(())
 }

@@ -6,7 +6,7 @@ use crate::{
         TransactionDispatchState,
     },
 };
-use bitcoin::{Address, Amount, Network, Transaction, Txid};
+use bitcoin::{Address, Network, Transaction, Txid};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, rpc_config::RpcConfig};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClientApi, types::BlockHeight};
 use bitvmx_transaction_monitor::{
@@ -17,7 +17,7 @@ use bitvmx_transaction_monitor::{
 use console::style;
 use key_manager::key_manager::KeyManager;
 use protocol_builder::{builder::ProtocolBuilder, types::Utxo};
-use std::{rc::Rc, str::FromStr};
+use std::rc::Rc;
 use storage_backend::storage::Storage;
 use tracing::{info, warn};
 
@@ -154,13 +154,19 @@ where
             .store
             .get_txs(TransactionDispatchState::PendingDispatch)?;
 
-        info!(
-            "transactions pending to be dispatch #{}",
-            style(pending_txs.len()).yellow()
-        );
+        if !pending_txs.is_empty() {
+            info!(
+                "Transactions pending to be dispatch #{}",
+                style(pending_txs.len()).yellow()
+            );
+        }
 
         for pending_tx in pending_txs {
             if !self.should_be_dispatched(&pending_tx)? {
+                info!(
+                    "Transaction {} should not be dispatched.",
+                    style(pending_tx.tx_id).yellow()
+                );
                 continue;
             }
 
@@ -175,6 +181,7 @@ where
             let dispatch_result = self.client.send_transaction(&pending_tx.tx);
 
             if let Err(error) = dispatch_result {
+                info!("Error dispatching transaction ID: {}", style(tx_id).red());
                 let news = CoordinatorNews::DispatchTransactionError(
                     tx_id,
                     pending_tx.context,
@@ -513,6 +520,7 @@ where
         // The monitor is considered ready when it has fully indexed the blockchain and is up to date with the latest block.
         // Note that if there is a significant gap in the indexing process, it may take multiple ticks for the monitor to become ready.
         if !(self.monitor.is_ready()?) {
+            info!("Monitor is not ready, ticking");
             self.monitor.tick()?;
             return Ok(());
         }

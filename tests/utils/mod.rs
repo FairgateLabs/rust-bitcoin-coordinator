@@ -1,9 +1,9 @@
-use bitcoin::secp256k1::{All, SecretKey};
+use bitcoin::secp256k1::SecretKey;
 use bitcoin::{
     absolute, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction, Amount,
     EcdsaSighashType, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
 };
-use bitcoin::{Address, CompressedPublicKey, Network, PublicKey, Txid, WPubkeyHash};
+use bitcoin::{Address, Network, PrivateKey, PublicKey, Txid};
 use bitcoin_coordinator::errors::TxBuilderHelperError;
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::TypesToMonitor;
@@ -15,7 +15,10 @@ use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_manager::KeyManager;
 use key_manager::key_store::KeyStore;
-use protocol_builder::types::Utxo;
+use protocol_builder::builder::{Protocol, ProtocolBuilder};
+use protocol_builder::types::connection::InputSpec;
+use protocol_builder::types::input::{SighashType, SpendMode};
+use protocol_builder::types::{InputArgs, OutputType, Utxo};
 use std::rc::Rc;
 use std::str::FromStr;
 use storage_backend::storage::Storage;
@@ -89,130 +92,84 @@ pub fn get_mock_data(
 }
 
 pub fn generate_tx(
-    rpc_config: &RpcConfig,
-    network: Network,
+    funding_outpoint: OutPoint,
+    origin_amount: u64,
+    origin_pubkey: PublicKey,
+    key_manager: Rc<KeyManager>,
 ) -> Result<Transaction, TxBuilderHelperError> {
-    let secp: Secp256k1<All> = Secp256k1::new();
-    let sk = SecretKey::new(&mut rand::thread_rng());
-    let pk = bitcoin::PublicKey::new(sk.public_key(&secp));
-    let wpkh = pk.wpubkey_hash().expect("key is compressed");
-    let compressed = CompressedPublicKey::try_from(pk).unwrap();
-    let address = Address::p2wpkh(&compressed, network).as_unchecked().clone();
-    let address_checked = address.require_network(network).unwrap();
+    let amount = 10000;
+    let fee = 1000;
 
-    // build and send a mock transaction that we can spend in our drp transaction
-    let tx_info = make_mock_output(rpc_config, &address_checked)?;
-    let spent_amount = tx_info.amount.unsigned_abs();
-
-    let cpfp_fee = Amount::from_sat(100);
-    let cpfp_amount = Amount::from_sat(100);
-
-    // reciduo.
-    let drp_amount = spent_amount - cpfp_fee - cpfp_amount;
-
-    // The input for the transaction we are constructing.
-    let input = TxIn {
-        previous_output: OutPoint {
-            txid: tx_info.info.txid,
-            vout: tx_info
-                .details
-                .first()
-                .expect("No details found for transaction")
-                .vout,
-        },
-        script_sig: ScriptBuf::default(), // For a p2wpkh script_sig is empty.
-        sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
-        witness: Witness::default(), // Filled in after signing.
-    };
-
-    // The drp output. For this example, we just pay back to the user.
-    let drp = TxOut {
-        value: drp_amount,
-        script_pubkey: address_checked.script_pubkey(),
-    };
-
-    // The cpfp output is locked to a key controlled by the user.
-    let cpfp = TxOut {
-        value: cpfp_amount,
-        script_pubkey: ScriptBuf::new_p2wpkh(&wpkh),
-    };
-
-    let tx = build_transaction(vec![input], vec![drp, cpfp], spent_amount, &wpkh, &sk)?;
+    let tx = create_transfer_transaction(
+        funding_outpoint,
+        origin_amount,
+        origin_pubkey,
+        origin_pubkey,
+        amount,
+        fee,
+        key_manager,
+    );
 
     Ok(tx)
 }
 
-pub fn make_mock_output(
-    rpc_config: &RpcConfig,
-    address: &Address,
-) -> Result<GetTransactionResult, TxBuilderHelperError> {
-    let client = Client::new(
-        rpc_config.url.as_str(),
-        Auth::UserPass(
-            rpc_config.username.as_str().to_string(),
-            rpc_config.password.as_str().to_string(),
-        ),
-    )?;
+fn create_transfer_transaction(
+    outpoint: OutPoint,
+    origin_amount: u64,
+    origin_pubkey: PublicKey,
+    to_pubkey: PublicKey,
+    amount: u64,
+    fee: u64,
+    key_manager: Rc<KeyManager>,
+) -> Transaction {
+    // Create the  for funding
+    let external_output = OutputType::segwit_key(origin_amount, &origin_pubkey).unwrap();
 
-    // fund the user address
-    let txid = client.send_to_address(
-        address,
-        Amount::from_sat(100_000_000), // 1 BTC
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )?;
-
-    // get transaction details
-    Ok(client.get_transaction(&txid, Some(true))?)
-}
-
-/// Builds a transaction with a single input and multiple outputs.
-pub fn build_transaction(
-    inputs: Vec<TxIn>,
-    outputs: Vec<TxOut>,
-    spent_amount: Amount,
-    wpkh: &WPubkeyHash,
-    sk: &SecretKey,
-) -> Result<Transaction, TxBuilderHelperError> {
-    // TODO support multiple inputs and accounts (we only support one input, for now)
-    // The transaction we want to sign and broadcast.
-    let mut unsigned_tx = Transaction {
-        version: transaction::Version::TWO,  // Post BIP-68.
-        lock_time: absolute::LockTime::ZERO, // Ignore the locktime.
-        input: inputs,                       // Input goes into index 0.
-        output: outputs,                     // cpfp output is always index 0.
-    };
-    let input_index = 0;
-
-    // Get the sighash to sign.
-    let sighash_type = EcdsaSighashType::All;
-    let mut sighasher = SighashCache::new(&mut unsigned_tx);
-    let sighash = sighasher
-        .p2wpkh_signature_hash(
-            input_index,
-            &ScriptBuf::new_p2wpkh(&wpkh),
-            spent_amount,
-            sighash_type,
+    let mut protocol = Protocol::new("transfer_tx");
+    protocol.add_external_transaction("origin").unwrap();
+    protocol
+        .add_unkwnoun_outputs("origin", outpoint.vout)
+        .unwrap();
+    protocol
+        .add_connection(
+            "origin_tx_transfer",
+            "origin",
+            external_output.clone().into(),
+            "transfer",
+            InputSpec::Auto(SighashType::ecdsa_all(), SpendMode::Segwit),
+            None,
+            Some(outpoint.txid),
         )
-        .expect("failed to create sighash");
+        .unwrap();
 
-    // Sign the sighash using the secp256k1 library (exported by rust-bitcoin).
-    let msg = Message::from(sighash);
-    let secp = Secp256k1::new();
-    let signature = secp.sign_ecdsa(&msg, sk);
+    let transfer_output = OutputType::segwit_key(amount, &to_pubkey).unwrap();
 
-    // Update the witness stack.
-    let signature = bitcoin::ecdsa::Signature {
-        signature,
-        sighash_type,
-    };
-    let pk = sk.public_key(&secp);
-    *sighasher.witness_mut(input_index).unwrap() = Witness::p2wpkh(&signature, &pk);
+    protocol
+        .add_transaction_output("transfer", &transfer_output)
+        .unwrap();
 
-    // Get the signed transaction.
-    Ok(sighasher.into_transaction().to_owned())
+    let change = origin_amount - amount - fee;
+
+    if change > 0 {
+        let change_output = OutputType::segwit_key(change, &origin_pubkey).unwrap();
+        protocol
+            .add_transaction_output("transfer", &change_output)
+            .unwrap();
+    }
+
+    protocol.build_and_sign(&key_manager, "id").unwrap();
+
+    let signature = protocol
+        .input_ecdsa_signature("transfer", 0)
+        .unwrap()
+        .unwrap();
+
+    let mut spending_args = InputArgs::new_segwit_args();
+    spending_args.push_ecdsa_signature(signature).unwrap();
+
+    let result = protocol
+        .transaction_to_send("transfer", &[spending_args])
+        .unwrap();
+
+    result
 }
