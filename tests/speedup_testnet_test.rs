@@ -19,8 +19,31 @@ use tracing::info;
 use utils::{generate_random_string, generate_tx};
 mod utils;
 
+/*
+    Test Summary: speed_up_tx
+    // Note: On Regtest, transactions are typically mined immediately after being broadcast,
+    // making it difficult to keep a transaction in the mempool without it being included in a block.
+    // Therefore, to test a speedup, both the original and the speedup transaction
+    // must be broadcast and mined together in the same block.
+
+    1. Setup:
+       - Initializes a Bitcoin regtest node and key manager.
+       - Mines 101 blocks to fund a test wallet.
+       - Funds a new address for use in the test.
+
+    2. Dispatch Transaction + Speedup Transaction:
+       - Creates and dispatches a transaction.
+       - Adds funding for a speedup transaction.
+       - Advances the coordinator to process and speed up the transaction all together.
+
+    3. Monitoring and Confirmation:
+       - Mines a block to confirm the transaction together with the speedup transaction.
+       - Coordinator ticks again to detect the mined transactions.
+       - News status updates are checked to ensure the transaction is confirmed.
+*/
+
 #[test]
-#[ignore = "This test runs in regtest with a bitcoind running, it fails intermittently"]
+#[ignore = "This test runs in regtest with a bitcoind running."]
 fn speed_up_tx() -> Result<(), anyhow::Error> {
     let log_level = tracing::Level::INFO;
     tracing_subscriber::fmt().with_max_level(log_level).init();
