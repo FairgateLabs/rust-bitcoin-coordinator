@@ -141,7 +141,7 @@ fn reorg_speed_up_tx() -> Result<(), anyhow::Error> {
     let tx_speed_up_1_news = MonitorNews::Transaction(
         tx_id.clone(), // This should have the txid of the speed up created  internally by the coordinator.
         tx_speed_up_1_status,
-        "speed_up_child_txid".to_string(),
+        "SPEED_UP_TRANSACTION".to_string(),
     );
 
     mock_monitor

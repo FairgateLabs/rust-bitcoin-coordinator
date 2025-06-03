@@ -15,6 +15,8 @@ pub enum TransactionDispatchState {
     BroadcastPendingConfirmation,
     // The transaction has been successfully confirmed by the network.
     Finalized,
+    // The transaction has failed to be broadcasted.
+    FailedToBroadcast,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

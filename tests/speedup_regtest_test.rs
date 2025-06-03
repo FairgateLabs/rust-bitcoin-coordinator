@@ -144,7 +144,7 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         coordinator.tick()?;
     }
 
-    let (tx_to_speedup, speedup_utxo) = generate_tx(
+    let (tx1, tx1_speedup_utxo) = generate_tx(
         OutPoint::new(funding_tx.compute_txid(), funding_vout),
         amount.to_sat(),
         public_key,
@@ -152,12 +152,11 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     )?;
 
     let tx_context = "My tx".to_string();
-    let tx_to_monitor =
-        TypesToMonitor::Transactions(vec![tx_to_speedup.compute_txid()], tx_context.clone());
+    let tx_to_monitor = TypesToMonitor::Transactions(vec![tx1.compute_txid()], tx_context.clone());
     coordinator.monitor(tx_to_monitor)?;
 
     // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.dispatch(tx_to_speedup, Some(speedup_utxo), tx_context.clone(), None)?;
+    coordinator.dispatch(tx1, Some(tx1_speedup_utxo), tx_context.clone(), None)?;
 
     // Add funding for speed up transaction
     coordinator.add_funding(Utxo::new(
@@ -167,25 +166,71 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         &public_key,
     ))?;
 
+    // First tick dispatch the tx and create a speedup tx to be send
     coordinator.tick()?;
+
+    // Second tick dispatch the speedup tx
     coordinator.tick()?;
 
     bitcoin_client
         .mine_blocks_to_address(1, &funding_wallet)
         .unwrap();
 
+    // Third tick detect the speedup tx + tx1 mined
     coordinator.tick()?;
 
     // Should be news.
     let news = coordinator.get_news()?;
-    
+
     if news.coordinator_news.len() > 0 {
-        info!("Coordinator news: {:?}", news);
+        info!("Coordinator NEWS({:?})", news.coordinator_news.len());
         assert!(false);
     }
 
     if news.monitor_news.len() > 0 {
-        info!("Monitor news: {:?}", news);
+        info!("Monitor NEWS({:?})", news.monitor_news.len());
+        assert!(true);
+    }
+
+    let (funding_speedup_2, funding_speedup_vout_2) =
+        bitcoin_client.fund_address(&funding_wallet, amount)?;
+
+    let (tx2, tx2_speedup_utxo) = generate_tx(
+        OutPoint::new(funding_speedup_2.compute_txid(), funding_speedup_vout_2),
+        amount.to_sat(),
+        public_key,
+        key_manager.clone(),
+    )?;
+
+    let tx_to_monitor_2 =
+        TypesToMonitor::Transactions(vec![tx2.compute_txid()], tx_context.clone());
+    coordinator.monitor(tx_to_monitor_2)?;
+
+    coordinator.dispatch(tx2, Some(tx2_speedup_utxo), tx_context.clone(), None)?;
+
+    // First tick dispatch the tx2 and create a speedup tx to be send
+    coordinator.tick()?;
+
+    // Second tick dispatch the speedup tx
+    coordinator.tick()?;
+
+    bitcoin_client
+        .mine_blocks_to_address(1, &funding_wallet)
+        .unwrap();
+
+    // Third tick detect the speedup tx2 + tx2 mined
+    coordinator.tick()?;
+
+    // Should be news.
+    let news = coordinator.get_news()?;
+
+    if news.coordinator_news.len() > 0 {
+        info!("Coordinator NEWS({:?})", news.coordinator_news.len());
+        assert!(false);
+    }
+
+    if news.monitor_news.len() > 0 {
+        info!("Monitor NEWS({:?})", news.monitor_news.len());
         assert!(true);
     }
 
