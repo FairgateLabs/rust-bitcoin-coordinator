@@ -329,7 +329,7 @@ where
 
     fn perform_speed_up_in_batch(
         &self,
-        txs_to_speedup: Vec<CoordinatedTransaction>,
+        txs: Vec<CoordinatedTransaction>,
     ) -> Result<(), BitcoinCoordinatorError> {
         let mut funding_tx_utxo = match self.store.get_funding()? {
             Some(utxo) => utxo,
@@ -337,17 +337,31 @@ where
             None => return Ok(()),
         };
 
-        let txids: Vec<Txid> = txs_to_speedup.iter().map(|tx| tx.tx_id).collect();
-        let utxos: Vec<Utxo> = txs_to_speedup
-            .iter()
-            .filter_map(|tx_data| tx_data.speedup_utxo.clone())
-            .collect();
-
+        let txs_to_speedup: Vec<Transaction> = txs.iter().map(|tx| tx.tx.clone()).collect();
         // TODO: This logic may need to be updated to use OutputType from the protocol builder for greater flexibility.
         // Currently, we derive the change address as a P2PKH address from the funding UTXO's public key.
         let compressed = CompressedPublicKey::try_from(funding_tx_utxo.pub_key).unwrap();
         let change_address = Address::p2wpkh(&compressed, self.network);
-        let speedup_fee = self.calculate_speedup_fee(txs_to_speedup, funding_tx_utxo.clone())?;
+        let target_feerate_sat_vb = self.client.estimate_smart_fee()?;
+        let bump_percent = 1.1; // First time speed up we pay 10% more.
+        let speedup_fee: u64 = Self::calculate_speedup_fee(
+            &txs_to_speedup,
+            target_feerate_sat_vb.to_sat(),
+            bump_percent,
+        )?;
+
+        info!(
+            "{} Speedup Fee: {}",
+            style("Coordinator").green(),
+            style(speedup_fee).yellow()
+        );
+
+        let txids: Vec<Txid> = txs_to_speedup.iter().map(|tx| tx.compute_txid()).collect();
+
+        let utxos: Vec<Utxo> = txs
+            .iter()
+            .filter_map(|tx_data| tx_data.speedup_utxo.clone())
+            .collect();
 
         // We should not get any error from protocol builder.
         let speedup_tx = (ProtocolBuilder {}).speedup_transactions(
@@ -386,54 +400,48 @@ where
     }
 
     fn calculate_speedup_fee(
-        &self,
-        _txs: Vec<CoordinatedTransaction>,
-        _funding_tx_utxo: Utxo,
+        parents: &[Transaction],
+        target_feerate_sat_vb: u64,
+        bump_percent: f64,
     ) -> Result<u64, BitcoinCoordinatorError> {
-        // let tx_out = self
-        //     .client
-        //     .get_tx_out(&funding_tx_utxo.txid, funding_tx_utxo.vout)?;
+        if target_feerate_sat_vb <= 0 {
+            return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(
+                "Target feerate must be greater than 0.".to_string(),
+            ));
+        }
 
-        // let _funding_amount = tx_out.value; // TODO: This should be the amount of the funding transaction.
-        // TODO define fee bumping strategy
-        // let porcentage_increase = 1.1;
-        // let fee_rate = self.client.estimate_smart_fee()?;
+        let parent_vbytes: usize = parents.iter().map(|tx| tx.vsize()).sum();
 
-        // let _target_feerate =
-        //     Amount::from_sat((fee_rate.to_sat() as f64 * porcentage_increase) as u64);
+        // Child structure assumptions:
+        // - One input per parent (to CPFP) + one funding input
+        // - One output (change)
+        let num_inputs = parents.len() + 1;
+        let num_outputs = 1;
 
-        // TODO: This should be the size of the transaction.
-        // total_size = size_parents + size_child
-        // fee_child = total_size * target_feerate - fee_parents
-        // change_output = funding_amount - fee_child
+        // --- Estimate base + witness size for P2WPKH inputs and P2WPKH output ---
 
-        //TODO: In case funds are not sufficient we should send a news.
-        // if let Err(error) = speedup_tx {
-        //     match error {
-        //         ProtocolBuilderError::InsufficientFunds(amount, fee) => {
-        //             let news = CoordinatorNews::InsufficientFunds(funding_tx_utxo.txid);
+        // P2WPKH base input size ≈ 41 bytes
+        // P2WPKH witness size ≈ 107 bytes (1-byte stack size + sig + pubkey)
+        // TODO: This calculation should change base on the signature. For now we assume it is a P2WPKH.
+        let base_input_size = 41;
+        let witness_input_size = 107;
 
-        //             self.store.add_news(news)?;
+        let base_output_size = 31; // P2WPKH output: 8 value + 1 len + 22 script
+        let tx_overhead = 10; // version + locktime + varints
 
-        //             return Ok(());
-        //         }
-        //         e => {
-        //             let news = CoordinatorNews::DispatchSpeedUpError(
-        //                 txs_to_speedup.iter().map(|tx| tx.tx_id).collect(),
-        //                 txs_to_speedup.iter().map(|tx| tx.context).collect(),
-        //                 e.to_string(),
-        //             );
+        let base_size = tx_overhead + num_inputs * base_input_size + num_outputs * base_output_size;
+        let witness_size = num_inputs * witness_input_size;
 
-        //             self.store.add_news(news)?;
+        let weight = base_size * 4 + witness_size;
+        let estimated_child_vbytes = (weight + 3) / 4;
 
-        //             return Ok(());
-        //         }
-        //     }
-        // }
+        let total_package_vbytes = parent_vbytes + estimated_child_vbytes;
 
-        //For now is hardcoded
-        let change_output = 10000;
-        Ok(change_output)
+        let bumped_feerate = target_feerate_sat_vb as f64 * bump_percent;
+
+        let required_total_fee = (total_package_vbytes as f64 * bumped_feerate).ceil() as u64;
+
+        Ok(required_total_fee)
     }
 
     fn process_speedup(
