@@ -278,6 +278,11 @@ where
                     let should_speedup = self.should_speedup_tx(&tx)?;
 
                     if should_speedup {
+                        info!(
+                            "{} Transaction({}) should be speed up.",
+                            style("Coordinator").green(),
+                            style(tx.tx_id).blue(),
+                        );
                         txs_to_speedup.push(tx);
                     }
                 }
@@ -312,10 +317,11 @@ where
                 let speed_up_data = self.store.get_speedup_tx(&tx_id)?;
 
                 info!(
-                    "{} Mined Speedup({}) for Transactions({})",
+                    "{} Speedup({}) for Transactions({}) Confirmation({})",
                     style("Coordinator").green(),
                     style(tx_id).yellow(),
-                    style(format!("{:?}", speed_up_data.child_tx_ids)).cyan()
+                    style(format!("{:?}", speed_up_data.child_tx_ids)).cyan(),
+                    style(tx_status.confirmations).blue()
                 );
 
                 self.process_speedup(&tx_status)?;
@@ -344,26 +350,33 @@ where
         let change_address = Address::p2wpkh(&compressed, self.network);
         let target_feerate_sat_vb = self.client.estimate_smart_fee()?;
         let bump_percent = 1.1; // First time speed up we pay 10% more.
-        let speedup_fee: u64 = Self::calculate_speedup_fee(
-            &txs_to_speedup,
-            target_feerate_sat_vb.to_sat(),
-            bump_percent,
-        )?;
-
-        info!(
-            "{} Speedup Fee: {}",
-            style("Coordinator").green(),
-            style(speedup_fee).yellow()
-        );
-
-        let txids: Vec<Txid> = txs_to_speedup.iter().map(|tx| tx.compute_txid()).collect();
 
         let utxos: Vec<Utxo> = txs
             .iter()
             .filter_map(|tx_data| tx_data.speedup_utxo.clone())
             .collect();
 
-        // We should not get any error from protocol builder.
+        // SMALL TICK:
+        // - Create the child tx with an empty fee to get the vsize of the tx.
+        // - Then we use child_vbytes to calculate the total fee.
+        // - Now we have the total fee, we can create the speedup tx.
+        let child_vbytes = (ProtocolBuilder {})
+            .speedup_transactions(
+                &utxos,
+                funding_tx_utxo.clone(),
+                change_address.clone(),
+                0, // Dummy fee
+                &self.key_manager,
+            )?
+            .vsize();
+
+        let speedup_fee: u64 = self.calculate_speedup_fee(
+            &txs_to_speedup,
+            child_vbytes,
+            target_feerate_sat_vb.to_sat(),
+            bump_percent,
+        )?;
+
         let speedup_tx = (ProtocolBuilder {}).speedup_transactions(
             &utxos,
             funding_tx_utxo.clone(),
@@ -371,6 +384,14 @@ where
             speedup_fee,
             &self.key_manager,
         )?;
+
+        info!(
+            "{} SpeedupFee({})",
+            style("Coordinator").green(),
+            style(speedup_fee).yellow()
+        );
+
+        let txids: Vec<Txid> = txs_to_speedup.iter().map(|tx| tx.compute_txid()).collect();
 
         let speedup_tx_id = speedup_tx.compute_txid();
 
@@ -400,7 +421,9 @@ where
     }
 
     fn calculate_speedup_fee(
+        &self,
         parents: &[Transaction],
+        child_vbytes: usize,
         target_feerate_sat_vb: u64,
         bump_percent: f64,
     ) -> Result<u64, BitcoinCoordinatorError> {
@@ -412,34 +435,11 @@ where
 
         let parent_vbytes: usize = parents.iter().map(|tx| tx.vsize()).sum();
 
-        // Child structure assumptions:
-        // - One input per parent (to CPFP) + one funding input
-        // - One output (change)
-        let num_inputs = parents.len() + 1;
-        let num_outputs = 1;
-
-        // --- Estimate base + witness size for P2WPKH inputs and P2WPKH output ---
-
-        // P2WPKH base input size ≈ 41 bytes
-        // P2WPKH witness size ≈ 107 bytes (1-byte stack size + sig + pubkey)
-        // TODO: This calculation should change base on the signature. For now we assume it is a P2WPKH.
-        let base_input_size = 41;
-        let witness_input_size = 107;
-
-        let base_output_size = 31; // P2WPKH output: 8 value + 1 len + 22 script
-        let tx_overhead = 10; // version + locktime + varints
-
-        let base_size = tx_overhead + num_inputs * base_input_size + num_outputs * base_output_size;
-        let witness_size = num_inputs * witness_input_size;
-
-        let weight = base_size * 4 + witness_size;
-        let estimated_child_vbytes = (weight + 3) / 4;
-
-        let total_package_vbytes = parent_vbytes + estimated_child_vbytes;
+        let total_vbytes = parent_vbytes + child_vbytes;
 
         let bumped_feerate = target_feerate_sat_vb as f64 * bump_percent;
 
-        let required_total_fee = (total_package_vbytes as f64 * bumped_feerate).ceil() as u64;
+        let required_total_fee = (total_vbytes as f64 * bumped_feerate).ceil() as u64;
 
         Ok(required_total_fee)
     }
@@ -589,7 +589,7 @@ where
             .save_tx(tx.clone(), speedup, block_height, context)?;
 
         info!(
-            "{} Transaction ID {} ready to be dispatch.",
+            "{} Transaction({}) ready to be dispatch.",
             style("Coordinator").green(),
             style(tx.compute_txid()).yellow()
         );

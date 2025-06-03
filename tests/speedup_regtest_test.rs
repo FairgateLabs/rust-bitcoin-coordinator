@@ -69,7 +69,7 @@ fn config_trace_aux() {
 
 #[test]
 #[ignore = "This test runs in regtest with a bitcoind running, it fails intermittently"]
-fn send_tx_regtest() -> Result<(), anyhow::Error> {
+fn speedup_tx() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let network = Network::Regtest;
@@ -178,6 +178,7 @@ fn send_tx_regtest() -> Result<(), anyhow::Error> {
 
     // Should be news.
     let news = coordinator.get_news()?;
+    
     if news.coordinator_news.len() > 0 {
         info!("Coordinator news: {:?}", news);
         assert!(false);
