@@ -20,7 +20,7 @@ use std::sync::mpsc::{channel, Receiver};
 use uuid::Uuid;
 
 #[test]
-#[ignore]
+#[ignore = "This test is not working"]
 fn integration_test() -> Result<(), anyhow::Error> {
     let config = Config::load()?;
 

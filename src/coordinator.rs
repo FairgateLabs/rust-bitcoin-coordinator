@@ -177,7 +177,7 @@ where
             let tx_id = pending_tx.tx.compute_txid();
 
             info!(
-                "{} Dispatching Transaction({})",
+                "{} Send Transaction({})",
                 style("Coordinator").green(),
                 style(tx_id).yellow(),
             );
@@ -186,7 +186,7 @@ where
 
             if let Err(error) = dispatch_result {
                 error!(
-                    "{} Error Dispatching Transaction({})",
+                    "{} Error Sending Transaction({})",
                     style("Coordinator").green(),
                     style(tx_id).blue()
                 );
@@ -332,29 +332,15 @@ where
         &self,
         txs: Vec<CoordinatedTransaction>,
     ) -> Result<(), BitcoinCoordinatorError> {
-        let last_speedup_tx = self.store.get_last_speedup()?;
-
-        if let Some(speedup_tx) = last_speedup_tx {
-            let status = self.monitor.get_tx_status(&speedup_tx.tx_id);
-
-            match status {
-                Err(_) => {
-                    // For now if status is error, it means the tx is not confirmed, so we can speed up.
-                    return Ok(());
-                }
-                _ => {}
-            }
-        }
-
-        let mut at_least_one_tx_need_speedup = false;
+        let mut new_txs_to_speedup: Vec<CoordinatedTransaction> = Vec::new();
 
         for tx in txs.iter() {
             if self.should_speedup_tx(&tx)? {
-                at_least_one_tx_need_speedup = true;
+                new_txs_to_speedup.push(tx.clone());
             }
         }
 
-        if !at_least_one_tx_need_speedup {
+        if new_txs_to_speedup.is_empty() {
             info!(
                 "{} No transactions need speedup.",
                 style("Coordinator").green()
@@ -370,7 +356,7 @@ where
             None => return Ok(()),
         };
 
-        let txs_to_speedup: Vec<Transaction> = txs.iter().map(|tx| tx.tx.clone()).collect();
+        let txs_to_speedup: Vec<Transaction> = txs.iter().map(|tx| tx.tx.clone()).rev().collect();
         // TODO: This logic may need to be updated to use OutputType from the protocol builder for greater flexibility.
         // Currently, we derive the change address as a P2PKH address from the funding UTXO's public key.
         let compressed = CompressedPublicKey::try_from(funding_tx_utxo.pub_key).unwrap();
@@ -417,12 +403,22 @@ where
         let txids: Vec<Txid> = txs_to_speedup.iter().map(|tx| tx.compute_txid()).collect();
 
         info!(
-            "{} New Speedup({}) | Fee({}) | Transactions#({})",
+            "{} New Speedup({}) | Fee({}) | Transactions#({}) | FundingTx({})",
             style("Coordinator").green(),
             style(speedup_tx_id).blue(),
             style(speedup_fee).blue(),
-            style(txids.len()).blue()
+            style(txids.len()).blue(),
+            style(funding_tx_utxo.txid).blue()
         );
+
+        // info!(
+        //     "Speedup tx: {:#?}",
+        //     speedup_tx
+        //         .input
+        //         .iter()
+        //         .map(|input| input.previous_output.txid)
+        //         .collect::<Vec<Txid>>()
+        // );
 
         self.dispatch(
             speedup_tx.clone(),
@@ -440,10 +436,16 @@ where
             &funding_tx_utxo.pub_key,
         );
 
-        let speed_up_tx =
-            SpeedUpTx::new(speedup_tx_id, deliver_block_height, txids, new_funding_utxo);
+        let speed_up_tx = SpeedUpTx::new(
+            speedup_tx_id,
+            deliver_block_height,
+            txids,
+            new_funding_utxo.clone(),
+        );
 
         self.store.save_speedup_tx(&speed_up_tx)?;
+
+        self.store.add_funding(new_funding_utxo)?;
 
         Ok(())
     }
@@ -499,7 +501,7 @@ where
 
                 // The transaction has received its first confirmation, indicating it is now included in a block.
                 // At this point, the speed-up transaction becomes the new funding transaction for future operations.
-                self.store.add_funding(speed_up_data.utxo)?;
+                // self.store.add_funding(speed_up_data.utxo)?;
             }
 
             if tx_status.is_orphan() {
@@ -627,7 +629,7 @@ where
             .save_tx(tx.clone(), speedup, block_height, context)?;
 
         info!(
-            "{} Transaction({}) ready to be dispatch.",
+            "{} Dispatch Transaction({})",
             style("Coordinator").green(),
             style(tx.compute_txid()).yellow()
         );

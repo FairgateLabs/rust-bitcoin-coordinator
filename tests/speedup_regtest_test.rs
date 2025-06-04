@@ -1,13 +1,15 @@
 use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
 use bitcoin_coordinator::{
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
-    TypesToMonitor,
+    types::AckNews,
+    AckMonitorNews, MonitorNews, TypesToMonitor,
 };
 use bitcoind::bitcoind::Bitcoind;
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     rpc_config::RpcConfig,
 };
+use console::style;
 use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_store::KeyStore;
@@ -68,7 +70,7 @@ fn config_trace_aux() {
 }
 
 #[test]
-#[ignore = "This test runs in regtest with a bitcoind running, it fails intermittently"]
+#[ignore = "This test works, but it runs in regtest with a bitcoind running"]
 fn speedup_tx() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
@@ -95,37 +97,51 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         config_bitcoin_client.clone(),
     );
 
-    info!("Starting bitcoind");
+    info!("{} Starting bitcoind", style("Test").green());
     bitcoind.start()?;
 
-    info!("Creating keypair in key manager");
+    info!("{} Creating keypair in key manager", style("Test").green());
     let public_key = key_manager.derive_keypair(0).unwrap();
     let compressed = CompressedPublicKey::try_from(public_key).unwrap();
     let funding_wallet = Address::p2wpkh(&compressed, network);
     let regtest_wallet = bitcoin_client.init_wallet(network, "test_wallet").unwrap();
 
-    info!("Mine 101 blocks to address {:?}", regtest_wallet);
+    info!(
+        "{} Mine 101 blocks to address {:?}",
+        style("Test").green(),
+        regtest_wallet
+    );
     bitcoin_client
         .mine_blocks_to_address(101, &regtest_wallet)
         .unwrap();
 
     let amount = Amount::from_sat(23450000);
-    info!("Funding address {:?}", funding_wallet);
+    info!(
+        "{} Funding address {:?}",
+        style("Test").green(),
+        funding_wallet
+    );
 
-    info!("Funding main tx address {:?}", funding_wallet);
+    info!(
+        "{} Funding tx address {:?}",
+        style("Test").green(),
+        funding_wallet
+    );
     let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
 
     let (funding_speedup, funding_speedup_vout) =
         bitcoin_client.fund_address(&funding_wallet, amount)?;
 
     info!(
-        "Funding tx: {:?} | vout: {:?}",
+        "{} Funding tx: {:?} | vout: {:?}",
+        style("Test").green(),
         funding_tx.compute_txid(),
         funding_vout
     );
 
     info!(
-        "Funding speed up tx: {:?} | vout: {:?}",
+        "{} Funding speed up tx: {:?} | vout: {:?}",
+        style("Test").green(),
         funding_speedup.compute_txid(),
         funding_speedup_vout
     );
@@ -182,14 +198,25 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     // Should be news.
     let news = coordinator.get_news()?;
 
-    if news.coordinator_news.len() > 0 {
-        info!("Coordinator NEWS({:?})", news.coordinator_news.len());
-        assert!(false);
-    }
-
     if news.monitor_news.len() > 0 {
-        info!("Monitor NEWS({:?})", news.monitor_news.len());
+        info!(
+            "{} News(#{:?})",
+            style("Test").green(),
+            news.monitor_news.len()
+        );
+        // Ack the news
+        match news.monitor_news[0] {
+            MonitorNews::Transaction(txid, _, _) => {
+                let ack_news = AckMonitorNews::Transaction(txid);
+                coordinator.ack_news(AckNews::Monitor(ack_news))?;
+            }
+            _ => {
+                assert!(false);
+            }
+        }
         assert!(true);
+    } else {
+        assert!(false);
     }
 
     let (funding_speedup_2, funding_speedup_vout_2) =
@@ -224,14 +251,15 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     // Should be news.
     let news = coordinator.get_news()?;
 
-    if news.coordinator_news.len() > 0 {
-        info!("Coordinator NEWS({:?})", news.coordinator_news.len());
-        assert!(false);
-    }
-
     if news.monitor_news.len() > 0 {
-        info!("Monitor NEWS({:?})", news.monitor_news.len());
+        info!(
+            "{} News(#{:?})",
+            style("Test").green(),
+            news.monitor_news.len()
+        );
         assert!(true);
+    } else {
+        assert!(false);
     }
 
     bitcoind.stop()?;
