@@ -12,9 +12,7 @@ use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClientApi, types::BlockHeight};
 use bitvmx_transaction_monitor::{
     errors::MonitorError,
     monitor::{Monitor, MonitorApi},
-    types::{
-        AckMonitorNews, MonitorNews, TransactionBlockchainStatus, TransactionStatus, TypesToMonitor,
-    },
+    types::{AckMonitorNews, MonitorNews, TransactionStatus, TypesToMonitor},
 };
 use console::style;
 use key_manager::key_manager::KeyManager;
