@@ -33,14 +33,13 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
         Txid::from_str("f9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2000").unwrap();
 
     // Add different types of news
-    let insufficient_funds_news = CoordinatorNews::InsufficientFunds(
+    let insufficient_funds_news = CoordinatorNews::InsufficientFunds(tx_id_1);
+    let speed_up_error_news = CoordinatorNews::DispatchSpeedUpError(
+        vec![tx_id_2],
+        vec!["tx_2".to_string()],
         tx_id_1,
-        "tx_1".to_string(),
-        tx_id_2,
-        "tx_2".to_string(),
+        "error".to_string(),
     );
-    let speed_up_error_news =
-        CoordinatorNews::DispatchSpeedUpError(tx_id_2, "tx_2".to_string(), "error".to_string());
 
     let transaction_error_news =
         CoordinatorNews::DispatchTransactionError(tx_id_3, "tx_3".to_string(), "error".to_string());
@@ -63,7 +62,7 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     assert!(all_news.contains(&speed_up_error_news));
 
     // Acknowledge one news item
-    let ack_news = AckCoordinatorNews::DispatchSpeedUpError(tx_id_2);
+    let ack_news = AckCoordinatorNews::DispatchSpeedUpError(tx_id_1);
     store.ack_news(ack_news)?;
 
     // Verify the news was removed
@@ -72,17 +71,14 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     assert!(remaining_news.contains(&insufficient_funds_news));
     assert!(remaining_news.contains(&transaction_error_news));
     assert!(!remaining_news.contains(&speed_up_error_news));
-
     // Acknowledge another news
     let ack_news = AckCoordinatorNews::InsufficientFunds(tx_id_1);
     store.ack_news(ack_news)?;
-
     // Verify the news was removed
     let remaining_news = store.get_news()?;
     assert_eq!(remaining_news.len(), 2);
     assert!(remaining_news.contains(&transaction_error_news));
     assert!(!remaining_news.contains(&insufficient_funds_news));
-
     // Acknowledge the last news
     let ack_news = AckCoordinatorNews::DispatchTransactionError(tx_id_3);
     store.ack_news(ack_news)?;
@@ -91,11 +87,9 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     let remaining_news = store.get_news()?;
     assert_eq!(remaining_news.len(), 1);
     assert!(remaining_news.contains(&speed_up_news));
-
     // Acknowledge the last news
     let ack_news = AckCoordinatorNews::NewSpeedUp(tx_id_2);
     store.ack_news(ack_news)?;
-
     // Verify all news are removed
     let remaining_news = store.get_news()?;
     assert_eq!(remaining_news.len(), 0);
@@ -113,18 +107,8 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
         Txid::from_str("8888888888888888888888888888888888888888888888888888888888888888").unwrap();
 
     // Create 2 news of each type
-    let insufficient_funds_news_1 = CoordinatorNews::InsufficientFunds(
-        tx_id_4,
-        "Test context 4".to_string(),
-        tx_id_1,
-        "Test funding context 4".to_string(),
-    );
-    let insufficient_funds_news_2 = CoordinatorNews::InsufficientFunds(
-        tx_id_5,
-        "Test context 5".to_string(),
-        tx_id_1,
-        "Test funding context 5".to_string(),
-    );
+    let insufficient_funds_news_1 = CoordinatorNews::InsufficientFunds(tx_id_4);
+    let insufficient_funds_news_2 = CoordinatorNews::InsufficientFunds(tx_id_5);
 
     let transaction_error_news_1 = CoordinatorNews::DispatchTransactionError(
         tx_id_6,
@@ -141,16 +125,17 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     let speed_up_news_2 = CoordinatorNews::NewSpeedUp(tx_id_7, "Test context 7".to_string(), 3);
 
     let speed_up_error_news_1 = CoordinatorNews::DispatchSpeedUpError(
+        vec![tx_id_6],
+        vec!["Test context 6".to_string()],
         tx_id_6,
-        "Test context 6".to_string(),
         "Test error 6".to_string(),
     );
     let speed_up_error_news_2 = CoordinatorNews::DispatchSpeedUpError(
+        vec![tx_id_8],
+        vec!["Test context 8".to_string()],
         tx_id_8,
-        "Test context 8".to_string(),
         "Test error 8".to_string(),
     );
-
     // Add all news
     store.add_news(insufficient_funds_news_1.clone())?;
     store.add_news(insufficient_funds_news_2.clone())?;

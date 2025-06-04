@@ -1,29 +1,11 @@
-use bitcoin::{Amount, Transaction, TxOut, Txid};
-use bitvmx_bitcoin_rpc::types::BlockHeight;
+use crate::{coordinator::BitcoinCoordinator, storage::BitcoinCoordinatorStore};
+use bitcoin::{Transaction, Txid};
+use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, types::BlockHeight};
 use bitvmx_transaction_monitor::types::{
     AckMonitorNews, BlockInfo, MonitorNews, MonitorType, TransactionBlockchainStatus,
 };
+use protocol_builder::types::Utxo;
 use serde::{Deserialize, Serialize};
-use transaction_dispatcher::DispatcherType;
-
-use crate::{coordinator::BitcoinCoordinator, storage::BitcoinCoordinatorStore};
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct FundingTransaction {
-    pub tx_id: Txid,
-    pub utxo_index: u32,
-    pub utxo_output: TxOut,
-}
-
-impl FundingTransaction {
-    pub fn new(tx_id: Txid, utxo_index: u32, utxo_output: TxOut) -> Self {
-        Self {
-            tx_id,
-            utxo_index,
-            utxo_output,
-        }
-    }
-}
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum TransactionDispatchState {
@@ -33,21 +15,26 @@ pub enum TransactionDispatchState {
     BroadcastPendingConfirmation,
     // The transaction has been successfully confirmed by the network.
     Finalized,
+    // The transaction has failed to be broadcasted.
+    FailedToBroadcast,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct CoordinatedTransaction {
     pub tx_id: Txid,
     pub tx: Transaction,
+    // This is the utxo that will be used to speed up the transaction
+    pub speedup_utxo: Option<Utxo>,
     pub broadcast_block_height: Option<BlockHeight>,
-    pub state: TransactionDispatchState,
     pub target_block_height: Option<BlockHeight>,
+    pub state: TransactionDispatchState,
     pub context: String,
 }
 
 impl CoordinatedTransaction {
     pub fn new(
         tx: Transaction,
+        speedup_utxo: Option<Utxo>,
         state: TransactionDispatchState,
         target_block_height: Option<BlockHeight>,
         context: String,
@@ -55,6 +42,7 @@ impl CoordinatedTransaction {
         Self {
             tx_id: tx.compute_txid(),
             tx,
+            speedup_utxo,
             broadcast_block_height: None,
             state,
             target_block_height,
@@ -76,29 +64,22 @@ pub struct TransactionNew {
 pub struct SpeedUpTx {
     pub tx_id: Txid,
     pub deliver_block_height: BlockHeight,
-    pub deliver_fee_rate: Amount,
-    pub child_tx_id: Txid,
-    pub utxo_index: u32,
-    pub utxo_output: TxOut,
-    //TODO: maybe we need to add status.
+    pub child_tx_ids: Vec<Txid>,
+    pub utxo: Utxo,
 }
 
 impl SpeedUpTx {
     pub fn new(
         tx_id: Txid,
         deliver_block_height: BlockHeight,
-        deliver_fee_rate: Amount,
-        child_tx_id: Txid,
-        utxo_index: u32,
-        utxo_output: TxOut,
+        child_tx_ids: Vec<Txid>,
+        utxo: Utxo,
     ) -> Self {
         Self {
             tx_id,
             deliver_block_height,
-            deliver_fee_rate,
-            child_tx_id,
-            utxo_index,
-            utxo_output,
+            child_tx_ids,
+            utxo,
         }
     }
 }
@@ -125,15 +106,13 @@ pub enum CoordinatorNews {
     /// Error when attempting to speed up a transaction
     /// - Txid: The transaction ID that failed to speed up
     /// - String: Context information about the transaction
-    /// - String: Error message describing what went wrong
-    DispatchSpeedUpError(Txid, String, String),
-
-    /// Indicates insufficient funds for a transaction
-    /// - Txid: The transaction ID that needs funds
-    /// - String: Context information about the transaction
     /// - Txid: The funding transaction ID that was insufficient
-    /// - String: Context information about the funding transaction
-    InsufficientFunds(Txid, String, Txid, String),
+    /// - String: Error message describing what went wrong
+    DispatchSpeedUpError(Vec<Txid>, Vec<String>, Txid, String),
+
+    /// Indicates insufficient funds for a  funding transaction
+    /// - Txid: The funding transaction ID that was insufficient
+    InsufficientFunds(Txid),
 
     /// Notification of a new speed-up transaction
     /// - Txid: The transaction ID that was sped up
@@ -164,6 +143,6 @@ pub enum AckNews {
 }
 
 pub type BitcoinCoordinatorType =
-    BitcoinCoordinator<MonitorType, DispatcherType, BitcoinCoordinatorStore>;
+    BitcoinCoordinator<MonitorType, BitcoinCoordinatorStore, BitcoinClient>;
 
 pub type TransactionNewsType = MonitorNews;

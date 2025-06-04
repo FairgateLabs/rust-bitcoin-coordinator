@@ -17,7 +17,7 @@ pub struct Config {
     pub storage: StorageConfig,
     pub rpc: RpcConfig,
     pub monitor: MonitorConfig,
-    pub dispatcher: DispatcherConfig,
+    pub speedup: SpeedupConfig,
     pub key_manager: KeyManagerConfig,
     pub key_storage: StorageConfig,
     pub log_level: Option<String>,
@@ -30,7 +30,7 @@ pub struct MonitorConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct DispatcherConfig {
+pub struct SpeedupConfig {
     // amount in sats of the output used to bump the fee of the DRP transaction
     pub cpfp_amount: u64,
     // fee in sats for the DRP transaction

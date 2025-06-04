@@ -1,15 +1,16 @@
+use bitcoin::Network;
 use bitcoin_coordinator::{
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
     TypesToMonitor,
 };
 use bitvmx_transaction_monitor::errors::MonitorError;
-use mockall::predicate::{self, eq};
+use mockall::predicate::eq;
 use utils::{clear_output, get_mock_data, get_mocks};
 mod utils;
 
 #[test]
 fn coordinator_is_ready_method_test() -> Result<(), anyhow::Error> {
-    let (mut mock_monitor, store, account, mock_dispatcher) = get_mocks();
+    let (mut mock_monitor, store, bitcoin_client, key_manager) = get_mocks();
 
     mock_monitor
         .expect_is_ready()
@@ -21,7 +22,13 @@ fn coordinator_is_ready_method_test() -> Result<(), anyhow::Error> {
         .times(1)
         .returning(|| Ok(true));
 
-    let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
+    let coordinator = BitcoinCoordinator::new(
+        mock_monitor,
+        store,
+        key_manager,
+        bitcoin_client,
+        Network::Regtest,
+    );
 
     let is_ready = coordinator.is_ready()?;
 
@@ -38,7 +45,7 @@ fn coordinator_is_ready_method_test() -> Result<(), anyhow::Error> {
 
 #[test]
 fn tick_method_is_not_ready() -> Result<(), anyhow::Error> {
-    let (mut mock_monitor, store, account, mock_dispatcher) = get_mocks();
+    let (mut mock_monitor, store, bitcoin_client, key_manager) = get_mocks();
 
     // Monitor is not ready then should call monitor tick
     mock_monitor
@@ -48,7 +55,13 @@ fn tick_method_is_not_ready() -> Result<(), anyhow::Error> {
 
     mock_monitor.expect_tick().times(1).returning(|| Ok(()));
 
-    let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
+    let coordinator = BitcoinCoordinator::new(
+        mock_monitor,
+        store,
+        key_manager,
+        bitcoin_client,
+        Network::Regtest,
+    );
 
     coordinator.tick()?;
 
@@ -59,16 +72,22 @@ fn tick_method_is_not_ready() -> Result<(), anyhow::Error> {
 
 #[test]
 fn monitor_test() -> Result<(), anyhow::Error> {
-    let (mut mock_monitor, store, account, mock_dispatcher) = get_mocks();
+    let (mut mock_monitor, store, mock_bitcoin_client, key_manager) = get_mocks();
 
-    let (tx_to_monitor, _, _, _, _) = get_mock_data();
+    let (tx_to_monitor, _, _, _, _, _) = get_mock_data(key_manager.clone());
 
     mock_monitor
         .expect_monitor()
         .with(eq(tx_to_monitor.clone()))
         .returning(|_| Ok(()));
 
-    let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
+    let coordinator = BitcoinCoordinator::new(
+        mock_monitor,
+        store,
+        key_manager,
+        mock_bitcoin_client,
+        Network::Regtest,
+    );
 
     coordinator.monitor(tx_to_monitor)?;
 
@@ -79,12 +98,13 @@ fn monitor_test() -> Result<(), anyhow::Error> {
 
 #[test]
 fn dispatch_with_target_block_height() -> Result<(), anyhow::Error> {
-    let (mut mock_monitor, store, account, mut mock_dispatcher) = get_mocks();
-    let (_, tx, _, _, context) = get_mock_data();
+    let (mut mock_monitor, store, mut mock_bitcoin_client, key_manager) = get_mocks();
+    let (_, tx, _, _, context, _) = get_mock_data(key_manager.clone());
     let tx_id = tx.compute_txid();
     let target_block_height = Some(1001);
 
     let tx_to_monitor = TypesToMonitor::Transactions(vec![tx_id], context.clone());
+
     // Always return true for is_ready and empty news for get_news
     mock_monitor.expect_tick().returning(|| Ok(()));
     mock_monitor.expect_is_ready().returning(|| Ok(true));
@@ -105,8 +125,8 @@ fn dispatch_with_target_block_height() -> Result<(), anyhow::Error> {
     // SECOND TICK (dispatch the transaction, it is ready) >>>>>>>>>>>>>>>>>
 
     // Mock the dispatcher to send the transaction
-    mock_dispatcher
-        .expect_send()
+    mock_bitcoin_client
+        .expect_send_transaction()
         .times(1)
         .with(eq(tx.clone()))
         .returning(move |tx_ret| Ok(tx_ret.compute_txid()));
@@ -123,10 +143,16 @@ fn dispatch_with_target_block_height() -> Result<(), anyhow::Error> {
         .with(eq(tx_id))
         .returning(move |_| Err(MonitorError::TransactionNotFound(tx_id.clone().to_string())));
 
-    let coordinator = BitcoinCoordinator::new(mock_monitor, store, mock_dispatcher, account);
+    let coordinator = BitcoinCoordinator::new(
+        mock_monitor,
+        store,
+        key_manager,
+        mock_bitcoin_client,
+        Network::Regtest,
+    );
 
     // Call dispatch with a specific target block height
-    coordinator.dispatch(tx, context.clone(), target_block_height)?;
+    coordinator.dispatch(tx, None, context.clone(), target_block_height)?;
 
     coordinator.tick()?; // should not dispatch the transaction because height is not reached 1001
     coordinator.tick()?; // should dispatch the transaction because height is reached 1001
