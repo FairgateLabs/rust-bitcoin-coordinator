@@ -1,3 +1,4 @@
+use crate::constants::MAX_UNCONFIRMED_SPEEDUPS;
 use crate::errors::BitcoinCoordinatorStoreError;
 use crate::storage::BitcoinCoordinatorStore;
 use crate::types::{CoordinatedSpeedUpTransaction, SpeedupState};
@@ -40,6 +41,8 @@ pub trait SpeedupStore {
         txid: Txid,
         state: SpeedupState,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
+
+    fn has_reached_max_unconfirmed_speedups(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
 }
 
 enum SpeedupStoreKey {
@@ -82,58 +85,69 @@ impl SpeedupStore for BitcoinCoordinatorStore {
     }
 
     fn get_funding(&self) -> Result<Option<Utxo>, BitcoinCoordinatorStoreError> {
-        // In case there are no speedups we can't get the funding.
+        // Attempt to determine the current funding UTXO by walking the speedup transaction history in reverse.
+        // The funding UTXO is derived from the most recent speedup transaction that is either:
+        //   - Finalized (serves as a checkpoint, i.e., a new funding insertion), or
+        //   - Confirmed (regardless of whether it's a replace speedup), or
+        //   - Not a replace speedup (i.e., a regular speedup, even if unconfirmed).
+        //
+        // If the latest speedup is an unconfirmed replace speedup, we must look further back for a confirmed replace speedup.
+        // This prevents chaining unconfirmed replace speedups, ensuring only a confirmed replace speedup can serve as funding.
+        //
+        // If no suitable funding is found, return None.
 
-        // Funding comes from the last speedup transaction creted.
-        // This method should trigger an error in case there are no replace speedups that is confirmed.
-        // Se le va a hacer replace a la ultima transaccion speedup. Una vez que se haga un replace si sigue sin minarse ninguna transaccion
-        // Use the StoreKey::PendingSpeedUpList to get the list of speedups
-        let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
-        let speedup_ids: Vec<Txid> = self.store.get(&key)?.unwrap_or_default();
-
-        if speedup_ids.is_empty() {
+        // If we have reached the max number of unconfirmed speedups, we are waiting for confirmations, then there is no funding available.
+        if self.has_reached_max_unconfirmed_speedups()? {
             return Ok(None);
         }
 
-        let last_speedup_txid = speedup_ids.last().unwrap();
+        let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
+        let speedup_ids: Vec<Txid> = self.store.get(&key)?.unwrap_or_default();
 
-        let last_speedup = self.get_speedup(last_speedup_txid)?;
+        let mut should_be_a_replace = false;
 
-        if last_speedup.state != SpeedupState::Finalized {
-            // Funding added manually are the funding tht always keep in this array.
-            return Ok(Some(last_speedup.funding));
-        }
+        for txid in speedup_ids.iter().rev() {
+            let speedup = self.get_speedup(txid)?;
 
-        if !last_speedup.is_replace_speedup {
-            // If there are no replace speedup means that we can keep chaining speedups.
-            // Then the last one is the funding.
-            return Ok(Some(last_speedup.funding));
-        }
-
-        // Last one is a Replace Speedup, it means that we can not chain speedups if there is not a confirmed replace speedup.
-        if last_speedup.state == SpeedupState::Confirmed {
-            // Means that we can use this as a funding.
-            return Ok(Some(last_speedup.funding));
-        }
-
-        // Means there are other replace speedups that is confirmed.
-        if last_speedup.state == SpeedupState::Dispatched {
-            // Means there are other replace speedups that is confirmed.
-            for txid in speedup_ids.iter().rev() {
-                let speedup = self.get_speedup(txid)?;
-
-                if speedup.state == SpeedupState::Dispatched {
-                    continue;
-                }
-
-                if speedup.is_replace_speedup && speedup.state == SpeedupState::Confirmed {
+            if !should_be_a_replace {
+                if speedup.state == SpeedupState::Finalized
+                    || speedup.state == SpeedupState::Confirmed
+                {
                     return Ok(Some(speedup.funding));
-                } else {
-                    return Ok(None);
                 }
+
+                if !speedup.is_replace_speedup {
+                    // Encountered an unconfirmed speedup. We should
+                    return Ok(Some(speedup.funding));
+                }
+
+                // Encountered an unconfirmed replace speedup; must look for a previous confirmed replace.
+                should_be_a_replace = true;
+
+                continue;
+            }
+
+            // We are searching for a previous confirmed replace speedup.
+            if speedup.is_replace_speedup {
+                if speedup.state == SpeedupState::Confirmed {
+                    // Found a confirmed replace speedup; use as funding.
+                    return Ok(Some(speedup.funding));
+                }
+
+                continue;
+            }
+
+            if speedup.state == SpeedupState::Confirmed {
+                // Found a confirmed regular speedup; use as funding.
+                return Ok(Some(speedup.funding));
+            } else {
+                // Found an unconfirmed regular speedup; cannot use as funding.
+                // This current speedup is the responsable we get into a chain of replacements.
+                return Ok(None);
             }
         }
 
+        // No suitable funding found in the speedup history.
         Ok(None)
     }
 
@@ -150,12 +164,14 @@ impl SpeedupStore for BitcoinCoordinatorStore {
 
             if speedup.state == SpeedupState::Finalized {
                 // Up to here we don't need to go back more, this is like a checkpoint. In our case is the last funding tx added.
-                break;
+                return Ok(pending_speedups);
             }
 
             // If the speedup is not finalized, it means that it is still pending.
             pending_speedups.push(speedup);
         }
+
+        pending_speedups.reverse();
 
         Ok(pending_speedups)
     }
@@ -195,6 +211,29 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
         Ok(speedup)
+    }
+
+    fn has_reached_max_unconfirmed_speedups(&self) -> Result<bool, BitcoinCoordinatorStoreError> {
+        let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
+        let speedups = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
+
+        if speedups.len() == 0 {
+            return Ok(false);
+        }
+
+        // sum up all consecutive unconfirmed speedups, and if sum is greater than MAX_UNCONFIRMED_SPEEDUPS, return true.
+        let mut sum = 0;
+
+        for txid in speedups.iter() {
+            let speedup = self.get_speedup(txid)?;
+            if speedup.state == SpeedupState::Dispatched {
+                sum += 1;
+            } else {
+                break;
+            }
+        }
+
+        Ok(sum >= MAX_UNCONFIRMED_SPEEDUPS)
     }
 
     fn update_speedup_state(

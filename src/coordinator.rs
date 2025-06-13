@@ -1,8 +1,5 @@
 use crate::{
-    constants::{
-        CPFP_TRANSACTION_CONTEXT, MAX_MONITORING_CONFIRMATIONS, MAX_TX_WEIGHT,
-        MAX_UNCONFIRMED_SPEEDUPS,
-    },
+    constants::{CPFP_TRANSACTION_CONTEXT, MAX_MONITORING_CONFIRMATIONS, MAX_TX_WEIGHT},
     errors::BitcoinCoordinatorError,
     speedup::SpeedupStore,
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
@@ -294,8 +291,6 @@ impl BitcoinCoordinator {
     fn process_in_progress_speedup_txs(&self) -> Result<(), BitcoinCoordinatorError> {
         let txs = self.store.get_pending_speedups()?;
 
-        let mut unconfirmed_speedup_txs = Vec::new();
-
         for tx in txs {
             info!(
                 "{} Processing Speedup Transaction({})",
@@ -334,19 +329,11 @@ impl BitcoinCoordinator {
                         // Move the
                         self.store
                             .update_tx_state(tx_status.tx_id, TransactionState::Dispatched)?;
-
-                        unconfirmed_speedup_txs.push(tx);
                     }
                 }
-                Err(MonitorError::TransactionNotFound(_)) => {
-                    unconfirmed_speedup_txs.push(tx);
-                }
+                Err(MonitorError::TransactionNotFound(_)) => {}
                 Err(e) => return Err(e.into()),
             }
-        }
-
-        if unconfirmed_speedup_txs.len() >= MAX_UNCONFIRMED_SPEEDUPS {
-            self.replace_speedup_tx(unconfirmed_speedup_txs)?;
         }
 
         Ok(())
@@ -533,10 +520,8 @@ impl BitcoinCoordinator {
         Ok(())
     }
 
-    fn replace_speedup_tx(
-        &self,
-        _txs: Vec<CoordinatedSpeedUpTransaction>,
-    ) -> Result<(), BitcoinCoordinatorError> {
+    fn rbf_last_speedup(&self) -> Result<(), BitcoinCoordinatorError> {
+        // We replace the last speedup transaction
         // TODO: Implement this function.
         // Esta funcion reconstruye la transaction cpfp y la envia a la red nuevmente con un fee mas alto.
         // Para reconstruir la transaction cpfp, se obtiene la ultima transaction speedup y se obtienen las transacciones hijas.
@@ -602,6 +587,12 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         self.process_pending_txs_to_dispatch()?;
         self.process_in_progress_txs()?;
         self.process_in_progress_speedup_txs()?;
+
+        let should_bump_last_speedup = self.store.has_reached_max_unconfirmed_speedups()?;
+
+        if should_bump_last_speedup {
+            self.rbf_last_speedup()?;
+        }
 
         Ok(())
     }

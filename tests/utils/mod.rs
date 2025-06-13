@@ -1,5 +1,5 @@
-use bitcoin::{absolute, transaction, Amount, OutPoint, Transaction, TxIn, TxOut, Witness};
-use bitcoin::{Address, Network, PrivateKey, PublicKey, Txid};
+use bitcoin::{absolute, transaction, OutPoint, Transaction};
+use bitcoin::{Network, PublicKey, Txid};
 use bitcoin_coordinator::errors::TxBuilderHelperError;
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::TypesToMonitor;
@@ -19,7 +19,7 @@ use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 
 pub fn clear_output() {
-    let _ = std::fs::remove_dir_all("test_output");
+    let _ = std::fs::remove_dir("test_output/");
 }
 
 pub fn clear_db(path: &str) {
@@ -176,4 +176,11 @@ fn create_tx_to_speedup(
     let speedup_utxo = Utxo::new(result.compute_txid(), 1, speedup_amount, &to_pubkey);
 
     (result, speedup_utxo)
+}
+
+pub fn create_store() -> BitcoinCoordinatorStore {
+    let path = format!("test_output/speedup/{}", generate_random_string());
+    let storage_config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&storage_config).unwrap());
+    BitcoinCoordinatorStore::new(storage).unwrap()
 }
