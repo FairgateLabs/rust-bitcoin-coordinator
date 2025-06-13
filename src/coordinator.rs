@@ -203,6 +203,49 @@ impl BitcoinCoordinator {
         Ok(())
     }
 
+    fn dispatch_speedup(
+        &self,
+        tx: Transaction,
+        speedup_data: CoordinatedSpeedUpTransaction,
+    ) -> Result<(), BitcoinCoordinatorError> {
+        info!(
+            "{} Send Speedup({})",
+            style("Coordinator").green(),
+            style(speedup_data.tx_id).yellow(),
+        );
+
+        let dispatch_result = self.client.send_transaction(&tx);
+
+        match dispatch_result {
+            Ok(_) => {
+                self.monitor.monitor(TypesToMonitor::Transactions(
+                    vec![speedup_data.tx_id],
+                    CPFP_TRANSACTION_CONTEXT.to_string(),
+                ))?;
+
+                self.store.save_speedup(speedup_data)?;
+            }
+            Err(e) => {
+                error!(
+                    "{} Error Sending Speedup({})",
+                    style("Coordinator").green(),
+                    style(speedup_data.tx_id).blue()
+                );
+
+                let news = CoordinatorNews::DispatchTransactionError(
+                    speedup_data.tx_id,
+                    CPFP_TRANSACTION_CONTEXT.to_string(),
+                    e.to_string(),
+                );
+
+                self.store.add_news(news)?;
+            }
+        }
+
+        // TODO: Implement this function.
+        Ok(())
+    }
+
     fn dispatch_txs(
         &self,
         txs: Vec<CoordinatedTransaction>,
@@ -292,17 +335,17 @@ impl BitcoinCoordinator {
         let txs = self.store.get_pending_speedups()?;
 
         for tx in txs {
-            info!(
-                "{} Processing Speedup Transaction({})",
-                style("Coordinator").green(),
-                style(tx.tx_id).blue(),
-            );
-
             // Get updated transaction status from monitor
             let tx_status = self.monitor.get_tx_status(&tx.tx_id);
 
             match tx_status {
                 Ok(tx_status) => {
+                    info!(
+                        "{} Speedup({}) | Confirmations({})",
+                        style("Coordinator").green(),
+                        style(tx.tx_id).blue(),
+                        style(tx_status.confirmations).blue(),
+                    );
                     // Handle the case where the transaction is a CPFP (Child Pays For Parent) transaction.
 
                     // First we acknowledge the transaction to clear any related news.
@@ -312,16 +355,14 @@ impl BitcoinCoordinator {
                     if tx_status.confirmations >= MAX_MONITORING_CONFIRMATIONS {
                         // Once the transaction is finalized, we are not monitoring it anymore.
                         self.store
-                            .update_tx_state(tx_status.tx_id, TransactionState::Finalized)?;
-
+                            .update_speedup_state(tx_status.tx_id, SpeedupState::Finalized)?;
                         continue;
                     }
 
                     if tx_status.is_confirmed() {
                         // We want to keep the the confirmation on the storage to  calculate the maximum speedups
                         self.store
-                            .update_tx_state(tx_status.tx_id, TransactionState::Confirmed)?;
-
+                            .update_speedup_state(tx_status.tx_id, SpeedupState::Confirmed)?;
                         continue;
                     }
 
@@ -343,17 +384,18 @@ impl BitcoinCoordinator {
         let txs = self.store.get_txs_in_progress()?;
 
         for tx in txs {
-            info!(
-                "{} Processing Transaction({})",
-                style("Coordinator").green(),
-                style(tx.tx_id).blue(),
-            );
-
             // Get updated transaction status from monitor
             let tx_status = self.monitor.get_tx_status(&tx.tx_id);
 
             match tx_status {
                 Ok(tx_status) => {
+                    info!(
+                        "{} Transaction({}) | Confirmations({})",
+                        style("Coordinator").green(),
+                        style(tx.tx_id).blue(),
+                        style(tx_status.confirmations).blue(),
+                    );
+
                     if tx_status.confirmations >= MAX_MONITORING_CONFIRMATIONS {
                         // Once the transaction is finalized, we are not monitoring it anymore.
                         self.store
@@ -489,7 +531,7 @@ impl BitcoinCoordinator {
             &funding.pub_key,
         );
 
-        let cpfp = CoordinatedSpeedUpTransaction::new(
+        let speedup_data = CoordinatedSpeedUpTransaction::new(
             speedup_tx_id,
             txids,
             speedup_fee,
@@ -500,22 +542,7 @@ impl BitcoinCoordinator {
             CPFP_TRANSACTION_CONTEXT.to_string(),
         );
 
-        let cpfp_txid = cpfp.tx_id;
-
-        self.store.save_speedup(cpfp)?;
-
-        self.monitor.monitor(TypesToMonitor::Transactions(
-            vec![cpfp_txid],
-            CPFP_TRANSACTION_CONTEXT.to_string(),
-        ))?;
-
-        self.dispatch_txs(txs_data)?;
-
-        info!(
-            "{} Dispatch Speedup Transaction({})",
-            style("Coordinator").green(),
-            style(speedup_tx_id).yellow()
-        );
+        self.dispatch_speedup(speedup_tx, speedup_data)?;
 
         Ok(())
     }

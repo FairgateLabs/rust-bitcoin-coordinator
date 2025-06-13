@@ -90,7 +90,7 @@ fn test_save_and_get_speedup() -> Result<(), anyhow::Error> {
     let store = create_store();
 
     // Save a speedup tx
-    let txid = Txid::from_str("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")?;
+    let txid = generate_random_txid();
     let speedup = dummy_speedup_tx(&txid, SpeedupState::Dispatched, false, 0, "ctx1");
     store.save_speedup(speedup.clone())?;
 
