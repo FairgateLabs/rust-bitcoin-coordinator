@@ -45,6 +45,9 @@ pub enum BitcoinCoordinatorStoreError {
 
     #[error("Invalid transaction state")]
     InvalidTransactionState,
+
+    #[error("Replace speedup not confirmed")]
+    ReplaceSpeedupNotConfirmed,
 }
 
 #[derive(Error, Debug)]
@@ -58,6 +61,9 @@ pub enum BitcoinCoordinatorError {
     #[error("Error with Bitcoin Coordinator: {0}")]
     BitcoinCoordinatorError(String),
 
+    #[error("Transaction not found: {0}")]
+    TransactionNotFound(String),
+
     #[error("Error with Bitcoin Client: {0}")]
     BitcoinClientError(#[from] BitcoinClientError),
 
@@ -66,6 +72,9 @@ pub enum BitcoinCoordinatorError {
 
     #[error("Protocol builder error: {0}")]
     ProtocolBuilderError(#[from] ProtocolBuilderError),
+
+    #[error("Transaction too heavy: {0}, weight: {1}, max weight: {2}")]
+    TransactionTooHeavy(String, u64, u64),
 }
 
 #[derive(Error, Debug)]

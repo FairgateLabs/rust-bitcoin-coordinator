@@ -1,21 +1,15 @@
-use bitcoin::secp256k1::SecretKey;
-use bitcoin::{
-    absolute, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction, Amount,
-    EcdsaSighashType, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
-};
+use bitcoin::{absolute, transaction, Amount, OutPoint, Transaction, TxIn, TxOut, Witness};
 use bitcoin::{Address, Network, PrivateKey, PublicKey, Txid};
 use bitcoin_coordinator::errors::TxBuilderHelperError;
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::TypesToMonitor;
-use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 use bitvmx_bitcoin_rpc::bitcoin_client::MockBitcoinClient;
-use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_manager::KeyManager;
 use key_manager::key_store::KeyStore;
-use protocol_builder::builder::{Protocol, ProtocolBuilder};
+use protocol_builder::builder::Protocol;
 use protocol_builder::types::connection::InputSpec;
 use protocol_builder::types::input::{SighashType, SpendMode};
 use protocol_builder::types::{InputArgs, OutputType, Utxo};
