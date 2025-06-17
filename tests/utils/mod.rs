@@ -92,7 +92,7 @@ pub fn generate_tx(
     key_manager: Rc<KeyManager>,
 ) -> Result<(Transaction, Utxo), TxBuilderHelperError> {
     let amount = 10000;
-    let fee = 1000;
+    let fee = 172; // Tx has 172 vbytes. We are using the minimal vsize.
 
     let (tx, speedup_utxo) = create_tx_to_speedup(
         funding_outpoint,
@@ -143,7 +143,7 @@ fn create_tx_to_speedup(
         .unwrap();
 
     // Add the output for the speed up transaction
-    let speedup_amount = 2000;
+    let speedup_amount = 294; // This is the minimal non-dust output.
     let speedup_output = OutputType::segwit_key(speedup_amount, &to_pubkey).unwrap();
 
     protocol
@@ -154,6 +154,7 @@ fn create_tx_to_speedup(
     let change = origin_amount - amount - fee - speedup_amount;
     if change > 0 {
         let change_output = OutputType::segwit_key(change, &origin_pubkey).unwrap();
+
         protocol
             .add_transaction_output("transfer", &change_output)
             .unwrap();

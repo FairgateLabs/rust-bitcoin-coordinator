@@ -69,6 +69,9 @@ fn config_trace_aux() {
         .init();
 }
 
+// This test creates and dispatches two transactions in sequence, where each transaction is accelerated using a speedup (CPFP) mechanism.
+// The funding for the second transaction comes from the change output of the first transaction.
+// The test verifies that both transactions are successfully mined and confirmed, and asserts that the coordinator reports the expected news events.
 #[test]
 #[ignore = "This test works, but it runs in regtest with a bitcoind running"]
 fn speedup_tx() -> Result<(), anyhow::Error> {
@@ -116,18 +119,20 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         .unwrap();
 
     let amount = Amount::from_sat(23450000);
+
     info!(
         "{} Funding address {:?}",
         style("Test").green(),
         funding_wallet
     );
 
+    let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
+
     info!(
         "{} Funding tx address {:?}",
         style("Test").green(),
         funding_wallet
     );
-    let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
 
     let (funding_speedup, funding_speedup_vout) =
         bitcoin_client.fund_address(&funding_wallet, amount)?;
@@ -182,20 +187,17 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         &public_key,
     ))?;
 
-    // First tick dispatch the tx and create a speedup tx to be send
+    // First tick dispatch the tx and create and dispatch a speedup tx
     coordinator.tick()?;
 
-    // Second tick dispatch the speedup tx
-    coordinator.tick()?;
-
+    // Mine a block to mined txs (tx1 and speedup tx)
     bitcoin_client
         .mine_blocks_to_address(1, &funding_wallet)
         .unwrap();
 
-    // Third tick detect the speedup tx + tx1 mined
+    // Detect txs (tx1 and speedup tx)
     coordinator.tick()?;
 
-    // Should be news.
     let news = coordinator.get_news()?;
 
     if news.monitor_news.len() > 0 {
