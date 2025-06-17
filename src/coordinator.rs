@@ -8,12 +8,12 @@ use crate::{
         SpeedupState, TransactionState,
     },
 };
-use bitcoin::{Address, CompressedPublicKey, Network, Transaction, Txid};
+use bitcoin::{Address, Amount, CompressedPublicKey, Network, Transaction, Txid};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, rpc_config::RpcConfig};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClientApi, types::BlockHeight};
 use bitvmx_transaction_monitor::{
     errors::MonitorError,
-    monitor::{Monitor, MonitorApi},
+    monitor::{Monitor, MonitorApi, __mock_MockMonitorApi_MonitorApi::__get_monitor_height},
     types::{AckMonitorNews, MonitorNews, MonitorType, TransactionStatus, TypesToMonitor},
 };
 use console::style;
@@ -156,13 +156,13 @@ impl BitcoinCoordinator {
             style(txs_to_dispatch_without_speedup.len()).yellow()
         );
 
+        self.dispatch_txs(txs_to_dispatch_without_speedup)?;
+
         info!(
             "{} Number of transactions to dispatch with speedup {}",
             style("Coordinator").green(),
             style(txs_to_dispatch_with_speedup.len()).yellow()
         );
-
-        self.dispatch_txs(txs_to_dispatch_without_speedup)?;
 
         // Check if we can send transactions or we stop the process until CPFP transactions start to be confirmed.
         if self.store.can_speedup()? {
@@ -195,9 +195,11 @@ impl BitcoinCoordinator {
             // construct and broadcast a single CPFP (Child Pays For Parent) transaction to pay for the entire batch.
             let txs_sent: Vec<CoordinatedTransaction> = self.dispatch_txs(txs_batch)?;
 
-            let bump_percent = self.get_bump_strategy(1.0)?;
-            // TODO: For now we assume this will always work.
-            self.create_and_send_cpfp_tx(txs_sent, bump_percent)?;
+            // We need to pay for transactions that were sent. If there is no transactions sent, we don't need to create a CPFP.
+            if txs_sent.len() > 0 {
+                let bump_percent = self.get_bump_strategy()?;
+                self.create_and_send_cpfp_tx(txs_sent, bump_percent)?;
+            }
         }
 
         Ok(())
@@ -459,7 +461,6 @@ impl BitcoinCoordinator {
         bump_percent: f64,
     ) -> Result<(), BitcoinCoordinatorError> {
         // This function creates a CPFP (Child Pays For Parent) to fund transactions and sends it to the network.
-
         let funding = self.store.get_funding()?;
 
         if funding.is_none() {
@@ -469,13 +470,11 @@ impl BitcoinCoordinator {
         }
 
         let funding = funding.unwrap();
-        let txs_to_speedup: Vec<Transaction> =
-            txs_data.iter().map(|tx| tx.tx.clone()).rev().collect();
+
         // TODO: This logic may need to be updated to use OutputType from the protocol builder for greater flexibility.
         // Currently, we derive the change address as a P2PKH address from the funding UTXO's public key.
         let compressed = CompressedPublicKey::try_from(funding.pub_key).unwrap();
         let change_address = Address::p2wpkh(&compressed, self.network);
-        let target_feerate_sat_vb = self.client.estimate_smart_fee()?;
 
         let utxos: Vec<Utxo> = txs_data
             .iter()
@@ -483,7 +482,7 @@ impl BitcoinCoordinator {
             .collect();
 
         // SMALL TICK:
-        // - Create the child tx with an empty fee to get the vsize of the tx.
+        // - Create the child tx with an dummy fee to get the vsize of the tx.
         // - Then we use child_vbytes to calculate the total fee.
         // - Now we have the total fee, we can create the speedup tx.
         let child_vbytes = (ProtocolBuilder {})
@@ -491,29 +490,23 @@ impl BitcoinCoordinator {
                 &utxos,
                 funding.clone(),
                 change_address.clone(),
-                0, // Dummy fee
+                10000, // Dummy fee
                 &self.key_manager,
             )?
             .vsize();
 
-        let speedup_fee = self.calculate_speedup_fee(
-            &txs_to_speedup,
-            child_vbytes,
-            target_feerate_sat_vb.to_sat(),
-            bump_percent,
-        )?;
+        let speedup_fee = self.calculate_speedup_fee(&txs_data, child_vbytes, 1.0)?;
 
         let speedup_tx = (ProtocolBuilder {}).speedup_transactions(
             &utxos,
             funding.clone(),
             change_address,
-            speedup_fee as u64,
+            speedup_fee,
             &self.key_manager,
         )?;
 
-        let change_output = speedup_tx.output.last().unwrap();
         let speedup_tx_id = speedup_tx.compute_txid();
-        let txids: Vec<Txid> = txs_to_speedup.iter().map(|tx| tx.compute_txid()).collect();
+        let txids: Vec<Txid> = txs_data.iter().map(|tx| tx.tx_id).collect();
 
         info!(
             "{} New Speedup({}) | Fee({}) | Transactions#({}) | FundingTx({})",
@@ -527,9 +520,11 @@ impl BitcoinCoordinator {
         let new_funding_utxo = Utxo::new(
             speedup_tx_id,
             0, // After creating the speedup tx we know that the vout is 0.
-            change_output.value.to_sat(),
+            speedup_tx.output.last().unwrap().value.to_sat(),
             &funding.pub_key,
         );
+
+        let monitor_height = self.monitor.get_monitor_height()?;
 
         let speedup_data = CoordinatedSpeedUpTransaction::new(
             speedup_tx_id,
@@ -537,7 +532,7 @@ impl BitcoinCoordinator {
             speedup_fee,
             new_funding_utxo,
             false,
-            0,
+            monitor_height,
             SpeedupState::Dispatched,
             CPFP_TRANSACTION_CONTEXT.to_string(),
         );
@@ -570,34 +565,43 @@ impl BitcoinCoordinator {
 
     fn calculate_speedup_fee(
         &self,
-        parents: &[Transaction],
+        parents: &[CoordinatedTransaction],
         child_vbytes: usize,
-        target_feerate_sat_vb: u64,
         bump_percent: f64,
-    ) -> Result<f64, BitcoinCoordinatorError> {
-        if target_feerate_sat_vb == 0 {
-            return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(
-                "Target feerate must be greater than 0.".to_string(),
-            ));
+    ) -> Result<u64, BitcoinCoordinatorError> {
+        // Assumes that each parent transaction pays 1 sat/vbyte.
+        // To calculate the total fee, we need to know the vsize of the child (CPFP) + the vsize of each parent. 
+        // Also we have to subtract the parent's transaction vbytes and the total output amounts once.
+        
+        let target_feerate_sat_vb = self.client.estimate_smart_fee()? as usize;
+        let parent_vbytes: usize = parents.iter().map(|tx_data| tx_data.tx.vsize()).sum();
+
+        let mut parent_amount_outputs: usize = 0;
+
+        for tx_data in parents {
+            if let Some(utxo) = &tx_data.cpfp_utxo {
+                let tx_vout_amount = tx_data.tx.output[utxo.vout as usize].value;
+                parent_amount_outputs += tx_vout_amount.to_sat() as usize;
+            }
         }
 
-        let parent_vbytes: usize = parents.iter().map(|tx| tx.vsize()).sum();
+        // We substract the vbytes of the parents and the amount of outputs.
+        // Because the child pays for the parents and the parents pay for the outputs
+        let total_sats = (parent_vbytes + child_vbytes) * target_feerate_sat_vb
+            - parent_amount_outputs
+            - parent_vbytes;
 
-        let total_vbytes = parent_vbytes + child_vbytes;
+        let required_total_fee = (total_sats as f64 * bump_percent).ceil();
 
-        let bumped_feerate = target_feerate_sat_vb as f64 * bump_percent;
-
-        let required_total_fee = (total_vbytes as f64 * bumped_feerate).ceil();
-
-        Ok(required_total_fee)
+        Ok(required_total_fee as u64)
     }
 
-    fn get_bump_strategy(&self, last_fee_rate: f64) -> Result<f64, BitcoinCoordinatorError> {
+    fn get_bump_strategy(&self) -> Result<f64, BitcoinCoordinatorError> {
         // TODO: Improve fee bumping strategy.
         // Currently, we simply increase the fee rate by 10%.
         // In the future, this should consider current mempool conditions, network fee estimates,
         // and urgency (e.g., how many blocks the transaction has been unconfirmed).
-        let bumped_feerate = last_fee_rate * 1.1;
+        let bumped_feerate = 1.0;
         Ok(bumped_feerate)
     }
 }

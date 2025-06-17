@@ -79,7 +79,7 @@ pub struct CoordinatedSpeedUpTransaction {
     pub child_tx_ids: Vec<Txid>,
 
     // The fee used when tx was sent.
-    pub fee: f64,
+    pub fee: u64,
 
     // The change funding utxo.
     pub funding: Utxo,
@@ -100,7 +100,7 @@ impl CoordinatedSpeedUpTransaction {
     pub fn new(
         tx_id: Txid,
         child_tx_ids: Vec<Txid>,
-        fee: f64,
+        fee: u64,
         funding: Utxo,
         is_replace_speedup: bool,
         broadcast_block_height: BlockHeight,

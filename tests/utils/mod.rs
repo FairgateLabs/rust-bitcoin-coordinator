@@ -92,7 +92,7 @@ pub fn generate_tx(
     key_manager: Rc<KeyManager>,
 ) -> Result<(Transaction, Utxo), TxBuilderHelperError> {
     let amount = 10000;
-    let fee = 172; // Tx has 172 vbytes. We are using the minimal vsize.
+    let fee: u64 = 172; // Tx has 172 vbytes. We are using the minimal vsize 1sat/vB.
 
     let (tx, speedup_utxo) = create_tx_to_speedup(
         funding_outpoint,

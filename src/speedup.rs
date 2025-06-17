@@ -70,7 +70,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         let funding_to_speedup = CoordinatedSpeedUpTransaction::new(
             funding.txid,
             vec![],
-            1.0,
+            1,
             funding,
             false,
             // Given we are saving the funding, the broadcast block height is 0 for now.
