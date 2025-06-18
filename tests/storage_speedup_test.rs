@@ -33,17 +33,15 @@ fn dummy_speedup_tx(
     state: SpeedupState,
     is_replace: bool,
     block_height: u32,
-    context: &str,
 ) -> CoordinatedSpeedUpTransaction {
     CoordinatedSpeedUpTransaction::new(
         *txid,
         vec![],
-        1.0,
+        dummy_utxo(txid),
         dummy_utxo(txid),
         is_replace,
         block_height,
         state,
-        context.to_string(),
     )
 }
 
@@ -91,7 +89,7 @@ fn test_save_and_get_speedup() -> Result<(), anyhow::Error> {
 
     // Save a speedup tx
     let txid = generate_random_txid();
-    let speedup = dummy_speedup_tx(&txid, SpeedupState::Dispatched, false, 0, "ctx1");
+    let speedup = dummy_speedup_tx(&txid, SpeedupState::Dispatched, false, 0);
     store.save_speedup(speedup.clone())?;
 
     // Get by id
@@ -117,11 +115,11 @@ fn test_pending_speedups_break_on_finalized() -> Result<(), anyhow::Error> {
 
     // Add a finalized speedup (should act as checkpoint)
     let txid1 = generate_random_txid();
-    let s1 = dummy_speedup_tx(&txid1, SpeedupState::Confirmed, false, 0, "ctx1");
+    let s1 = dummy_speedup_tx(&txid1, SpeedupState::Confirmed, false, 0);
     store.save_speedup(s1.clone())?;
 
     let txid2 = generate_random_txid();
-    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Dispatched, false, 0, "ctx2");
+    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Dispatched, false, 0);
     store.save_speedup(s2.clone())?;
 
     // Only the last (pending) speedup should be returned, up to the finalized checkpoint
@@ -132,7 +130,7 @@ fn test_pending_speedups_break_on_finalized() -> Result<(), anyhow::Error> {
 
     // Insert a new speedup finalized, wich means that is a checkpoint.
     let txid3 = generate_random_txid();
-    let s3 = dummy_speedup_tx(&txid3, SpeedupState::Finalized, false, 0, "ctx3");
+    let s3 = dummy_speedup_tx(&txid3, SpeedupState::Finalized, false, 0);
     store.save_speedup(s3.clone())?;
 
     let pending = store.get_pending_speedups()?;
@@ -150,7 +148,6 @@ fn test_pending_speedups_break_on_finalized() -> Result<(), anyhow::Error> {
             },
             false,
             0,
-            "ctx4",
         );
         store.save_speedup(speedup)?;
     }
@@ -168,7 +165,7 @@ fn test_get_funding_with_replace_speedup_confirmed() -> Result<(), anyhow::Error
 
     // Add a replace speedup, confirmed
     let txid1 = generate_random_txid();
-    let speedup1 = dummy_speedup_tx(&txid1, SpeedupState::Confirmed, true, 0, "ctx3");
+    let speedup1 = dummy_speedup_tx(&txid1, SpeedupState::Confirmed, true, 0);
     store.save_speedup(speedup1.clone())?;
 
     // Funding should be present
@@ -177,7 +174,7 @@ fn test_get_funding_with_replace_speedup_confirmed() -> Result<(), anyhow::Error
 
     // Add speed replace unconfirmed and check that speed up is the previous one
     let txid2 = generate_random_txid();
-    let speedup2 = dummy_speedup_tx(&txid2, SpeedupState::Dispatched, true, 0, "ctx4");
+    let speedup2 = dummy_speedup_tx(&txid2, SpeedupState::Dispatched, true, 0);
     store.save_speedup(speedup2.clone())?;
 
     let funding = store.get_funding()?;
@@ -186,7 +183,7 @@ fn test_get_funding_with_replace_speedup_confirmed() -> Result<(), anyhow::Error
     // Add 3 more speedups with replace unconfirmed and check that funding is the confirmed one
     for _ in 0..3 {
         let txid = generate_random_txid();
-        let s = dummy_speedup_tx(&txid, SpeedupState::Dispatched, true, 0, "ctx5");
+        let s = dummy_speedup_tx(&txid, SpeedupState::Dispatched, true, 0);
         store.save_speedup(s.clone())?;
     }
 
@@ -205,12 +202,12 @@ fn test_get_funding_with_replace_speedup_dispatched_and_no_confirmed() -> Result
 
     // Add a replace speedup, dispatched
     let txid1 = generate_random_txid();
-    let s1 = dummy_speedup_tx(&txid1, SpeedupState::Dispatched, true, 0, "ctx6");
+    let s1 = dummy_speedup_tx(&txid1, SpeedupState::Dispatched, true, 0);
     store.save_speedup(s1.clone())?;
 
     // Add a replace speedup, dispatched (no confirmed in chain)
     let txid2 = generate_random_txid();
-    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Dispatched, true, 0, "ctx7");
+    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Dispatched, true, 0);
     store.save_speedup(s2.clone())?;
 
     let funding = store.get_funding()?;
@@ -228,7 +225,7 @@ fn test_can_speedup_none() -> Result<(), anyhow::Error> {
     // Add 10 dispatched speedups (none are finalized or confirmed)
     for _ in 0..10 {
         let txid = generate_random_txid();
-        let s = dummy_speedup_tx(&txid, SpeedupState::Dispatched, false, 0, "ctx_can_speedup");
+        let s = dummy_speedup_tx(&txid, SpeedupState::Dispatched, false, 0);
         store.save_speedup(s)?;
     }
     // After only dispatched speedups, can_speedup should still be false
@@ -243,7 +240,7 @@ fn test_update_speedup_state_and_remove_from_pending() -> Result<(), anyhow::Err
 
     // Add a speedup tx
     let txid = generate_random_txid();
-    let s = dummy_speedup_tx(&txid, SpeedupState::Dispatched, false, 0, "ctx8");
+    let s = dummy_speedup_tx(&txid, SpeedupState::Dispatched, false, 0);
     store.save_speedup(s.clone())?;
 
     // Update to Finalized (should remove from pending list)
@@ -291,7 +288,7 @@ fn test_get_speedup_not_found() -> Result<(), anyhow::Error> {
 fn test_save_speedup_overwrites() -> Result<(), anyhow::Error> {
     let store = create_store();
     let txid = generate_random_txid();
-    let s1 = dummy_speedup_tx(&txid, SpeedupState::Dispatched, false, 0, "ctx9");
+    let s1 = dummy_speedup_tx(&txid, SpeedupState::Dispatched, false, 0);
     let mut s2 = s1.clone();
     s2.state = SpeedupState::Dispatched;
     // s2.block_height = 999;
@@ -306,15 +303,6 @@ fn test_save_speedup_overwrites() -> Result<(), anyhow::Error> {
     assert_eq!(fetched2.state, SpeedupState::Dispatched);
     // assert_eq!(fetched2.block_height, 999);
 
-    clear_output();
-    Ok(())
-}
-
-#[test]
-fn test_get_speedup_to_replace_always_none() -> Result<(), anyhow::Error> {
-    let store = create_store();
-    let res = store.get_speedup_to_replace()?;
-    assert!(res.is_none());
     clear_output();
     Ok(())
 }

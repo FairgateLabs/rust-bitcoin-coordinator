@@ -6,6 +6,10 @@ use bitvmx_transaction_monitor::types::{
 use protocol_builder::types::Utxo;
 use serde::{Deserialize, Serialize};
 
+use crate::constants::{
+    CPFP_TRANSACTION_CONTEXT, FUNDING_TRANSACTION_CONTEXT, RBF_TRANSACTION_CONTEXT,
+};
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum TransactionState {
     // The transaction is ready and queued to be sent.
@@ -78,15 +82,15 @@ pub struct CoordinatedSpeedUpTransaction {
     // The child tx ids that are being speeded up.
     pub child_tx_ids: Vec<Txid>,
 
-    // The fee used when tx was sent.
-    pub fee: u64,
+    // The previous funding utxo.
+    pub prev_funding: Utxo,
 
     // The change funding utxo.
-    pub funding: Utxo,
+    pub next_funding: Utxo,
 
     // If true, this speed is is a replacement (RBF) for a previous speedup.
     // Otherwise, it is a new speedup (CPFP)
-    pub is_replace_speedup: bool,
+    pub is_rbf: bool,
 
     pub broadcast_block_height: BlockHeight,
 
@@ -100,22 +104,56 @@ impl CoordinatedSpeedUpTransaction {
     pub fn new(
         tx_id: Txid,
         child_tx_ids: Vec<Txid>,
-        fee: u64,
-        funding: Utxo,
-        is_replace_speedup: bool,
+        prev_funding: Utxo,
+        next_funding: Utxo,
+        is_rbf: bool,
         broadcast_block_height: BlockHeight,
         state: SpeedupState,
-        context: String,
     ) -> Self {
+        let mut context = if is_rbf {
+            RBF_TRANSACTION_CONTEXT.to_string()
+        } else {
+            CPFP_TRANSACTION_CONTEXT.to_string()
+        };
+
+        if broadcast_block_height == 0
+            && state == SpeedupState::Finalized
+            && child_tx_ids.is_empty()
+        {
+            context = FUNDING_TRANSACTION_CONTEXT.to_string();
+        }
+
         Self {
             tx_id,
             child_tx_ids,
-            fee,
-            funding,
-            is_replace_speedup,
+            prev_funding,
+            next_funding,
+            is_rbf,
             broadcast_block_height,
             state,
             context,
+        }
+    }
+}
+
+impl CoordinatedSpeedUpTransaction {
+    pub fn is_funding(&self) -> bool {
+        self.broadcast_block_height == 0
+            && self.state == SpeedupState::Finalized
+            && self.child_tx_ids.is_empty()
+    }
+
+    pub fn is_rbf(&self) -> bool {
+        self.is_rbf
+    }
+
+    pub fn get_tx_name(&self) -> String {
+        if self.is_funding() {
+            "FUNDING".to_string()
+        } else if self.is_rbf() {
+            "RBF".to_string()
+        } else {
+            "CPFP".to_string()
         }
     }
 }

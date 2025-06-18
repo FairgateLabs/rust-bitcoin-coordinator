@@ -15,6 +15,10 @@ pub trait SpeedupStore {
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
 
+    fn get_all_pending_speedups(
+        &self,
+    ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
+
     /// Saves a speedup transaction to the list of speedups.
     fn save_speedup(
         &self,
@@ -30,10 +34,10 @@ pub trait SpeedupStore {
     /// Gets the list of speedups that have not been confirmed.
     fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
 
-    // This function will return the last speedup if is necessary to replace it. Otherwise it will return None.
+    // This function will return the last speedup if is necessary to replace it an the amount of RBF that were done.
     fn get_speedup_to_replace(
         &self,
-    ) -> Result<Option<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
+    ) -> Result<(CoordinatedSpeedUpTransaction, u64), BitcoinCoordinatorStoreError>;
 
     /// Updates the state of a speedup transaction (e.g., confirmed or finalized).
     fn update_speedup_state(
@@ -63,20 +67,19 @@ impl SpeedupStoreKey {
 }
 
 impl SpeedupStore for BitcoinCoordinatorStore {
-    fn add_funding(&self, funding: Utxo) -> Result<(), BitcoinCoordinatorStoreError> {
-        // Every time we save a funding we don't care about the preious one. From now one every speed up is done with the new funding.
-        const FUNDING_UTXO_CONTEXT: &str = "FUNDING_UTXO";
-
+    fn add_funding(&self, next_funding: Utxo) -> Result<(), BitcoinCoordinatorStoreError> {
+        // When saving a new funding UTXO, we ignore any previous funding.
+        // From this point onward, next speedup transaction will use the new funding.
+        // Since this is a new funding, there is no previous funding UTXO; we use the same UTXO for both previous and next funding fields to avoid introducing an Option type.
+        // The broadcast block height is set to 0 and Finalized because funding should be confirmed on chain.
         let funding_to_speedup = CoordinatedSpeedUpTransaction::new(
-            funding.txid,
+            next_funding.txid,
             vec![],
-            1,
-            funding,
+            next_funding.clone(),
+            next_funding,
             false,
-            // Given we are saving the funding, the broadcast block height is 0 for now.
             0,
             SpeedupState::Finalized,
-            FUNDING_UTXO_CONTEXT.to_string(),
         );
 
         self.save_speedup(funding_to_speedup)?;
@@ -101,24 +104,21 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             return Ok(None);
         }
 
-        let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
-        let speedup_ids: Vec<Txid> = self.store.get(&key)?.unwrap_or_default();
+        let speedups = self.get_all_pending_speedups()?;
 
         let mut should_be_a_replace = false;
 
-        for txid in speedup_ids.iter().rev() {
-            let speedup = self.get_speedup(txid)?;
-
+        for speedup in speedups.iter() {
             if !should_be_a_replace {
                 if speedup.state == SpeedupState::Finalized
                     || speedup.state == SpeedupState::Confirmed
                 {
-                    return Ok(Some(speedup.funding));
+                    return Ok(Some(speedup.next_funding.clone()));
                 }
 
-                if !speedup.is_replace_speedup {
+                if !speedup.is_rbf {
                     // Encountered an unconfirmed speedup. We should
-                    return Ok(Some(speedup.funding));
+                    return Ok(Some(speedup.next_funding.clone()));
                 }
 
                 // Encountered an unconfirmed replace speedup; must look for a previous confirmed replace.
@@ -128,10 +128,10 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             }
 
             // We are searching for a previous confirmed replace speedup.
-            if speedup.is_replace_speedup {
+            if speedup.is_rbf {
                 if speedup.state == SpeedupState::Confirmed {
                     // Found a confirmed replace speedup; use as funding.
-                    return Ok(Some(speedup.funding));
+                    return Ok(Some(speedup.next_funding.clone()));
                 }
 
                 continue;
@@ -139,7 +139,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
 
             if speedup.state == SpeedupState::Confirmed {
                 // Found a confirmed regular speedup; use as funding.
-                return Ok(Some(speedup.funding));
+                return Ok(Some(speedup.next_funding.clone()));
             } else {
                 // Found an unconfirmed regular speedup; cannot use as funding.
                 // This current speedup is the responsable we get into a chain of replacements.
@@ -176,6 +176,24 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         Ok(pending_speedups)
     }
 
+    fn get_all_pending_speedups(
+        &self,
+    ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
+        let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
+        let speedup_ids = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
+
+        let mut pending_speedups = Vec::new();
+
+        for txid in speedup_ids.iter() {
+            let speedup = self.get_speedup(txid)?;
+            pending_speedups.push(speedup);
+        }
+
+        pending_speedups.reverse();
+
+        Ok(pending_speedups)
+    }
+
     fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError> {
         let funding = self.get_funding()?;
         Ok(funding.is_some())
@@ -191,11 +209,12 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
         let mut speedups = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
         speedups.push(speedup.tx_id);
-        self.store.set(&key, &speedups, None)?;
+
+        self.store.set(&key, speedups, None)?;
 
         // Save speedup to get by id.
         let key = SpeedupStoreKey::SpeedUpTransaction(speedup.tx_id).get_key();
-        self.store.set(&key, &speedup, None)?;
+        self.store.set(&key, speedup, None)?;
 
         Ok(())
     }
@@ -214,18 +233,12 @@ impl SpeedupStore for BitcoinCoordinatorStore {
     }
 
     fn has_reached_max_unconfirmed_speedups(&self) -> Result<bool, BitcoinCoordinatorStoreError> {
-        let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
-        let speedups = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
-
-        if speedups.len() == 0 {
-            return Ok(false);
-        }
+        let speedups = self.get_pending_speedups()?;
 
         // sum up all consecutive unconfirmed speedups, and if sum is greater than MAX_UNCONFIRMED_SPEEDUPS, return true.
         let mut sum = 0;
 
-        for txid in speedups.iter() {
-            let speedup = self.get_speedup(txid)?;
+        for speedup in speedups.iter() {
             if speedup.state == SpeedupState::Dispatched {
                 sum += 1;
             } else {
@@ -273,7 +286,19 @@ impl SpeedupStore for BitcoinCoordinatorStore {
 
     fn get_speedup_to_replace(
         &self,
-    ) -> Result<Option<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
-        Ok(None)
+    ) -> Result<(CoordinatedSpeedUpTransaction, u64), BitcoinCoordinatorStoreError> {
+        let speedups = self.get_pending_speedups()?;
+
+        let mut replace_speedup_count = 0;
+        for speedup in speedups.iter() {
+            if speedup.is_rbf {
+                replace_speedup_count += 1;
+                continue;
+            }
+
+            return Ok((speedup.clone(), replace_speedup_count));
+        }
+
+        Err(BitcoinCoordinatorStoreError::NoSpeedupToReplace)
     }
 }
