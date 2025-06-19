@@ -146,3 +146,5 @@ pub type BitcoinCoordinatorType =
     BitcoinCoordinator<MonitorType, BitcoinCoordinatorStore, BitcoinClient>;
 
 pub type TransactionNewsType = MonitorNews;
+
+pub use bitvmx_transaction_monitor::types::FullBlock;
