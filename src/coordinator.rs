@@ -650,7 +650,12 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         self.monitor.tick()?;
         // The monitor is considered ready when it has fully indexed the blockchain and is up to date with the latest block.
         // Note that if there is a significant gap in the indexing process, it may take multiple ticks for the monitor to become ready.
-        if !(self.monitor.is_ready()?) {
+        let is_ready = self.monitor.is_ready()?;
+
+        let is_ready_str = if is_ready { "READY" } else { "NOT READY" };
+        info!("{} {}", style("Coordinator").green(), is_ready_str);
+
+        if !is_ready {
             return Ok(());
         }
 

@@ -1,4 +1,4 @@
-use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
+use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint, Transaction};
 use bitcoin_coordinator::{
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
     types::AckNews,
@@ -10,9 +10,9 @@ use bitvmx_bitcoin_rpc::{
     rpc_config::RpcConfig,
 };
 use console::style;
-use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_store::KeyStore;
+use key_manager::{config::KeyManagerConfig, key_manager::KeyManager};
 use protocol_builder::types::Utxo;
 use std::rc::Rc;
 use storage_backend::storage::Storage;
@@ -59,6 +59,7 @@ fn config_trace_aux() {
 fn speedup_tx() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
+    let mut blocks_mined = 102;
     let network = Network::Regtest;
     let path = format!("test_output/test/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
@@ -74,7 +75,7 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     let key_store = KeyStore::new(storage.clone());
     let key_manager =
         Rc::new(create_key_manager_from_config(&config, key_store, storage.clone()).unwrap());
-    let bitcoin_client = BitcoinClient::new_from_config(&config_bitcoin_client)?;
+    let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
 
     let bitcoind = Bitcoind::new(
         "bitcoin-regtest",
@@ -92,27 +93,28 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     let regtest_wallet = bitcoin_client.init_wallet(network, "test_wallet").unwrap();
 
     info!(
-        "{} Mine 101 blocks to address {:?}",
+        "{} Mine {} blocks to address {:?}",
         style("Test").green(),
+        blocks_mined,
         regtest_wallet
     );
 
     let amount = Amount::from_sat(23450000);
 
     bitcoin_client
-        .mine_blocks_to_address(101, &regtest_wallet)
+        .mine_blocks_to_address(blocks_mined, &regtest_wallet)
         .unwrap();
 
     let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
+
+    // Fund address mines 1 block
+    blocks_mined = blocks_mined + 1;
 
     info!(
         "{} Funding tx address {:?}",
         style("Test").green(),
         funding_wallet
     );
-
-    let (funding_speedup, funding_speedup_vout) =
-        bitcoin_client.fund_address(&funding_wallet, amount)?;
 
     info!(
         "{} Funding tx: {:?} | vout: {:?}",
@@ -121,6 +123,12 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         funding_vout
     );
 
+    let (funding_speedup, funding_speedup_vout) =
+        bitcoin_client.fund_address(&funding_wallet, amount)?;
+
+    // Funding speed up tx mines 1 block
+    blocks_mined = blocks_mined + 1;
+
     info!(
         "{} Funding speed up tx: {:?} | vout: {:?}",
         style("Test").green(),
@@ -128,19 +136,85 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         funding_speedup_vout
     );
 
-    let coordinator = BitcoinCoordinator::new_with_paths(
+    let coordinator = Rc::new(BitcoinCoordinator::new_with_paths(
         &config_bitcoin_client,
         storage.clone(),
         key_manager.clone(),
         None,
         1,
-    )?;
+    )?);
 
     // Since we've already mined 102 blocks, we need to advance the coordinator by 102 ticks
     // so the indexer can catch up with the current blockchain height.
-    for _ in 0..105 {
+    for _ in 0..blocks_mined {
         coordinator.tick()?;
     }
+
+    // Add funding for speed up transaction
+    coordinator.add_funding(Utxo::new(
+        funding_speedup.compute_txid(),
+        funding_speedup_vout,
+        amount.to_sat(),
+        &public_key,
+    ))?;
+
+    // Create 10 txs and dispatch them
+    for _ in 0..10 {
+        coordinate_tx(
+            coordinator.clone(),
+            amount,
+            network,
+            key_manager.clone(),
+            bitcoin_client.clone(),
+        )?;
+    }
+
+    // Up to here we have 10 txs dispatched and 10 CPFP dispatched.
+    // In this tick coordinator should RBF the last CPFP.
+    coordinator.tick()?;
+
+    for _ in 0..19 {
+        info!("Mine and Tick");
+        // Mine a block to mined txs (tx1 and speedup tx)
+        bitcoin_client
+            .mine_blocks_to_address(1, &funding_wallet)
+            .unwrap();
+
+        coordinator.tick()?;
+    }
+
+    let news = coordinator.get_news()?;
+    assert_eq!(news.monitor_news.len(), 10);
+
+    let news = coordinator.get_news()?;
+
+    assert_eq!(news.monitor_news.len(), 10);
+
+    bitcoind.stop()?;
+
+    Ok(())
+}
+
+fn coordinate_tx(
+    coordinator: Rc<BitcoinCoordinator>,
+    amount: Amount,
+    network: Network,
+    key_manager: Rc<KeyManager>,
+    bitcoin_client: Rc<BitcoinClient>,
+) -> Result<(), anyhow::Error> {
+    // Create a funding wallet
+    // Fund the funding wallet
+    // Create a tx1 and a speedup utxo for tx1
+    // Monitor tx1
+    // Dispatch tx1
+    // First tick dispatch the tx and create and dispatch a speedup tx
+    let public_key = key_manager.derive_keypair(0).unwrap();
+    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
+    let funding_wallet = Address::p2wpkh(&compressed, network);
+
+    let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
+
+    coordinator.tick()?;
 
     let (tx1, tx1_speedup_utxo) = generate_tx(
         OutPoint::new(funding_tx.compute_txid(), funding_vout),
@@ -160,63 +234,6 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         tx_context.clone(),
         None,
     )?;
-
-    // Add funding for speed up transaction
-    coordinator.add_funding(Utxo::new(
-        funding_speedup.compute_txid(),
-        funding_speedup_vout,
-        amount.to_sat(),
-        &public_key,
-    ))?;
-
-    // First tick dispatch the tx and create and dispatch a speedup tx
-    coordinator.tick()?;
-
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    // Replace speedup tx.
-    coordinator.tick()?;
-
-    let news = coordinator.get_news()?;
-    assert!(news.monitor_news.len() == 0);
-
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-    coordinator.tick()?;
-    coordinator.tick()?;
-
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-    coordinator.tick()?;
-
-    let news = coordinator.get_news()?;
-
-    match news.monitor_news.get(0) {
-        Some(MonitorNews::Transaction(tx_id, _, _)) => {
-            assert_eq!(tx_id, &tx1.compute_txid());
-        }
-        _ => panic!("Expected a mined transaction"),
-    }
-
-    bitcoind.stop()?;
 
     Ok(())
 }
