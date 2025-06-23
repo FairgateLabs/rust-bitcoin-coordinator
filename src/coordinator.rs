@@ -359,7 +359,7 @@ where
         // Currently, we derive the change address as a P2PKH address from the funding UTXO's public key.
         let compressed = CompressedPublicKey::try_from(funding_tx_utxo.pub_key).unwrap();
         let change_address = Address::p2wpkh(&compressed, self.network);
-        let target_feerate_sat_vb = self.client.estimate_smart_fee()?;
+        let target_feerate = self.client.estimate_smart_fee()?;
         let bump_percent = 1.1; // 10% more fee.
 
         let utxos: Vec<Utxo> = txs
@@ -384,7 +384,7 @@ where
         let speedup_fee: u64 = self.calculate_speedup_fee(
             &txs_to_speedup,
             child_vbytes,
-            target_feerate_sat_vb.to_sat(),
+            target_feerate,
             bump_percent,
         )?;
 
