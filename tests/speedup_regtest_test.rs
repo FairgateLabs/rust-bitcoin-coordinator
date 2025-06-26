@@ -187,10 +187,10 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         &public_key,
     ))?;
 
-    // First tick dispatch the tx and create and dispatch a speedup tx
+    // First tick dispatch the tx and CPFP speedup tx.
     coordinator.tick()?;
 
-    // Mine a block to mined txs (tx1 and speedup tx)
+    // Mine a block to mine txs (tx1 and speedup tx)
     bitcoin_client
         .mine_blocks_to_address(1, &funding_wallet)
         .unwrap();

@@ -1,10 +1,9 @@
-use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint, Transaction};
+use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
 use bitcoin_coordinator::{
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
-    types::AckNews,
-    AckMonitorNews, MonitorNews, TypesToMonitor,
+    TypesToMonitor,
 };
-use bitcoind::bitcoind::Bitcoind;
+use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     rpc_config::RpcConfig,
@@ -56,7 +55,7 @@ fn config_trace_aux() {
 // When RBF pays the sufficient fee, the tx1 will be mined. And the last RBF also will be mined.
 #[test]
 #[ignore = "This test works, but it runs in regtest with a bitcoind running"]
-fn speedup_tx() -> Result<(), anyhow::Error> {
+fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
@@ -77,10 +76,14 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         Rc::new(create_key_manager_from_config(&config, key_store, storage.clone()).unwrap());
     let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
 
-    let bitcoind = Bitcoind::new(
+    let bitcoind = Bitcoind::new_with_flags(
         "bitcoin-regtest",
         "ruimarinho/bitcoin-core",
         config_bitcoin_client.clone(),
+        BitcoindFlags {
+            block_min_tx_fee: 0.00004,
+            ..Default::default()
+        },
     );
 
     info!("{} Starting bitcoind", style("Test").green());

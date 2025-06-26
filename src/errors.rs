@@ -48,9 +48,6 @@ pub enum BitcoinCoordinatorStoreError {
 
     #[error("Replace speedup not confirmed")]
     ReplaceSpeedupNotConfirmed,
-
-    #[error("No speedup to replace")]
-    NoSpeedupToReplace,
 }
 
 #[derive(Error, Debug)]

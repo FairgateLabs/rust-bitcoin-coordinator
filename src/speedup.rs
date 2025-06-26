@@ -34,10 +34,10 @@ pub trait SpeedupStore {
     /// Gets the list of speedups that have not been confirmed.
     fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
 
-    // This function will return the last speedup if is necessary to replace it an the amount of RBF that were done.
-    fn get_speedup_to_replace(
+    // This function will return the last speedup (CPFP) transaction to be bumped with RBF + the amount of RBF that were done to it.
+    fn get_last_speedup_to_rbf(
         &self,
-    ) -> Result<(CoordinatedSpeedUpTransaction, u64), BitcoinCoordinatorStoreError>;
+    ) -> Result<Option<(CoordinatedSpeedUpTransaction, u32)>, BitcoinCoordinatorStoreError>;
 
     /// Updates the state of a speedup transaction (e.g., confirmed or finalized).
     fn update_speedup_state(
@@ -151,6 +151,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         Ok(None)
     }
 
+    // Returns the list of pending speedups in reverse order until the last finalized speedup.
     fn get_pending_speedups(
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
@@ -284,21 +285,27 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn get_speedup_to_replace(
+    fn get_last_speedup_to_rbf(
         &self,
-    ) -> Result<(CoordinatedSpeedUpTransaction, u64), BitcoinCoordinatorStoreError> {
+    ) -> Result<Option<(CoordinatedSpeedUpTransaction, u32)>, BitcoinCoordinatorStoreError> {
         let speedups = self.get_pending_speedups()?;
 
         let mut replace_speedup_count = 0;
+
         for speedup in speedups.iter() {
-            if speedup.is_rbf {
+            if speedup.is_rbf && speedup.state == SpeedupState::Dispatched {
                 replace_speedup_count += 1;
                 continue;
             }
 
-            return Ok((speedup.clone(), replace_speedup_count));
+            if speedup.state == SpeedupState::Confirmed {
+                // If the last speedup is confirmed, we don't need to replace it. It is already confirmed.
+                return Ok(None);
+            }
+
+            return Ok(Some((speedup.clone(), replace_speedup_count)));
         }
 
-        Err(BitcoinCoordinatorStoreError::NoSpeedupToReplace)
+        return Ok(None);
     }
 }
