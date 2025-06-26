@@ -1,3 +1,4 @@
+use crate::types::TransactionState;
 use bitvmx_bitcoin_rpc::errors::BitcoinClientError;
 use config as settings;
 use protocol_builder::errors::ProtocolBuilderError;
@@ -49,9 +50,11 @@ pub enum BitcoinCoordinatorStoreError {
     #[error("Replace speedup not confirmed")]
     ReplaceSpeedupNotConfirmed,
 
+    #[error("Insufficient funding: required {0} sats, available {1} sats")]
+    InsufficientFunding(u64, u64),
+
     #[error("Transaction state transition invalid: from {0:?} to {1:?}")]
     InvalidStateTransition(TransactionState, TransactionState),
-
 }
 
 #[derive(Error, Debug)]

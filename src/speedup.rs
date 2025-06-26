@@ -311,6 +311,6 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             return Ok(Some((speedup.clone(), replace_speedup_count)));
         }
 
-        return Ok(None);
+        Ok(None)
     }
 }

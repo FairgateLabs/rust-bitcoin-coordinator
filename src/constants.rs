@@ -13,3 +13,15 @@ pub const MAX_MONITORING_CONFIRMATIONS: u32 = 100;
 
 // Maximum transaction weight in bytes.
 pub const MAX_TX_WEIGHT: u64 = 400_000;
+
+// Maximum number of RBF attempts for a single transaction
+pub const MAX_RBF_ATTEMPTS: u32 = 10;
+
+// Minimum funding amount in sats to ensure sufficient funds for speedups
+pub const MIN_FUNDING_AMOUNT_SATS: u64 = 10000;
+
+// Fee percentage increase for RBF (150% of original fee)
+pub const RBF_FEE_PERCENTAGE: f64 = 1.5;
+
+// Minimum blocks to wait before attempting RBF
+pub const MIN_BLOCKS_BEFORE_RBF: u32 = 1;

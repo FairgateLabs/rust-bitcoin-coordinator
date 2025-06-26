@@ -1,5 +1,8 @@
 use crate::{
-    constants::{CPFP_TRANSACTION_CONTEXT, MAX_MONITORING_CONFIRMATIONS, MAX_TX_WEIGHT},
+    constants::{
+        CPFP_TRANSACTION_CONTEXT, MAX_MONITORING_CONFIRMATIONS, MAX_TX_WEIGHT,
+        MIN_BLOCKS_BEFORE_RBF, MIN_FUNDING_AMOUNT_SATS,
+    },
     errors::BitcoinCoordinatorError,
     speedup::SpeedupStore,
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
@@ -210,9 +213,12 @@ impl BitcoinCoordinator {
                     return Ok(());
                 }
 
-                let funding = funding.unwrap();
-
-                self.create_and_send_cpfp_tx(txs_sent, funding, bump_fee_porcentage, false)?;
+                self.create_and_send_cpfp_tx(
+                    txs_sent,
+                    funding.unwrap(),
+                    bump_fee_porcentage,
+                    false,
+                )?;
             }
         }
 
@@ -297,10 +303,25 @@ impl BitcoinCoordinator {
                         style(tx.tx_id).blue()
                     );
 
+                    //TODO: Handle specific errors when we send a tx and decide what to do.
+                    let error_msg = e.to_string();
+
+                    // let coordinator_error = if error_msg.contains("already in mempool") {
+                    //     BitcoinCoordinatorError::TransactionAlreadyInMempool(tx.tx_id.to_string())
+                    // } else if error_msg.contains("mempool full")
+                    //     || error_msg.contains("insufficient priority")
+                    // {
+                    //     BitcoinCoordinatorError::MempoolFull(error_msg.clone())
+                    // } else if error_msg.contains("network") || error_msg.contains("connection") {
+                    //     BitcoinCoordinatorError::NetworkError(error_msg.clone())
+                    // } else {
+                    //     BitcoinCoordinatorError::BitcoinClientError(e)
+                    // };
+
                     let news = CoordinatorNews::DispatchTransactionError(
                         tx.tx_id,
                         tx.context.clone(),
-                        e.to_string(),
+                        error_msg,
                     );
 
                     self.store.add_news(news)?;
@@ -441,7 +462,7 @@ impl BitcoinCoordinator {
     }
 
     fn should_speedup(&self, tx: &CoordinatedTransaction) -> bool {
-        // If the transaction has a CPFP UTXO, we have to speed up it.
+        // If the transaction has a CPFP UTXO, we have to speed it up.
         tx.cpfp_utxo.is_some()
     }
 
@@ -449,9 +470,7 @@ impl BitcoinCoordinator {
         &self,
         pending_tx: &CoordinatedTransaction,
     ) -> Result<bool, BitcoinCoordinatorError> {
-        let should_be_dispatched_now = pending_tx.target_block_height.is_none();
-
-        if should_be_dispatched_now {
+        if pending_tx.target_block_height.is_none() {
             return Ok(true);
         }
 
@@ -481,6 +500,18 @@ impl BitcoinCoordinator {
         fee_porcentage: f64,
         is_rbf: bool,
     ) -> Result<(), BitcoinCoordinatorError> {
+        // Check if the funding amount is below the minimum required for a speedup.
+        // If so, notify via CoordinatorNews and exit early.
+        if funding.amount < MIN_FUNDING_AMOUNT_SATS {
+            let news = CoordinatorNews::InsufficientFunds(
+                funding.txid,
+                funding.amount,
+                MIN_FUNDING_AMOUNT_SATS,
+            );
+            self.store.add_news(news)?;
+            return Ok(());
+        }
+
         // TODO: This logic may need to be updated to use OutputType from the protocol builder for greater flexibility.
         // Currently, we derive the change address as a P2PKH address from the funding UTXO's public key.
         let compressed = CompressedPublicKey::try_from(funding.pub_key).unwrap();
@@ -507,6 +538,14 @@ impl BitcoinCoordinator {
 
         let speedup_fee =
             self.calculate_speedup_fee(&txs_data, child_vbytes, fee_porcentage, is_rbf)?;
+
+        // Validate that funding can cover the fee
+        if speedup_fee > funding.amount {
+            let news =
+                CoordinatorNews::InsufficientFunds(funding.txid, funding.amount, speedup_fee);
+            self.store.add_news(news)?;
+            return Ok(());
+        }
 
         let speedup_tx = (ProtocolBuilder {}).speedup_transactions(
             &utxos,
@@ -615,7 +654,7 @@ impl BitcoinCoordinator {
             .saturating_sub(parent_vbytes as u64);
 
         if is_rbf && total_fee < child_total_sats as u64 {
-            // Somethimes new calculated fee for the child tx is less than the previous child tx (+-1).
+            // Sometimes new calculated fee for the child tx is less than the previous child tx (+-1).
             // In this case we add 10 sats to the fee to avoid underpaying.
             let fee_to_add = child_total_sats as u64 + 10;
             return Ok(fee_to_add);
@@ -645,15 +684,15 @@ impl BitcoinCoordinator {
     }
 
     fn should_rbf_last_speedup(&self) -> Result<bool, BitcoinCoordinatorError> {
-        let should_bump_last_speedup = self.store.has_reached_max_unconfirmed_speedups()?;
+        let reached_unconfirmed_speedups = self.store.has_reached_max_unconfirmed_speedups()?;
 
-        if should_bump_last_speedup {
+        if reached_unconfirmed_speedups {
             info!(
-                "{} Reached max unconfirmed speedups. Bumping last speedup",
+                "{} Reached max unconfirmed speedups.",
                 style("Coordinator").green()
             );
 
-            return Ok(true);
+            return Ok(false);
         }
 
         let last_speedup = self.store.get_last_speedup_to_rbf()?;
@@ -665,12 +704,15 @@ impl BitcoinCoordinator {
             // The logic is: if the current block height is greater than the sum of the speedup's broadcast block height and the number of RBFs,
             // then enough blocks have passed without confirmation, so we should bump the fee again.
             // This helps ensure that stuck transactions are periodically rebroadcast with higher fees to improve their chances of confirmation.
-            if speedup.broadcast_block_height + replace_speedup_count < current_block_height {
+            if current_block_height
+                .saturating_sub(speedup.broadcast_block_height + replace_speedup_count)
+                <= MIN_BLOCKS_BEFORE_RBF
+            {
                 return Ok(true);
             }
         }
 
-        Ok(should_bump_last_speedup)
+        Ok(false)
     }
 }
 
@@ -692,9 +734,9 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         self.process_in_progress_txs()?;
         self.process_in_progress_speedup_txs()?;
 
-        let should_bump_last_speedup = self.should_rbf_last_speedup()?;
+        let should_rbf_last_speedup = self.should_rbf_last_speedup()?;
 
-        if should_bump_last_speedup {
+        if should_rbf_last_speedup {
             self.rbf_last_speedup()?;
         }
 

@@ -186,7 +186,9 @@ pub enum CoordinatorNews {
 
     /// Indicates insufficient funds for a  funding transaction
     /// - Txid: The funding transaction ID that was insufficient
-    InsufficientFunds(Txid),
+    /// - u64: The available funding amount
+    /// - u64: The amount required for a speedup
+    InsufficientFunds(Txid, u64, u64),
 
     /// Indicates that there are no funds for a funding transaction
     FundingNotFound(),
