@@ -692,7 +692,7 @@ impl BitcoinCoordinator {
                 style("Coordinator").green()
             );
 
-            return Ok(false);
+            return Ok(true);
         }
 
         let last_speedup = self.store.get_last_speedup_to_rbf()?;
@@ -706,8 +706,15 @@ impl BitcoinCoordinator {
             // This helps ensure that stuck transactions are periodically rebroadcast with higher fees to improve their chances of confirmation.
             if current_block_height
                 .saturating_sub(speedup.broadcast_block_height + replace_speedup_count)
-                <= MIN_BLOCKS_BEFORE_RBF
+                >= MIN_BLOCKS_BEFORE_RBF
             {
+                info!(
+                    "{} RBF last speedup | CurrentHeight({}) | BroadcastHeight({}) | ReplaceCount({}) ",
+                    style("Coordinator").green(),
+                    style(current_block_height).blue(),
+                    style(speedup.broadcast_block_height).blue(),
+                    style(replace_speedup_count).blue(),
+                );
                 return Ok(true);
             }
         }
