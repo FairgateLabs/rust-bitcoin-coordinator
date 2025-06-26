@@ -48,6 +48,10 @@ pub enum BitcoinCoordinatorStoreError {
 
     #[error("Replace speedup not confirmed")]
     ReplaceSpeedupNotConfirmed,
+
+    #[error("Transaction state transition invalid: from {0:?} to {1:?}")]
+    InvalidStateTransition(TransactionState, TransactionState),
+
 }
 
 #[derive(Error, Debug)]

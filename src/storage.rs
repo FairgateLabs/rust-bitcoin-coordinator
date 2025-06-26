@@ -197,11 +197,9 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         tx_id: Txid,
         deliver_block_height: u32,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
-        //TODO: Implement transaction status transition validation to ensure the correct sequence:
-        // Pending -> InProgress -> Completed, and in reorganization scenarios, do the reverse order.
-
         let mut tx = self.get_tx(&tx_id)?;
 
+        // Validate state transition: only ToDispatch can transition to Dispatched
         if tx.state != TransactionState::ToDispatch {
             return Err(BitcoinCoordinatorStoreError::InvalidTransactionState);
         }
@@ -219,19 +217,36 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
     fn update_tx_state(
         &self,
         tx_id: Txid,
-        state: TransactionState,
+        new_state: TransactionState,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
-        //TODO: Implement transaction status transition validation to ensure the correct sequence:
-        // PendingDispatch -> BroadcastPendingConfirmation -> Finalized, and in reorganization scenarios, do the reverse order.
-
         let mut tx = self.get_tx(&tx_id)?;
-        tx.state = state.clone();
+
+        // Validate state transitions
+        let valid_transition = match (&tx.state, &new_state) {
+            // Valid transitions
+            (TransactionState::ToDispatch, TransactionState::Dispatched) => true,
+            (TransactionState::ToDispatch, TransactionState::Failed) => true,
+            (TransactionState::Dispatched, TransactionState::Confirmed) => true,
+            (TransactionState::Confirmed, TransactionState::Finalized) => true,
+            (current, new) if current == new => true,
+            // Invalid transitions
+            _ => false,
+        };
+
+        if !valid_transition {
+            return Err(BitcoinCoordinatorStoreError::InvalidStateTransition(
+                tx.state.clone(),
+                new_state.clone(),
+            ));
+        }
+
+        tx.state = new_state.clone();
 
         let key = self.get_key(StoreKey::Transaction(tx_id));
         self.store.set(key, tx, None)?;
 
-        // Remove tx in the list if it is finalized
-        if state == TransactionState::Finalized {
+        // Remove tx from the list if it is finalized
+        if new_state == TransactionState::Finalized {
             let txs_key = self.get_key(StoreKey::PendingTransactionList);
             let mut txs = self
                 .store
