@@ -222,3 +222,5 @@ pub enum AckNews {
 }
 
 pub type TransactionNewsType = MonitorNews;
+
+pub use bitvmx_transaction_monitor::types::FullBlock;
