@@ -48,6 +48,7 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     assert_eq!(ready_txs.len(), 1);
 
     // Update to confirmed state
+    store.update_tx_state(tx_id, TransactionState::Confirmed)?;
     store.update_tx_state(tx_id, TransactionState::Finalized)?;
 
     // Verify state was updated
@@ -116,8 +117,13 @@ fn test_multiple_transactions() -> Result<(), anyhow::Error> {
     assert!(tx_ids.contains(&tx3_id));
 
     // Update states of transactions to different states
+    store.update_tx_state(tx_id, TransactionState::Dispatched)?;
+    store.update_tx_state(tx_id, TransactionState::Confirmed)?;
     store.update_tx_state(tx_id, TransactionState::Finalized)?;
     store.update_tx_state(tx2_id, TransactionState::Dispatched)?;
+    store.update_tx_state(tx2_id, TransactionState::Confirmed)?;
+    store.update_tx_state(tx3_id, TransactionState::Dispatched)?;
+    store.update_tx_state(tx3_id, TransactionState::Confirmed)?;
     store.update_tx_state(tx3_id, TransactionState::Finalized)?;
 
     // Verify each state has the correct transactions

@@ -261,10 +261,13 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn add_news(&self, news: CoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError> {
         match news {
-            CoordinatorNews::InsufficientFunds(tx_id) => {
+            CoordinatorNews::InsufficientFunds(tx_id, amount, required) => {
                 let key = self.get_key(StoreKey::InsufficientFundsNewsList);
-                let mut news_list = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
-                news_list.push(tx_id);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, u64, u64)>>(&key)?
+                    .unwrap_or_default();
+                news_list.push((tx_id, amount, required));
                 self.store.set(&key, &news_list, None)?;
             }
             CoordinatorNews::NewSpeedUp(tx_id, context, counting) => {
@@ -306,8 +309,11 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         match news {
             AckCoordinatorNews::InsufficientFunds(tx_id) => {
                 let key = self.get_key(StoreKey::InsufficientFundsNewsList);
-                let mut news_list = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
-                news_list.retain(|id| *id != tx_id);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, u64, u64)>>(&key)?
+                    .unwrap_or_default();
+                news_list.retain(|(id, _, _)| *id != tx_id);
                 self.store.set(&key, &news_list, None)?;
             }
             AckCoordinatorNews::NewSpeedUp(tx_id) => {
@@ -346,9 +352,12 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
         // Get insufficient funds news
         let insufficient_funds_key = self.get_key(StoreKey::InsufficientFundsNewsList);
-        if let Some(news_list) = self.store.get::<&str, Vec<Txid>>(&insufficient_funds_key)? {
-            for txid in news_list {
-                all_news.push(CoordinatorNews::InsufficientFunds(txid));
+        if let Some(news_list) = self
+            .store
+            .get::<&str, Vec<(Txid, u64, u64)>>(&insufficient_funds_key)?
+        {
+            for (txid, amount, required) in news_list {
+                all_news.push(CoordinatorNews::InsufficientFunds(txid, amount, required));
             }
         }
 
