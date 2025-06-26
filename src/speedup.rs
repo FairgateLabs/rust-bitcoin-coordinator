@@ -117,7 +117,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
                 }
 
                 if !speedup.is_rbf {
-                    // Encountered an unconfirmed speedup. We should
+                    // Encountered an unconfirmed regular speedup. We can use this as funding.
                     return Ok(Some(speedup.next_funding.clone()));
                 }
 
@@ -142,7 +142,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
                 return Ok(Some(speedup.next_funding.clone()));
             } else {
                 // Found an unconfirmed regular speedup; cannot use as funding.
-                // This current speedup is the responsable we get into a chain of replacements.
+                // This current speedup is the responsible for getting into a chain of replacements.
                 return Ok(None);
             }
         }
@@ -264,7 +264,12 @@ impl SpeedupStore for BitcoinCoordinatorStore {
                 .get::<&str, Vec<Txid>>(&key)?
                 .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
-            speedups.remove(speedups.iter().position(|id| *id == txid).unwrap());
+            let position = speedups
+                .iter()
+                .position(|id| *id == txid)
+                .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
+
+            speedups.remove(position);
 
             self.store.set(&key, &speedups, None)?;
         }
