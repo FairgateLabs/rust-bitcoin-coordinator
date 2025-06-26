@@ -33,7 +33,7 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
         Txid::from_str("f9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f2000").unwrap();
 
     // Add different types of news
-    let insufficient_funds_news = CoordinatorNews::InsufficientFunds(tx_id_1);
+    let insufficient_funds_news = CoordinatorNews::InsufficientFunds(tx_id_1, 1000, 2000);
     let speed_up_error_news = CoordinatorNews::DispatchSpeedUpError(
         vec![tx_id_2],
         vec!["tx_2".to_string()],
@@ -107,8 +107,8 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
         Txid::from_str("8888888888888888888888888888888888888888888888888888888888888888").unwrap();
 
     // Create 2 news of each type
-    let insufficient_funds_news_1 = CoordinatorNews::InsufficientFunds(tx_id_4);
-    let insufficient_funds_news_2 = CoordinatorNews::InsufficientFunds(tx_id_5);
+    let insufficient_funds_news_1 = CoordinatorNews::InsufficientFunds(tx_id_4, 1000, 2000);
+    let insufficient_funds_news_2 = CoordinatorNews::InsufficientFunds(tx_id_5, 1000, 2000);
 
     let transaction_error_news_1 = CoordinatorNews::DispatchTransactionError(
         tx_id_6,

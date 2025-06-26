@@ -1,21 +1,15 @@
-use bitcoin::secp256k1::SecretKey;
-use bitcoin::{
-    absolute, key::Secp256k1, secp256k1::Message, sighash::SighashCache, transaction, Amount,
-    EcdsaSighashType, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
-};
-use bitcoin::{Address, Network, PrivateKey, PublicKey, Txid};
+use bitcoin::{absolute, transaction, OutPoint, Transaction};
+use bitcoin::{Network, PublicKey, Txid};
 use bitcoin_coordinator::errors::TxBuilderHelperError;
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::TypesToMonitor;
-use bitcoincore_rpc::{json::GetTransactionResult, Auth, Client, RpcApi};
 use bitvmx_bitcoin_rpc::bitcoin_client::MockBitcoinClient;
-use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_manager::KeyManager;
 use key_manager::key_store::KeyStore;
-use protocol_builder::builder::{Protocol, ProtocolBuilder};
+use protocol_builder::builder::Protocol;
 use protocol_builder::types::connection::InputSpec;
 use protocol_builder::types::input::{SighashType, SpendMode};
 use protocol_builder::types::{InputArgs, OutputType, Utxo};
@@ -25,7 +19,7 @@ use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 
 pub fn clear_output() {
-    let _ = std::fs::remove_dir_all("test_output");
+    let _ = std::fs::remove_dir("test_output/");
 }
 
 pub fn clear_db(path: &str) {
@@ -98,7 +92,7 @@ pub fn generate_tx(
     key_manager: Rc<KeyManager>,
 ) -> Result<(Transaction, Utxo), TxBuilderHelperError> {
     let amount = 10000;
-    let fee = 1000;
+    let fee: u64 = 172; // Tx has 172 vbytes. We are using the minimal vsize 1sat/vB.
 
     let (tx, speedup_utxo) = create_tx_to_speedup(
         funding_outpoint,
@@ -149,7 +143,7 @@ fn create_tx_to_speedup(
         .unwrap();
 
     // Add the output for the speed up transaction
-    let speedup_amount = 2000;
+    let speedup_amount = 294; // This is the minimal non-dust output.
     let speedup_output = OutputType::segwit_key(speedup_amount, &to_pubkey).unwrap();
 
     protocol
@@ -160,6 +154,7 @@ fn create_tx_to_speedup(
     let change = origin_amount - amount - fee - speedup_amount;
     if change > 0 {
         let change_output = OutputType::segwit_key(change, &origin_pubkey).unwrap();
+
         protocol
             .add_transaction_output("transfer", &change_output)
             .unwrap();
@@ -182,4 +177,11 @@ fn create_tx_to_speedup(
     let speedup_utxo = Utxo::new(result.compute_txid(), 1, speedup_amount, &to_pubkey);
 
     (result, speedup_utxo)
+}
+
+pub fn create_store() -> BitcoinCoordinatorStore {
+    let path = format!("test_output/speedup/{}", generate_random_string());
+    let storage_config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&storage_config).unwrap());
+    BitcoinCoordinatorStore::new(storage).unwrap()
 }

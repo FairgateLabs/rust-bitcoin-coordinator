@@ -1,52 +1,51 @@
 use crate::{
     errors::BitcoinCoordinatorStoreError,
-    types::{
-        AckCoordinatorNews, CoordinatedTransaction, CoordinatorNews, SpeedUpTx,
-        TransactionDispatchState,
-    },
+    types::{AckCoordinatorNews, CoordinatedTransaction, CoordinatorNews, TransactionState},
 };
 
 use bitcoin::{Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use mockall::automock;
 use protocol_builder::types::Utxo;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
 pub struct BitcoinCoordinatorStore {
-    store: Rc<Storage>,
+    pub store: Rc<Storage>,
 }
 enum StoreKey {
+    PendingTransactionList,
     Transaction(Txid),
-    TransactionList,
-    FundingList,
-    SpeedUpList,
 
     DispatchTransactionErrorNewsList,
     DispatchSpeedUpErrorNewsList,
     InsufficientFundsNewsList,
     NewSpeedUpNewsList,
+    FundingNotFoundNewsList,
 }
-#[automock]
 pub trait BitcoinCoordinatorStoreApi {
     fn save_tx(
         &self,
         tx: Transaction,
-        speedup: Option<Utxo>,
+        cpfp: Option<Utxo>,
         target_block_height: Option<BlockHeight>,
         context: String,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn remove_tx(&self, tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
 
-    fn get_txs(
+    fn get_txs_in_progress(
         &self,
-        state: TransactionDispatchState,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError>;
 
-    fn update_tx(
+    fn get_txs_to_dispatch(
+        &self,
+    ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError>;
+
+    fn get_tx(&self, tx_id: &Txid) -> Result<CoordinatedTransaction, BitcoinCoordinatorStoreError>;
+
+    fn update_tx_state(
         &self,
         tx_id: Txid,
-        status: TransactionDispatchState,
+        status: TransactionState,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn update_tx_to_dispatched(
@@ -54,14 +53,6 @@ pub trait BitcoinCoordinatorStoreApi {
         tx_id: Txid,
         deliver_block_height: u32,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
-
-    fn save_speedup_tx(&self, speed_up_tx: &SpeedUpTx) -> Result<(), BitcoinCoordinatorStoreError>;
-    fn get_last_speedup(&self) -> Result<Option<SpeedUpTx>, BitcoinCoordinatorStoreError>;
-    fn get_speedup_tx(&self, tx_id: &Txid) -> Result<SpeedUpTx, BitcoinCoordinatorStoreError>;
-
-    fn get_funding(&self) -> Result<Option<Utxo>, BitcoinCoordinatorStoreError>;
-    fn add_funding(&self, utxo: Utxo) -> Result<(), BitcoinCoordinatorStoreError>;
-    fn remove_funding(&self, funding_tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn add_news(&self, news: CoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError>;
     fn ack_news(&self, news: AckCoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError>;
@@ -76,10 +67,8 @@ impl BitcoinCoordinatorStore {
     fn get_key(&self, key: StoreKey) -> String {
         let prefix = "bitcoin_coordinator";
         match key {
-            StoreKey::TransactionList => format!("{prefix}/tx/list"),
+            StoreKey::PendingTransactionList => format!("{prefix}/tx/list"),
             StoreKey::Transaction(tx_id) => format!("{prefix}/tx/{tx_id}"),
-            StoreKey::FundingList => format!("{prefix}/tx/funding/txs/list"),
-            StoreKey::SpeedUpList => format!("{prefix}/speedup/list"),
 
             //NEWS
             StoreKey::InsufficientFundsNewsList => format!("{prefix}/news/insufficient_funds"),
@@ -90,11 +79,12 @@ impl BitcoinCoordinatorStore {
                 format!("{prefix}/news/dispatch_speed_up_error")
             }
             StoreKey::NewSpeedUpNewsList => format!("{prefix}/news/new_speed_up"),
+            StoreKey::FundingNotFoundNewsList => format!("{prefix}/news/funding_not_found"),
         }
     }
 
     fn get_txs(&self) -> Result<Vec<Txid>, BitcoinCoordinatorStoreError> {
-        let key = self.get_key(StoreKey::TransactionList);
+        let key = self.get_key(StoreKey::PendingTransactionList);
 
         let all_txs = self.store.get::<&str, Vec<Txid>>(&key)?;
 
@@ -103,9 +93,11 @@ impl BitcoinCoordinatorStore {
             None => Ok(vec![]),
         }
     }
+}
 
-    fn get_tx(&self, tx_id: Txid) -> Result<CoordinatedTransaction, BitcoinCoordinatorStoreError> {
-        let key = self.get_key(StoreKey::Transaction(tx_id));
+impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
+    fn get_tx(&self, tx_id: &Txid) -> Result<CoordinatedTransaction, BitcoinCoordinatorStoreError> {
+        let key = self.get_key(StoreKey::Transaction(*tx_id));
         let tx = self.store.get::<&str, CoordinatedTransaction>(&key)?;
 
         if tx.is_none() {
@@ -115,26 +107,45 @@ impl BitcoinCoordinatorStore {
 
         Ok(tx.unwrap())
     }
-}
 
-impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
-    fn get_txs(
+    fn get_txs_in_progress(
         &self,
-        state: TransactionDispatchState,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError> {
+        // Get all transactions in progress which are the ones are not Finalized
         let txs = self.get_txs()?;
         let mut txs_filter = Vec::new();
 
         for tx_id in txs {
-            let tx = self.get_tx(tx_id)?;
+            let tx = self.get_tx(&tx_id)?;
 
-            if tx.state == state {
+            if tx.state == TransactionState::ToDispatch
+                || tx.state == TransactionState::Dispatched
+                || tx.state == TransactionState::Confirmed
+            {
                 txs_filter.push(tx);
             }
         }
 
         Ok(txs_filter)
     }
+
+    fn get_txs_to_dispatch(
+        &self,
+    ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError> {
+        let txs = self.get_txs()?;
+        let mut txs_filter = Vec::new();
+
+        for tx_id in txs {
+            let tx = self.get_tx(&tx_id)?;
+
+            if tx.state == TransactionState::ToDispatch {
+                txs_filter.push(tx);
+            }
+        }
+
+        Ok(txs_filter)
+    }
+
     fn save_tx(
         &self,
         tx: Transaction,
@@ -147,14 +158,14 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let tx_info = CoordinatedTransaction::new(
             tx.clone(),
             speedup_utxo,
-            TransactionDispatchState::PendingDispatch,
+            TransactionState::ToDispatch,
             target_block_height,
             context,
         );
 
         self.store.set(&key, &tx_info, None)?;
 
-        let txs_key = self.get_key(StoreKey::TransactionList);
+        let txs_key = self.get_key(StoreKey::PendingTransactionList);
         let mut txs = self
             .store
             .get::<&str, Vec<Txid>>(&txs_key)?
@@ -169,7 +180,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let tx_key = self.get_key(StoreKey::Transaction(tx_id));
         self.store.delete(&tx_key)?;
 
-        let txs_key = self.get_key(StoreKey::TransactionList);
+        let txs_key = self.get_key(StoreKey::PendingTransactionList);
         let mut txs = self
             .store
             .get::<&str, Vec<Txid>>(&txs_key)?
@@ -181,125 +192,19 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn get_funding(&self) -> Result<Option<Utxo>, BitcoinCoordinatorStoreError> {
-        let funding_txs_key = self.get_key(StoreKey::FundingList);
-
-        let funding_txs = self
-            .store
-            .get::<&str, Vec<Utxo>>(&funding_txs_key)?
-            .unwrap_or_default();
-
-        if let Some(last_funding_tx) = funding_txs.last() {
-            // Funding transaction is the last one.
-            Ok(Some(last_funding_tx.clone()))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn add_funding(&self, utxo: Utxo) -> Result<(), BitcoinCoordinatorStoreError> {
-        let fundings_txs_key = self.get_key(StoreKey::FundingList);
-
-        let mut funding_info = self
-            .store
-            .get::<&str, Vec<Utxo>>(&fundings_txs_key)?
-            .unwrap_or_default();
-
-        funding_info.push(utxo);
-
-        self.store.set(&fundings_txs_key, &funding_info, None)?;
-
-        Ok(())
-    }
-
-    fn remove_funding(&self, funding_tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
-        let fundings_txs_key = self.get_key(StoreKey::FundingList);
-
-        let mut funding_txs = self
-            .store
-            .get::<&str, Vec<Utxo>>(&fundings_txs_key)?
-            .unwrap_or_default();
-
-        let original_len = funding_txs.len();
-        funding_txs.retain(|tx| tx.txid != funding_tx_id);
-
-        if funding_txs.len() == original_len {
-            return Err(BitcoinCoordinatorStoreError::FundingNotFound);
-        }
-
-        self.store.set(&fundings_txs_key, &funding_txs, None)?;
-
-        Ok(())
-    }
-
-    fn get_speedup_tx(&self, tx_id: &Txid) -> Result<SpeedUpTx, BitcoinCoordinatorStoreError> {
-        let speed_up_tx_key = self.get_key(StoreKey::SpeedUpList);
-
-        // Retrieve the list of speed up transactions from storage
-        let speed_up_txs = self
-            .store
-            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)?
-            .unwrap_or_default();
-
-        // Find the specific speed up transaction that matches the given tx_id
-        let speed_up_tx = speed_up_txs.into_iter().find(|t| t.tx_id == *tx_id);
-
-        if speed_up_tx.is_none() {
-            return Err(BitcoinCoordinatorStoreError::SpeedupNotFound);
-        }
-
-        Ok(speed_up_tx.unwrap())
-    }
-
-    fn get_last_speedup(&self) -> Result<Option<SpeedUpTx>, BitcoinCoordinatorStoreError> {
-        let speed_up_tx_key = self.get_key(StoreKey::SpeedUpList);
-
-        // Retrieve the list of speed up transactions from storage
-        let speed_up_txs = self
-            .store
-            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)?
-            .unwrap_or_default();
-
-        // Get the last speed up transaction from the list
-        let speed_up_tx = speed_up_txs.into_iter().last();
-
-        Ok(speed_up_tx)
-    }
-
-    // This function adds a new speed up transaction to the list of speed up transactions associated with an child transaction.
-    // Speed up transactions are stored in a list, with the most recent transaction added to the end of the list.
-    // This design ensures that if the last transaction in the list is pending, there cannot be another pending speed up transaction
-    // for the same group of transactions, except for one that is specifically related to the same child transaction.
-    fn save_speedup_tx(&self, speed_up_tx: &SpeedUpTx) -> Result<(), BitcoinCoordinatorStoreError> {
-        let speed_up_tx_key = self.get_key(StoreKey::SpeedUpList);
-
-        let mut speed_up_txs = self
-            .store
-            .get::<&str, Vec<SpeedUpTx>>(&speed_up_tx_key)?
-            .unwrap_or_default();
-
-        speed_up_txs.push(speed_up_tx.clone());
-
-        self.store.set(&speed_up_tx_key, &speed_up_txs, None)?;
-
-        Ok(())
-    }
-
     fn update_tx_to_dispatched(
         &self,
         tx_id: Txid,
         deliver_block_height: u32,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
-        //TODO: Implement transaction status transition validation to ensure the correct sequence:
-        // Pending -> InProgress -> Completed, and in reorganization scenarios, do the reverse order.
+        let mut tx = self.get_tx(&tx_id)?;
 
-        let mut tx = self.get_tx(tx_id)?;
-
-        if tx.state != TransactionDispatchState::PendingDispatch {
+        // Validate state transition: only ToDispatch can transition to Dispatched
+        if tx.state != TransactionState::ToDispatch {
             return Err(BitcoinCoordinatorStoreError::InvalidTransactionState);
         }
 
-        tx.state = TransactionDispatchState::BroadcastPendingConfirmation;
+        tx.state = TransactionState::Dispatched;
 
         tx.broadcast_block_height = Some(deliver_block_height);
 
@@ -309,29 +214,60 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn update_tx(
+    fn update_tx_state(
         &self,
         tx_id: Txid,
-        tx_state: TransactionDispatchState,
+        new_state: TransactionState,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
-        //TODO: Implement transaction status transition validation to ensure the correct sequence:
-        // PendingDispatch -> BroadcastPendingConfirmation -> Finalized, and in reorganization scenarios, do the reverse order.
+        let mut tx = self.get_tx(&tx_id)?;
 
-        let mut tx = self.get_tx(tx_id)?;
-        tx.state = tx_state.clone();
+        // Validate state transitions
+        let valid_transition = match (&tx.state, &new_state) {
+            // Valid transitions
+            (TransactionState::ToDispatch, TransactionState::Dispatched) => true,
+            (TransactionState::ToDispatch, TransactionState::Failed) => true,
+            (TransactionState::Dispatched, TransactionState::Confirmed) => true,
+            (TransactionState::Confirmed, TransactionState::Finalized) => true,
+            (current, new) if current == new => true,
+            // Invalid transitions
+            _ => false,
+        };
+
+        if !valid_transition {
+            return Err(BitcoinCoordinatorStoreError::InvalidStateTransition(
+                tx.state.clone(),
+                new_state.clone(),
+            ));
+        }
+
+        tx.state = new_state.clone();
 
         let key = self.get_key(StoreKey::Transaction(tx_id));
         self.store.set(key, tx, None)?;
+
+        // Remove tx from the list if it is finalized
+        if new_state == TransactionState::Finalized {
+            let txs_key = self.get_key(StoreKey::PendingTransactionList);
+            let mut txs = self
+                .store
+                .get::<&str, Vec<Txid>>(&txs_key)?
+                .unwrap_or_default();
+            txs.retain(|id| *id != tx_id);
+            self.store.set(&txs_key, &txs, None)?;
+        }
 
         Ok(())
     }
 
     fn add_news(&self, news: CoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError> {
         match news {
-            CoordinatorNews::InsufficientFunds(tx_id) => {
+            CoordinatorNews::InsufficientFunds(tx_id, amount, required) => {
                 let key = self.get_key(StoreKey::InsufficientFundsNewsList);
-                let mut news_list = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
-                news_list.push(tx_id);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, u64, u64)>>(&key)?
+                    .unwrap_or_default();
+                news_list.push((tx_id, amount, required));
                 self.store.set(&key, &news_list, None)?;
             }
             CoordinatorNews::NewSpeedUp(tx_id, context, counting) => {
@@ -361,6 +297,10 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 news_list.push((tx_ids, contexts, txid, error));
                 self.store.set(&key, &news_list, None)?;
             }
+            CoordinatorNews::FundingNotFound() => {
+                let key = self.get_key(StoreKey::FundingNotFoundNewsList);
+                self.store.set(&key, true, None)?;
+            }
         }
         Ok(())
     }
@@ -369,8 +309,11 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         match news {
             AckCoordinatorNews::InsufficientFunds(tx_id) => {
                 let key = self.get_key(StoreKey::InsufficientFundsNewsList);
-                let mut news_list = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
-                news_list.retain(|id| *id != tx_id);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, u64, u64)>>(&key)?
+                    .unwrap_or_default();
+                news_list.retain(|(id, _, _)| *id != tx_id);
                 self.store.set(&key, &news_list, None)?;
             }
             AckCoordinatorNews::NewSpeedUp(tx_id) => {
@@ -409,9 +352,12 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
         // Get insufficient funds news
         let insufficient_funds_key = self.get_key(StoreKey::InsufficientFundsNewsList);
-        if let Some(news_list) = self.store.get::<&str, Vec<Txid>>(&insufficient_funds_key)? {
-            for txid in news_list {
-                all_news.push(CoordinatorNews::InsufficientFunds(txid));
+        if let Some(news_list) = self
+            .store
+            .get::<&str, Vec<(Txid, u64, u64)>>(&insufficient_funds_key)?
+        {
+            for (txid, amount, required) in news_list {
+                all_news.push(CoordinatorNews::InsufficientFunds(txid, amount, required));
             }
         }
 
@@ -449,6 +395,14 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 all_news.push(CoordinatorNews::DispatchSpeedUpError(
                     tx_ids, contexts, txid, error,
                 ));
+            }
+        }
+
+        // Get funding not found news
+        let funding_not_found_key = self.get_key(StoreKey::FundingNotFoundNewsList);
+        if let Some(not_found) = self.store.get::<&str, bool>(&funding_not_found_key)? {
+            if not_found {
+                all_news.push(CoordinatorNews::FundingNotFound());
             }
         }
 
