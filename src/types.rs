@@ -220,6 +220,7 @@ pub enum AckCoordinatorNews {
     DispatchTransactionError(Txid),
     DispatchSpeedUpError(Txid),
     EstimateFeerateTooHigh(u64, u64),
+    FundingNotFound,
 }
 
 pub enum AckNews {

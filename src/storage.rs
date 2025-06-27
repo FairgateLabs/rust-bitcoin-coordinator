@@ -365,6 +365,10 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 news_list.retain(|(fee, max)| *fee != estimate_fee || *max != max_allowed);
                 self.store.set(&key, &news_list, None)?;
             }
+            AckCoordinatorNews::FundingNotFound => {
+                let key = self.get_key(StoreKey::FundingNotFoundNews);
+                self.store.set(&key, false, None)?;
+            }
         }
         Ok(())
     }
