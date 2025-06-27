@@ -301,7 +301,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 news_list.push((tx_ids, contexts, txid, error));
                 self.store.set(&key, &news_list, None)?;
             }
-            CoordinatorNews::FundingNotFound() => {
+            CoordinatorNews::FundingNotFound => {
                 let key = self.get_key(StoreKey::FundingNotFoundNews);
                 self.store.set(&key, true, None)?;
             }
@@ -428,7 +428,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let funding_not_found_key = self.get_key(StoreKey::FundingNotFoundNews);
         if let Some(not_found) = self.store.get::<&str, bool>(&funding_not_found_key)? {
             if not_found {
-                all_news.push(CoordinatorNews::FundingNotFound());
+                all_news.push(CoordinatorNews::FundingNotFound);
             }
         }
 

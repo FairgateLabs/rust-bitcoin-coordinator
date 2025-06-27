@@ -48,7 +48,7 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
 
     let estimate_feerate_news = CoordinatorNews::EstimateFeerateTooHigh(12345, 10000);
 
-    let funding_not_found_news = CoordinatorNews::FundingNotFound();
+    let funding_not_found_news = CoordinatorNews::FundingNotFound;
 
     // Add news
     store.add_news(insufficient_funds_news.clone())?;
@@ -172,7 +172,7 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     let estimate_feerate_news_1 = CoordinatorNews::EstimateFeerateTooHigh(22222, 11111);
     let estimate_feerate_news_2 = CoordinatorNews::EstimateFeerateTooHigh(33333, 22222);
 
-    let funding_not_found_news = CoordinatorNews::FundingNotFound();
+    let funding_not_found_news = CoordinatorNews::FundingNotFound;
 
     // Add all news
     store.add_news(insufficient_funds_news_1.clone())?;

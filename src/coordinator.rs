@@ -208,7 +208,7 @@ impl BitcoinCoordinator {
                 let funding = self.store.get_funding()?;
 
                 if funding.is_none() {
-                    let news = CoordinatorNews::FundingNotFound();
+                    let news = CoordinatorNews::FundingNotFound;
                     self.store.add_news(news)?;
                     return Ok(());
                 }

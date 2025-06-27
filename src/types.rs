@@ -191,7 +191,7 @@ pub enum CoordinatorNews {
     InsufficientFunds(Txid, u64, u64),
 
     /// Indicates that there are no funding utxo loaded
-    FundingNotFound(),
+    FundingNotFound,
 
     /// Notification of a new speed-up transaction
     /// - Txid: The transaction ID that was sped up
