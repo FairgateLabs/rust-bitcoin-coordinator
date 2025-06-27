@@ -1,6 +1,6 @@
 use crate::{
     constants::{
-        CPFP_TRANSACTION_CONTEXT, MAX_MONITORING_CONFIRMATIONS, MAX_TX_WEIGHT,
+        CPFP_TRANSACTION_CONTEXT, MAX_FEERATE_SAT_VB, MAX_MONITORING_CONFIRMATIONS, MAX_TX_WEIGHT,
         MIN_BLOCKS_BEFORE_RBF, MIN_FUNDING_AMOUNT_SATS,
     },
     errors::BitcoinCoordinatorError,
@@ -631,7 +631,28 @@ impl BitcoinCoordinator {
         // To calculate the total fee, we need to know the vsize of the child (CPFP) + the vsize of each parent.
         // Also we have to subtract the parent's transaction vbytes and the total output amounts once.
 
-        let target_feerate_sat_vb = self.client.estimate_smart_fee()? as usize;
+        let mut estimate_fee = self.client.estimate_smart_fee()?;
+
+        if estimate_fee > MAX_FEERATE_SAT_VB {
+            warn!(
+                "{} Estimate feerate sat/vbyte is greater than the max allowed. This could be a bug. | EstimateFeerate({}) | MaxAllowed({})",
+                style("Coordinator").red(),
+                style(estimate_fee).red(),
+                style(MAX_FEERATE_SAT_VB).red(),
+            );
+
+            // Inform this with news
+            let news = CoordinatorNews::EstimateFeerateTooHigh(
+                estimate_fee as u64,
+                MAX_FEERATE_SAT_VB as u64,
+            );
+
+            self.store.add_news(news)?;
+
+            // Set the estimate feerate to the max allowed
+            estimate_fee = MAX_FEERATE_SAT_VB;
+        }
+
         let parent_vbytes: usize = parents.iter().map(|tx_data| tx_data.tx.vsize()).sum();
 
         let mut parent_amount_outputs: usize = 0;
@@ -645,8 +666,8 @@ impl BitcoinCoordinator {
 
         // We substract the vbytes of the parents and the amount of outputs.
         // Because the child pays for the parents and the parents pay for the outputs
-        let parent_total_sats = parent_vbytes * target_feerate_sat_vb;
-        let child_total_sats = child_vbytes * target_feerate_sat_vb;
+        let parent_total_sats = parent_vbytes * estimate_fee as usize;
+        let child_total_sats = child_vbytes * estimate_fee as usize;
         let total_sats = parent_total_sats + child_total_sats;
         let total_fee = (total_sats as f64 * bump_fee_percentage).ceil().round() as u64;
         let total_fee = total_fee
@@ -813,7 +834,6 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
     fn add_funding(&self, utxo: Utxo) -> Result<(), BitcoinCoordinatorError> {
         // Each time a speedup transaction is generated, it consumes the previous funding UTXO and leaves any change as the new funding for subsequent speedups.
         // Therefore, every new funding UTXO should be recorded in the same format as a speedup transaction, ensuring the coordinator always tracks the latest available funding.
-
         self.store.add_funding(utxo)?;
 
         Ok(())

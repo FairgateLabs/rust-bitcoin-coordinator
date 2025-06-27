@@ -25,3 +25,6 @@ pub const RBF_FEE_PERCENTAGE: f64 = 1.5;
 
 // Minimum blocks to wait before attempting RBF
 pub const MIN_BLOCKS_BEFORE_RBF: u32 = 1;
+
+// Maximum feerate sat/vbyte allowed for speedups
+pub const MAX_FEERATE_SAT_VB: u64 = 2500;
