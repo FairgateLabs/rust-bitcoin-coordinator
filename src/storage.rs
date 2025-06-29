@@ -19,7 +19,8 @@ enum StoreKey {
     DispatchSpeedUpErrorNewsList,
     InsufficientFundsNewsList,
     NewSpeedUpNewsList,
-    FundingNotFoundNewsList,
+    FundingNotFoundNews,
+    EstimateFeerateTooHighNewsList,
 }
 pub trait BitcoinCoordinatorStoreApi {
     fn save_tx(
@@ -79,7 +80,10 @@ impl BitcoinCoordinatorStore {
                 format!("{prefix}/news/dispatch_speed_up_error")
             }
             StoreKey::NewSpeedUpNewsList => format!("{prefix}/news/new_speed_up"),
-            StoreKey::FundingNotFoundNewsList => format!("{prefix}/news/funding_not_found"),
+            StoreKey::FundingNotFoundNews => format!("{prefix}/news/funding_not_found"),
+            StoreKey::EstimateFeerateTooHighNewsList => {
+                format!("{prefix}/news/estimate_feerate_too_high")
+            }
         }
     }
 
@@ -297,9 +301,18 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 news_list.push((tx_ids, contexts, txid, error));
                 self.store.set(&key, &news_list, None)?;
             }
-            CoordinatorNews::FundingNotFound() => {
-                let key = self.get_key(StoreKey::FundingNotFoundNewsList);
+            CoordinatorNews::FundingNotFound => {
+                let key = self.get_key(StoreKey::FundingNotFoundNews);
                 self.store.set(&key, true, None)?;
+            }
+            CoordinatorNews::EstimateFeerateTooHigh(estimate_fee, max_allowed) => {
+                let key = self.get_key(StoreKey::EstimateFeerateTooHighNewsList);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(u64, u64)>>(&key)?
+                    .unwrap_or_default();
+                news_list.push((estimate_fee, max_allowed));
+                self.store.set(&key, &news_list, None)?;
             }
         }
         Ok(())
@@ -342,6 +355,19 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                     .unwrap_or_default();
                 news_list.retain(|(_, _, txid, _)| *txid != speedup_txid);
                 self.store.set(&key, &news_list, None)?;
+            }
+            AckCoordinatorNews::EstimateFeerateTooHigh(estimate_fee, max_allowed) => {
+                let key = self.get_key(StoreKey::EstimateFeerateTooHighNewsList);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(u64, u64)>>(&key)?
+                    .unwrap_or_default();
+                news_list.retain(|(fee, max)| *fee != estimate_fee || *max != max_allowed);
+                self.store.set(&key, &news_list, None)?;
+            }
+            AckCoordinatorNews::FundingNotFound => {
+                let key = self.get_key(StoreKey::FundingNotFoundNews);
+                self.store.set(&key, false, None)?;
             }
         }
         Ok(())
@@ -399,10 +425,24 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         }
 
         // Get funding not found news
-        let funding_not_found_key = self.get_key(StoreKey::FundingNotFoundNewsList);
+        let funding_not_found_key = self.get_key(StoreKey::FundingNotFoundNews);
         if let Some(not_found) = self.store.get::<&str, bool>(&funding_not_found_key)? {
             if not_found {
-                all_news.push(CoordinatorNews::FundingNotFound());
+                all_news.push(CoordinatorNews::FundingNotFound);
+            }
+        }
+
+        // Get estimate feerate too high news
+        let estimate_feerate_too_high_key = self.get_key(StoreKey::EstimateFeerateTooHighNewsList);
+        if let Some(news_list) = self
+            .store
+            .get::<&str, Vec<(u64, u64)>>(&estimate_feerate_too_high_key)?
+        {
+            for (estimate_fee, max_allowed) in news_list {
+                all_news.push(CoordinatorNews::EstimateFeerateTooHigh(
+                    estimate_fee,
+                    max_allowed,
+                ));
             }
         }
 
