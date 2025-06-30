@@ -5,7 +5,7 @@ use crate::{
 
 use bitcoin::{Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use protocol_builder::types::Utxo;
+use protocol_builder::types::output::SpeedupData;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
 pub struct BitcoinCoordinatorStore {
@@ -25,7 +25,7 @@ pub trait BitcoinCoordinatorStoreApi {
     fn save_tx(
         &self,
         tx: Transaction,
-        cpfp: Option<Utxo>,
+        speedup_data: Option<SpeedupData>,
         target_block_height: Option<BlockHeight>,
         context: String,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
@@ -149,7 +149,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
     fn save_tx(
         &self,
         tx: Transaction,
-        speedup_utxo: Option<Utxo>,
+        speedup_data: Option<SpeedupData>,
         target_block_height: Option<BlockHeight>,
         context: String,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
@@ -157,7 +157,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
         let tx_info = CoordinatedTransaction::new(
             tx.clone(),
-            speedup_utxo,
+            speedup_data,
             TransactionState::ToDispatch,
             target_block_height,
             context,

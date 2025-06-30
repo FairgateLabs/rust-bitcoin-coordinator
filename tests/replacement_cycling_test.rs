@@ -8,7 +8,10 @@ use console::style;
 use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_store::KeyStore;
-use protocol_builder::{builder::ProtocolBuilder, types::Utxo};
+use protocol_builder::{
+    builder::ProtocolBuilder,
+    types::{output::SpeedupData, Utxo},
+};
 use std::{rc::Rc, vec};
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
@@ -132,7 +135,8 @@ fn replacement_cycling_test() -> Result<(), anyhow::Error> {
         key_manager.clone(),
     )?;
 
-    let utxos = vec![tx1_speedup_utxo];
+    let speedup_data = SpeedupData::new(tx1_speedup_utxo);
+    let utxos = vec![speedup_data];
 
     let bob_funding_utxo = Utxo::new(
         bob_funding.compute_txid(),

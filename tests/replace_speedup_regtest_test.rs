@@ -12,7 +12,7 @@ use console::style;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_store::KeyStore;
 use key_manager::{config::KeyManagerConfig, key_manager::KeyManager};
-use protocol_builder::types::Utxo;
+use protocol_builder::types::{output::SpeedupData, Utxo};
 use std::rc::Rc;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
@@ -226,17 +226,14 @@ fn coordinate_tx(
         key_manager.clone(),
     )?;
 
+    let speedup_data = SpeedupData::new(tx1_speedup_utxo);
+
     let tx_context = "My tx".to_string();
     let tx_to_monitor = TypesToMonitor::Transactions(vec![tx1.compute_txid()], tx_context.clone());
     coordinator.monitor(tx_to_monitor)?;
 
     // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.dispatch(
-        tx1.clone(),
-        Some(tx1_speedup_utxo),
-        tx_context.clone(),
-        None,
-    )?;
+    coordinator.dispatch(tx1.clone(), Some(speedup_data), tx_context.clone(), None)?;
 
     Ok(())
 }
