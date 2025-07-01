@@ -21,7 +21,10 @@ use bitvmx_transaction_monitor::{
 };
 use console::style;
 use key_manager::key_manager::KeyManager;
-use protocol_builder::{builder::ProtocolBuilder, types::Utxo};
+use protocol_builder::{
+    builder::ProtocolBuilder,
+    types::{output::SpeedupData, Utxo},
+};
 use std::rc::Rc;
 use storage_backend::storage::Storage;
 use tracing::{error, info, warn};
@@ -60,7 +63,7 @@ pub trait BitcoinCoordinatorApi {
     fn dispatch(
         &self,
         tx: Transaction,
-        speedup: Option<Utxo>,
+        speedup: Option<SpeedupData>,
         context: String,
         block_height: Option<BlockHeight>,
     ) -> Result<(), BitcoinCoordinatorError>;
@@ -463,7 +466,7 @@ impl BitcoinCoordinator {
 
     fn should_speedup(&self, tx: &CoordinatedTransaction) -> bool {
         // If the transaction has a CPFP UTXO, we have to speed it up.
-        tx.cpfp_utxo.is_some()
+        tx.speedup_data.is_some()
     }
 
     fn should_dispatch_tx(
@@ -517,9 +520,9 @@ impl BitcoinCoordinator {
         let compressed = CompressedPublicKey::try_from(funding.pub_key).unwrap();
         let change_address = Address::p2wpkh(&compressed, self.network);
 
-        let utxos: Vec<Utxo> = txs_data
+        let speedups_data: Vec<SpeedupData> = txs_data
             .iter()
-            .filter_map(|tx_data| tx_data.cpfp_utxo.clone())
+            .map(|tx_data| tx_data.speedup_data.as_ref().unwrap().clone())
             .collect();
 
         // SMALL TICK:
@@ -528,7 +531,7 @@ impl BitcoinCoordinator {
         // - Now we have the total fee, we can create the speedup tx.
         let child_vbytes = (ProtocolBuilder {})
             .speedup_transactions(
-                &utxos,
+                speedups_data.as_slice(),
                 funding.clone(),
                 change_address.clone(),
                 10000, // Dummy fee
@@ -548,7 +551,7 @@ impl BitcoinCoordinator {
         }
 
         let speedup_tx = (ProtocolBuilder {}).speedup_transactions(
-            &utxos,
+            &speedups_data,
             funding.clone(),
             change_address,
             speedup_fee,
@@ -658,8 +661,8 @@ impl BitcoinCoordinator {
         let mut parent_amount_outputs: usize = 0;
 
         for tx_data in parents {
-            if let Some(utxo) = &tx_data.cpfp_utxo {
-                let tx_vout_amount = tx_data.tx.output[utxo.vout as usize].value;
+            if let Some(speedup) = &tx_data.speedup_data {
+                let tx_vout_amount = tx_data.tx.output[speedup.utxo.vout as usize].value;
                 parent_amount_outputs += tx_vout_amount.to_sat() as usize;
             }
         }
@@ -794,7 +797,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
     fn dispatch(
         &self,
         tx: Transaction,
-        cpfp: Option<Utxo>,
+        speedup_data: Option<SpeedupData>,
         context: String,
         target_block_height: Option<BlockHeight>,
     ) -> Result<(), BitcoinCoordinatorError> {
@@ -803,7 +806,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
 
         // Save the transaction to be dispatched.
         self.store
-            .save_tx(tx.clone(), cpfp, target_block_height, context)?;
+            .save_tx(tx.clone(), speedup_data, target_block_height, context)?;
 
         info!(
             "{} Mark Transaction({}) to dispatch",

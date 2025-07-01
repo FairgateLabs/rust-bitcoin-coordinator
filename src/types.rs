@@ -3,7 +3,7 @@ use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::types::{
     AckMonitorNews, BlockInfo, MonitorNews, TransactionBlockchainStatus,
 };
-use protocol_builder::types::Utxo;
+use protocol_builder::types::{output::SpeedupData, Utxo};
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{
@@ -32,7 +32,7 @@ pub struct CoordinatedTransaction {
     pub tx_id: Txid,
     pub tx: Transaction,
     // This is the utxo that will be used to pay for the transaction using CPFP (Child Pays For Parent)
-    pub cpfp_utxo: Option<Utxo>,
+    pub speedup_data: Option<SpeedupData>,
     pub broadcast_block_height: Option<BlockHeight>,
     pub target_block_height: Option<BlockHeight>,
     pub state: TransactionState,
@@ -42,7 +42,7 @@ pub struct CoordinatedTransaction {
 impl CoordinatedTransaction {
     pub fn new(
         tx: Transaction,
-        cpfp_utxo: Option<Utxo>,
+        speedup_data: Option<SpeedupData>,
         state: TransactionState,
         target_block_height: Option<BlockHeight>,
         context: String,
@@ -50,7 +50,7 @@ impl CoordinatedTransaction {
         Self {
             tx_id: tx.compute_txid(),
             tx,
-            cpfp_utxo,
+            speedup_data,
             broadcast_block_height: None,
             state,
             target_block_height,

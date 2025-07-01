@@ -13,7 +13,7 @@ use console::style;
 use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_store::KeyStore;
-use protocol_builder::types::Utxo;
+use protocol_builder::types::{output::SpeedupData, Utxo};
 use std::rc::Rc;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
@@ -172,12 +172,14 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         key_manager.clone(),
     )?;
 
+    let speedup_data = SpeedupData::new(tx1_speedup_utxo);
+
     let tx_context = "My tx".to_string();
     let tx_to_monitor = TypesToMonitor::Transactions(vec![tx1.compute_txid()], tx_context.clone());
     coordinator.monitor(tx_to_monitor)?;
 
     // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.dispatch(tx1, Some(tx1_speedup_utxo), tx_context.clone(), None)?;
+    coordinator.dispatch(tx1, Some(speedup_data), tx_context.clone(), None)?;
 
     // Add funding for speed up transaction
     coordinator.add_funding(Utxo::new(
@@ -231,11 +233,13 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         key_manager.clone(),
     )?;
 
+    let speedup_data = SpeedupData::new(tx2_speedup_utxo);
+
     let tx_to_monitor_2 =
         TypesToMonitor::Transactions(vec![tx2.compute_txid()], tx_context.clone());
     coordinator.monitor(tx_to_monitor_2)?;
 
-    coordinator.dispatch(tx2, Some(tx2_speedup_utxo), tx_context.clone(), None)?;
+    coordinator.dispatch(tx2, Some(speedup_data), tx_context.clone(), None)?;
 
     // First tick dispatch the tx2 and create a speedup tx to be send
     coordinator.tick()?;
