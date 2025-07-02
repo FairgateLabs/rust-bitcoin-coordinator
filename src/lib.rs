@@ -1,7 +1,7 @@
 pub mod config;
-pub mod constants;
 pub mod coordinator;
 pub mod errors;
+pub mod settings;
 pub mod speedup;
 pub mod storage;
 pub mod types;
