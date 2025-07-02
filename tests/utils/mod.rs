@@ -42,7 +42,7 @@ pub fn get_mocks() -> (
     let path = format!("test_output/test/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config).unwrap());
-    let store = BitcoinCoordinatorStore::new(storage.clone()).unwrap();
+    let store = BitcoinCoordinatorStore::new(storage.clone(), 1).unwrap();
     let bitcoin_client = MockBitcoinClient::new();
     let config = KeyManagerConfig::new(Network::Regtest.to_string(), None, None, None);
     let key_store = KeyStore::new(storage.clone());
@@ -183,5 +183,5 @@ pub fn create_store() -> BitcoinCoordinatorStore {
     let path = format!("test_output/speedup/{}", generate_random_string());
     let storage_config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&storage_config).unwrap());
-    BitcoinCoordinatorStore::new(storage).unwrap()
+    BitcoinCoordinatorStore::new(storage, 10).unwrap()
 }

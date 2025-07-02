@@ -16,7 +16,7 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     );
     let storage = Rc::new(Storage::new(&storage_config)?);
 
-    let store = BitcoinCoordinatorStore::new(storage)?;
+    let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
     // Storage is empty, so all states should return empty vectors
     let empty_txs = store.get_txs_in_progress()?;
@@ -67,7 +67,7 @@ fn test_multiple_transactions() -> Result<(), anyhow::Error> {
         None,
     );
     let storage = Rc::new(Storage::new(&storage_config)?);
-    let store = BitcoinCoordinatorStore::new(storage)?;
+    let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
     // Create a transaction
     let tx = Transaction {
@@ -145,7 +145,7 @@ fn test_cancel_monitor() -> Result<(), anyhow::Error> {
         None,
     );
     let storage = Rc::new(Storage::new(&storage_config)?);
-    let coordinator = BitcoinCoordinatorStore::new(storage)?;
+    let coordinator = BitcoinCoordinatorStore::new(storage, 1)?;
     // Create first transaction
     let tx1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
