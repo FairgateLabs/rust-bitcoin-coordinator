@@ -11,7 +11,7 @@ use crate::{
         SpeedupState, TransactionState,
     },
 };
-use bitcoin::{Address, CompressedPublicKey, Network, Transaction, Txid};
+use bitcoin::{Network, Transaction, Txid};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, rpc_config::RpcConfig};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClientApi, types::BlockHeight};
 use bitvmx_transaction_monitor::{
@@ -34,7 +34,7 @@ pub struct BitcoinCoordinator {
     key_manager: Rc<KeyManager>,
     store: BitcoinCoordinatorStore,
     client: BitcoinClient,
-    network: Network,
+    _network: Network,
 }
 
 pub trait BitcoinCoordinatorApi {
@@ -133,7 +133,7 @@ impl BitcoinCoordinator {
             store,
             key_manager,
             client,
-            network,
+            _network: network,
         }
     }
 
@@ -517,8 +517,8 @@ impl BitcoinCoordinator {
 
         // TODO: This logic may need to be updated to use OutputType from the protocol builder for greater flexibility.
         // Currently, we derive the change address as a P2PKH address from the funding UTXO's public key.
-        let compressed = CompressedPublicKey::try_from(funding.pub_key).unwrap();
-        let change_address = Address::p2wpkh(&compressed, self.network);
+        //let compressed = CompressedPublicKey::try_from(funding.pub_key).unwrap();
+        //let change_address = Address::p2wpkh(&compressed, self.network);
 
         let speedups_data: Vec<SpeedupData> = txs_data
             .iter()
@@ -533,7 +533,7 @@ impl BitcoinCoordinator {
             .speedup_transactions(
                 speedups_data.as_slice(),
                 funding.clone(),
-                change_address.clone(),
+                &funding.pub_key,
                 10000, // Dummy fee
                 &self.key_manager,
             )?
@@ -553,7 +553,7 @@ impl BitcoinCoordinator {
         let speedup_tx = (ProtocolBuilder {}).speedup_transactions(
             &speedups_data,
             funding.clone(),
-            change_address,
+            &funding.pub_key,
             speedup_fee,
             &self.key_manager,
         )?;
@@ -662,8 +662,12 @@ impl BitcoinCoordinator {
 
         for tx_data in parents {
             if let Some(speedup) = &tx_data.speedup_data {
-                let tx_vout_amount = tx_data.tx.output[speedup.utxo.vout as usize].value;
-                parent_amount_outputs += tx_vout_amount.to_sat() as usize;
+                let amount = if let Some(utxo) = &speedup.utxo {
+                    utxo.amount as usize
+                } else {
+                    speedup.partial_utxo.as_ref().unwrap().2 as usize
+                };
+                parent_amount_outputs += amount;
             }
         }
 
