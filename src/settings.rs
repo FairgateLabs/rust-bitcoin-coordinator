@@ -5,6 +5,18 @@ pub const CPFP_TRANSACTION_CONTEXT: &str = "CPFP_TRANSACTION";
 pub const RBF_TRANSACTION_CONTEXT: &str = "RBF_TRANSACTION";
 pub const FUNDING_TRANSACTION_CONTEXT: &str = "FUNDING_TRANSACTION";
 
+// Bitcoin Core has a mempool policy called the "chain limit":
+// You can’t have more than 25 unconfirmed transactions chained together (i.e. one spending the other).
+pub const MAX_LIMIT_UNCONFIRMED_PARENTS: u32 = 25;
+
+// Minimum number of unconfirmed transactions required to dispatch a CPFP (Child Pays For Parent) transaction.
+// This is due to Bitcoin's mempool chain limit policy, which restricts the number of unconfirmed transactions that can be chained together (default is 25).
+// To create a valid CPFP, there must be at least one unconfirmed parent transaction and at least one unconfirmed output available to spend for the CPFP.
+// This ensures that the CPFP transaction can be constructed and accepted by the mempool under Bitcoin's standardness rules.
+pub const MIN_UNCONFIRMED_TXS_FOR_CPFP: u32 = 2;
+
+// SETTINGS CONFIGURABLE:
+
 // Maximum number of unconfirmed speedup transactions allowed before triggering a replacement speedup.
 // If the number of unconfirmed speedups reaches this limit, the coordinator will attempt to replace them with a new speedup transaction.
 pub const DEFAULT_MAX_UNCONFIRMED_SPEEDUPS: u32 = 10;

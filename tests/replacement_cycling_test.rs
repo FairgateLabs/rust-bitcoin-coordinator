@@ -155,7 +155,7 @@ fn replacement_cycling_test() -> Result<(), anyhow::Error> {
     let bob_cpfp_tx = (ProtocolBuilder {}).speedup_transactions(
         &utxos,
         bob_funding_utxo,
-        funding_wallet.clone(),
+        &public_key,
         10000,
         &key_manager,
     )?;
@@ -163,7 +163,7 @@ fn replacement_cycling_test() -> Result<(), anyhow::Error> {
     let mallory_cpfp_tx = (ProtocolBuilder {}).speedup_transactions(
         &utxos,
         mallory_funding_utxo.clone(),
-        funding_wallet.clone(),
+        &public_key,
         12000,
         &key_manager,
     )?;
@@ -171,7 +171,7 @@ fn replacement_cycling_test() -> Result<(), anyhow::Error> {
     let mallory_tx = (ProtocolBuilder {}).speedup_transactions(
         &vec![],
         mallory_funding_utxo,
-        funding_wallet.clone(),
+        &public_key,
         13000,
         &key_manager,
     )?;

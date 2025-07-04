@@ -178,21 +178,27 @@ impl BitcoinCoordinator {
     ) -> Result<(), BitcoinCoordinatorError> {
         // Attempt to dispatch as many transactions as possible in a single CPFP (Child Pays For Parent) transaction,
         // while ensuring the resulting transaction does not exceed Bitcoin's standardness limits.
-        // Maximum transaction size: 400,000 weight units.
-        // Exceeding these limits will result in the transaction being considered non-standard and rejected by most mempools.
-        // If the set of transactions exceeds these limits, they must be split into multiple CPFP transactions.
+        // We have two policies to dispatch the transactions:
+        // 1. Maximum transaction size: MAX_TX_WEIGHT weight units. Exceeding these limits will result in the transaction
+        // being considered non-standard and rejected by most mempools.
+        // 2. Maximum number of unconfirmed transactions is 25 (MAX_LIMIT_UNCONFIRMED_PARENTS)
+        // If the set of transactions exceeds these limits, will fail the dispatch.
 
-        // TODO: This should be change for adding the child pays for the parents tx in order to be send to the network.
-
-        let txs_in_batch_by_size: Vec<Vec<CoordinatedTransaction>> =
+        let txs_in_batch_by_policies: Vec<Vec<CoordinatedTransaction>> =
             self.batch_txs_by_weight_limit(txs)?;
 
-        for txs_batch in txs_in_batch_by_size {
+        for txs_batch in txs_in_batch_by_policies {
             // For each batch, attempt to broadcast all transactions individually. After determining which transactions were successfully sent,
-            // construct and broadcast a single CPFP (Child Pays For Parent) transaction to pay for the entire batch.
+            // construct and broadcast a single CPFP  transaction to pay for the entire batch.
             let txs_sent: Vec<CoordinatedTransaction> = self.dispatch_txs(txs_batch)?;
 
-            // We need to pay for transactions that were sent. If there is no transactions sent, we don't need to create a CPFP.
+            info!(
+                "{} Sending batch of {} transactions",
+                style("Coordinator").green(),
+                txs_sent.len()
+            );
+            // Only create a CPFP (Child Pays For Parent) transaction if there are transactions that were successfully sent in this batch.
+            // If no transactions were sent, skip CPFP creation for this batch.
             if !txs_sent.is_empty() {
                 let bump_fee_porcentage = self.get_bump_fee_porcentage_strategy(0)?;
 
@@ -335,6 +341,7 @@ impl BitcoinCoordinator {
         let mut batches = Vec::new();
         let mut current_batch = Vec::new();
         let mut current_weight = 0;
+        let mut allow_unconfirmed_txs = self.store.get_available_unconfirmed_txs()?;
 
         for tx_data in txs {
             let weight = tx_data.tx.weight().to_wu();
@@ -347,11 +354,24 @@ impl BitcoinCoordinator {
                 ));
             }
 
+            // When adding this transaction, we're extending the mempool ancestry chain: the new CPFP (Child Pays For Parent) transaction becomes,
+            // for example, the 26th ancestor in the mempool's view.
+            // Therefore, we must decrement the available unconfirmed CPFP slots,
+            // since each batch will require a new CPFP transaction and further extend the ancestry chain.
+            if allow_unconfirmed_txs - 1 > 0 {
+                allow_unconfirmed_txs -= 1;
+            } else {
+                batches.push(current_batch);
+                // Up to here we have reached the limit of unconfirmed txs. We can't dispatch more txs.
+                return Ok(batches);
+            }
+
             if current_weight + weight > self.settings.max_tx_weight {
                 batches.push(current_batch);
                 current_batch = Vec::new();
                 current_weight = 0;
             }
+
             current_batch.push(tx_data);
             current_weight += weight;
         }
@@ -638,8 +658,8 @@ impl BitcoinCoordinator {
 
             // Inform this with news
             let news = CoordinatorNews::EstimateFeerateTooHigh(
-                estimate_fee as u64,
-                self.settings.max_feerate_sat_vb as u64,
+                estimate_fee,
+                self.settings.max_feerate_sat_vb,
             );
 
             self.store.add_news(news)?;
