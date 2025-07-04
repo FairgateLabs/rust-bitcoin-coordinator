@@ -1,9 +1,7 @@
 use crate::{
-    constants::{
-        CPFP_TRANSACTION_CONTEXT, MAX_FEERATE_SAT_VB, MAX_MONITORING_CONFIRMATIONS, MAX_TX_WEIGHT,
-        MIN_BLOCKS_BEFORE_RBF, MIN_FUNDING_AMOUNT_SATS,
-    },
+    config::CoordinatorSettings,
     errors::BitcoinCoordinatorError,
+    settings::CPFP_TRANSACTION_CONTEXT,
     speedup::SpeedupStore,
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{
@@ -35,6 +33,7 @@ pub struct BitcoinCoordinator {
     store: BitcoinCoordinatorStore,
     client: BitcoinClient,
     _network: Network,
+    settings: CoordinatorSettings,
 }
 
 pub trait BitcoinCoordinatorApi {
@@ -102,39 +101,28 @@ impl BitcoinCoordinator {
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
         key_manager: Rc<KeyManager>,
-        checkpoint: Option<BlockHeight>,
-        confirmation_threshold: u32,
+        settings: Option<CoordinatorSettings>,
     ) -> Result<Self, BitcoinCoordinatorError> {
+        let settings = settings.unwrap_or_default();
+
         let monitor = Monitor::new_with_paths(
             rpc_config,
             storage.clone(),
-            checkpoint,
-            confirmation_threshold,
+            Some(settings.monitor_settings.clone()),
         )?;
 
-        let store = BitcoinCoordinatorStore::new(storage)?;
-        let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
+        let store = BitcoinCoordinatorStore::new(storage, settings.max_unconfirmed_speedups)?;
+        let client = BitcoinClient::new_from_config(rpc_config)?;
         let network = rpc_config.network;
-        let coordinator =
-            BitcoinCoordinator::new(monitor, store, key_manager, bitcoin_client, network);
 
-        Ok(coordinator)
-    }
-
-    pub fn new(
-        monitor: MonitorType,
-        store: BitcoinCoordinatorStore,
-        key_manager: Rc<KeyManager>,
-        client: BitcoinClient,
-        network: Network,
-    ) -> Self {
-        Self {
+        Ok(Self {
             monitor,
             store,
             key_manager,
             client,
             _network: network,
-        }
+            settings,
+        })
     }
 
     fn process_pending_txs_to_dispatch(&self) -> Result<(), BitcoinCoordinatorError> {
@@ -351,15 +339,15 @@ impl BitcoinCoordinator {
         for tx_data in txs {
             let weight = tx_data.tx.weight().to_wu();
 
-            if weight > MAX_TX_WEIGHT {
+            if weight > self.settings.max_tx_weight {
                 return Err(BitcoinCoordinatorError::TransactionTooHeavy(
                     tx_data.tx_id.to_string(),
                     weight,
-                    MAX_TX_WEIGHT,
+                    self.settings.max_tx_weight,
                 ));
             }
 
-            if current_weight + weight > MAX_TX_WEIGHT {
+            if current_weight + weight > self.settings.max_tx_weight {
                 batches.push(current_batch);
                 current_batch = Vec::new();
                 current_weight = 0;
@@ -397,7 +385,9 @@ impl BitcoinCoordinator {
                     let ack = AckMonitorNews::Transaction(tx_status.tx_id);
                     self.monitor.ack_news(ack)?;
 
-                    if tx_status.is_finalized(MAX_MONITORING_CONFIRMATIONS) {
+                    if tx_status
+                        .is_finalized(self.settings.monitor_settings.max_monitoring_confirmations)
+                    {
                         // Once the transaction is finalized, we are not monitoring it anymore.
                         self.store
                             .update_speedup_state(tx_status.tx_id, SpeedupState::Finalized)?;
@@ -440,7 +430,9 @@ impl BitcoinCoordinator {
                         style(tx_status.confirmations).blue(),
                     );
 
-                    if tx_status.is_finalized(MAX_MONITORING_CONFIRMATIONS) {
+                    if tx_status
+                        .is_finalized(self.settings.monitor_settings.max_monitoring_confirmations)
+                    {
                         // Once the transaction is finalized, we are not monitoring it anymore.
                         self.store
                             .update_tx_state(tx_status.tx_id, TransactionState::Finalized)?;
@@ -505,11 +497,11 @@ impl BitcoinCoordinator {
     ) -> Result<(), BitcoinCoordinatorError> {
         // Check if the funding amount is below the minimum required for a speedup.
         // If so, notify via CoordinatorNews and exit early.
-        if funding.amount < MIN_FUNDING_AMOUNT_SATS {
+        if funding.amount < self.settings.min_funding_amount_sats {
             let news = CoordinatorNews::InsufficientFunds(
                 funding.txid,
                 funding.amount,
-                MIN_FUNDING_AMOUNT_SATS,
+                self.settings.min_funding_amount_sats,
             );
             self.store.add_news(news)?;
             return Ok(());
@@ -634,26 +626,26 @@ impl BitcoinCoordinator {
         // To calculate the total fee, we need to know the vsize of the child (CPFP) + the vsize of each parent.
         // Also we have to subtract the parent's transaction vbytes and the total output amounts once.
 
-        let mut estimate_fee = self.client.estimate_smart_fee()?;
+        let mut estimate_fee: u64 = self.client.estimate_smart_fee()?;
 
-        if estimate_fee > MAX_FEERATE_SAT_VB {
+        if estimate_fee > self.settings.max_feerate_sat_vb {
             warn!(
                 "{} Estimate feerate sat/vbyte is greater than the max allowed. This could be a bug. | EstimateFeerate({}) | MaxAllowed({})",
                 style("Coordinator").red(),
                 style(estimate_fee).red(),
-                style(MAX_FEERATE_SAT_VB).red(),
+                style(self.settings.max_feerate_sat_vb).red(),
             );
 
             // Inform this with news
             let news = CoordinatorNews::EstimateFeerateTooHigh(
                 estimate_fee as u64,
-                MAX_FEERATE_SAT_VB as u64,
+                self.settings.max_feerate_sat_vb as u64,
             );
 
             self.store.add_news(news)?;
 
             // Set the estimate feerate to the max allowed
-            estimate_fee = MAX_FEERATE_SAT_VB;
+            estimate_fee = self.settings.max_feerate_sat_vb;
         }
 
         let parent_vbytes: usize = parents.iter().map(|tx_data| tx_data.tx.vsize()).sum();
@@ -734,7 +726,7 @@ impl BitcoinCoordinator {
             // This helps ensure that stuck transactions are periodically rebroadcast with higher fees to improve their chances of confirmation.
             if current_block_height
                 .saturating_sub(speedup.broadcast_block_height + replace_speedup_count)
-                >= MIN_BLOCKS_BEFORE_RBF
+                >= self.settings.min_blocks_before_rbf
             {
                 info!(
                     "{} RBF last speedup | CurrentHeight({}) | BroadcastHeight({}) | ReplaceCount({}) ",

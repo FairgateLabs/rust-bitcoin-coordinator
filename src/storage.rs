@@ -10,6 +10,7 @@ use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
 pub struct BitcoinCoordinatorStore {
     pub store: Rc<Storage>,
+    pub max_unconfirmed_speedups: u32,
 }
 enum StoreKey {
     PendingTransactionList,
@@ -61,8 +62,14 @@ pub trait BitcoinCoordinatorStoreApi {
 }
 
 impl BitcoinCoordinatorStore {
-    pub fn new(store: Rc<Storage>) -> Result<Self, BitcoinCoordinatorStoreError> {
-        Ok(Self { store })
+    pub fn new(
+        store: Rc<Storage>,
+        max_unconfirmed_speedups: u32,
+    ) -> Result<Self, BitcoinCoordinatorStoreError> {
+        Ok(Self {
+            store,
+            max_unconfirmed_speedups,
+        })
     }
 
     fn get_key(&self, key: StoreKey) -> String {

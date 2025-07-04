@@ -6,7 +6,7 @@ use bitvmx_transaction_monitor::types::{
 use protocol_builder::types::{output::SpeedupData, Utxo};
 use serde::{Deserialize, Serialize};
 
-use crate::constants::{
+use crate::settings::{
     CPFP_TRANSACTION_CONTEXT, FUNDING_TRANSACTION_CONTEXT, RBF_TRANSACTION_CONTEXT,
 };
 
@@ -201,7 +201,7 @@ pub enum CoordinatorNews {
 
     /// Indicates that the estimate feerate is too high
     /// - u64: The estimate feerate from the node
-    /// - u64: The max allowed feerate from constants
+    /// - u64: The max allowed feerate from settings
     EstimateFeerateTooHigh(u64, u64),
 }
 

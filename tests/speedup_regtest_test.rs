@@ -156,7 +156,6 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         storage.clone(),
         key_manager.clone(),
         None,
-        1,
     )?;
 
     // Since we've already mined 102 blocks, we need to advance the coordinator by 102 ticks

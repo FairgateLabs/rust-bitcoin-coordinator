@@ -1,69 +1,47 @@
-use std::env;
-
-use crate::errors::ConfigError;
-use bitvmx_bitcoin_rpc::{rpc_config::RpcConfig, types::BlockHeight};
-use config as settings;
+use crate::settings::{
+    DEFAULT_MAX_FEERATE_SAT_VB, DEFAULT_MAX_RBF_ATTEMPTS, DEFAULT_MAX_TX_WEIGHT,
+    DEFAULT_MAX_UNCONFIRMED_SPEEDUPS, DEFAULT_MIN_BLOCKS_BEFORE_RBF,
+    DEFAULT_MIN_FUNDING_AMOUNT_SATS, DEFAULT_RBF_FEE_PERCENTAGE,
+};
+use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
+use bitvmx_transaction_monitor::config::MonitorSettings;
 use key_manager::config::KeyManagerConfig;
 use serde::Deserialize;
 use storage_backend::storage_config::StorageConfig;
-use tracing::warn;
-
-static DEFAULT_ENV: &str = "development";
-static CONFIG_PATH: &str = "config";
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)] // enforce strict field compliance
-pub struct Config {
+pub struct CoordinatorConfig {
     pub storage: StorageConfig,
     pub rpc: RpcConfig,
-    pub monitor: MonitorConfig,
-    pub speedup: SpeedupConfig,
     pub key_manager: KeyManagerConfig,
     pub key_storage: StorageConfig,
+    pub settings: Option<CoordinatorSettings>,
     pub log_level: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct MonitorConfig {
-    pub checkpoint_height: Option<BlockHeight>,
-    pub confirmation_threshold: u32,
+pub struct CoordinatorSettings {
+    pub max_unconfirmed_speedups: u32,
+    pub max_tx_weight: u64,
+    pub max_rbf_attempts: u32,
+    pub min_funding_amount_sats: u64,
+    pub rbf_fee_percentage: f64,
+    pub min_blocks_before_rbf: u32,
+    pub max_feerate_sat_vb: u64,
+    pub monitor_settings: MonitorSettings,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct SpeedupConfig {
-    // amount in sats of the output used to bump the fee of the DRP transaction
-    pub cpfp_amount: u64,
-    // fee in sats for the DRP transaction
-    pub cpfp_fee: u64,
-}
-
-impl Config {
-    pub fn load() -> Result<Config, ConfigError> {
-        let env = Config::get_env();
-        Config::parse_config(env)
-    }
-
-    fn get_env() -> String {
-        env::var("BITVMX_ENV").unwrap_or_else(|_| {
-            let default_env = DEFAULT_ENV.to_string();
-            warn!(
-                "BITVMX_ENV not set. Using default environment: {}",
-                default_env
-            );
-            default_env
-        })
-    }
-
-    fn parse_config(env: String) -> Result<Config, ConfigError> {
-        let config_path = format!("{}/{}.yaml", CONFIG_PATH, env);
-
-        let settings = settings::Config::builder()
-            .add_source(config::File::with_name(&config_path))
-            .build()
-            .map_err(ConfigError::ConfigFileError)?;
-
-        settings
-            .try_deserialize::<Config>()
-            .map_err(ConfigError::ConfigFileError)
+impl Default for CoordinatorSettings {
+    fn default() -> Self {
+        Self {
+            max_unconfirmed_speedups: DEFAULT_MAX_UNCONFIRMED_SPEEDUPS,
+            max_tx_weight: DEFAULT_MAX_TX_WEIGHT,
+            max_rbf_attempts: DEFAULT_MAX_RBF_ATTEMPTS,
+            min_funding_amount_sats: DEFAULT_MIN_FUNDING_AMOUNT_SATS,
+            rbf_fee_percentage: DEFAULT_RBF_FEE_PERCENTAGE,
+            min_blocks_before_rbf: DEFAULT_MIN_BLOCKS_BEFORE_RBF,
+            max_feerate_sat_vb: DEFAULT_MAX_FEERATE_SAT_VB,
+            monitor_settings: MonitorSettings::default(),
+        }
     }
 }

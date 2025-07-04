@@ -18,7 +18,7 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     let storage_config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&storage_config)?);
 
-    let store = BitcoinCoordinatorStore::new(storage)?;
+    let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
     // Initially, there should be no news
     let news_list = store.get_news()?;

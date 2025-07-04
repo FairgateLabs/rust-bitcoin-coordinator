@@ -1,4 +1,3 @@
-use crate::constants::MAX_UNCONFIRMED_SPEEDUPS;
 use crate::errors::BitcoinCoordinatorStoreError;
 use crate::storage::BitcoinCoordinatorStore;
 use crate::types::{CoordinatedSpeedUpTransaction, SpeedupState};
@@ -247,7 +246,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             }
         }
 
-        Ok(sum >= MAX_UNCONFIRMED_SPEEDUPS)
+        Ok(sum >= self.max_unconfirmed_speedups)
     }
 
     fn update_speedup_state(
