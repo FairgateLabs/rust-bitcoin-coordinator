@@ -93,7 +93,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
     let public_key = key_manager.derive_keypair(0).unwrap();
     let compressed = CompressedPublicKey::try_from(public_key).unwrap();
     let funding_wallet = Address::p2wpkh(&compressed, network);
-    let regtest_wallet = bitcoin_client.init_wallet(network, "test_wallet").unwrap();
+    let regtest_wallet = bitcoin_client.init_wallet("test_wallet").unwrap();
 
     info!(
         "{} Mine {} blocks to address {:?}",
