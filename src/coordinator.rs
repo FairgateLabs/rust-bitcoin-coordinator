@@ -23,7 +23,7 @@ use protocol_builder::{
     builder::ProtocolBuilder,
     types::{output::SpeedupData, Utxo},
 };
-use std::rc::Rc;
+use std::{ops::Add, rc::Rc};
 use storage_backend::storage::Storage;
 use tracing::{error, info, warn};
 
@@ -670,6 +670,7 @@ impl BitcoinCoordinator {
         let total_sats = parent_total_sats + child_total_sats;
         let total_fee = (total_sats as f64 * bump_fee_percentage).ceil().round() as u64;
         let total_fee = total_fee
+            .add(1)  // there is a round error somewhere
             .saturating_sub(parent_amount_outputs as u64)
             .saturating_sub(parent_vbytes as u64);
 
