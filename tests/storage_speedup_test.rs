@@ -4,6 +4,7 @@ use bitcoin::{
 };
 use bitcoin_coordinator::{
     errors::BitcoinCoordinatorStoreError,
+    settings::MAX_LIMIT_UNCONFIRMED_PARENTS,
     speedup::SpeedupStore,
     types::{CoordinatedSpeedUpTransaction, SpeedupState},
 };
@@ -34,11 +35,15 @@ fn dummy_speedup_tx(
     is_replace: bool,
     block_height: u32,
 ) -> CoordinatedSpeedUpTransaction {
+    let tx_id_2 = generate_random_txid();
+    let tx_id_3 = generate_random_txid();
+    let tx_id_4 = generate_random_txid();
+
     CoordinatedSpeedUpTransaction::new(
         *txid,
-        vec![],
-        dummy_utxo(txid),
-        dummy_utxo(txid),
+        vec![tx_id_2, tx_id_3, tx_id_4],
+        dummy_utxo(&txid),
+        dummy_utxo(&txid),
         is_replace,
         block_height,
         state,
@@ -302,6 +307,98 @@ fn test_save_speedup_overwrites() -> Result<(), anyhow::Error> {
     let fetched2 = store.get_speedup(&txid)?;
     assert_eq!(fetched2.state, SpeedupState::Dispatched);
     // assert_eq!(fetched2.block_height, 999);
+
+    clear_output();
+    Ok(())
+}
+
+#[test]
+fn test_get_unconfirmed_txs_count() -> Result<(), anyhow::Error> {
+    let store = create_store();
+    let txid = generate_random_txid();
+    // It has 3 child txs.
+    let max_unconfirmed_parents = MAX_LIMIT_UNCONFIRMED_PARENTS;
+
+    let s = dummy_speedup_tx(&txid, SpeedupState::Dispatched, false, 0);
+    store.save_speedup(s)?;
+
+    let txid3 = generate_random_txid();
+    let s3 = dummy_speedup_tx(&txid3, SpeedupState::Confirmed, false, 0);
+    store.save_speedup(s3)?;
+    let count = store.get_available_unconfirmed_txs()?;
+    assert_eq!(count, max_unconfirmed_parents);
+
+    let s = dummy_speedup_tx(&txid, SpeedupState::Dispatched, false, 0);
+    let child_tx_ids = s.child_tx_ids.len() as u32;
+    store.save_speedup(s)?;
+
+    let count = store.get_available_unconfirmed_txs()?;
+    let mut count_to_validate = max_unconfirmed_parents - (child_tx_ids + 1);
+    assert_eq!(count, count_to_validate);
+
+    let txid2 = generate_random_txid();
+    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Dispatched, false, 0);
+    store.save_speedup(s2)?;
+
+    let count = store.get_available_unconfirmed_txs()?;
+    count_to_validate -= child_tx_ids + 1;
+    assert_eq!(count, count_to_validate);
+
+    let txid2 = generate_random_txid();
+    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Confirmed, false, 0);
+    store.save_speedup(s2)?;
+
+    let count = store.get_available_unconfirmed_txs()?;
+    assert_eq!(count, max_unconfirmed_parents);
+
+    let txid2 = generate_random_txid();
+    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Dispatched, false, 0);
+    store.save_speedup(s2)?;
+
+    let count = store.get_available_unconfirmed_txs()?;
+    assert_eq!(count, max_unconfirmed_parents - (child_tx_ids + 1));
+
+    let txid2 = generate_random_txid();
+    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Dispatched, true, 0);
+    store.save_speedup(s2)?;
+
+    let count = store.get_available_unconfirmed_txs()?;
+    assert_eq!(count, 0);
+
+    let txid2 = generate_random_txid();
+    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Confirmed, true, 0);
+    store.save_speedup(s2)?;
+
+    let count = store.get_available_unconfirmed_txs()?;
+    assert_eq!(count, max_unconfirmed_parents);
+
+    let txid2 = generate_random_txid();
+    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Dispatched, true, 0);
+    store.save_speedup(s2)?;
+
+    let count = store.get_available_unconfirmed_txs()?;
+    assert_eq!(count, max_unconfirmed_parents);
+
+    let txid2 = generate_random_txid();
+    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Dispatched, true, 0);
+    store.save_speedup(s2)?;
+
+    let count = store.get_available_unconfirmed_txs()?;
+    assert_eq!(count, max_unconfirmed_parents);
+
+    let txid2 = generate_random_txid();
+    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Finalized, true, 0);
+    store.save_speedup(s2)?;
+
+    let count = store.get_available_unconfirmed_txs()?;
+    assert_eq!(count, max_unconfirmed_parents);
+
+    let txid2 = generate_random_txid();
+    let s2 = dummy_speedup_tx(&txid2, SpeedupState::Confirmed, true, 0);
+    store.save_speedup(s2)?;
+
+    let count = store.get_available_unconfirmed_txs()?;
+    assert_eq!(count, max_unconfirmed_parents);
 
     clear_output();
     Ok(())

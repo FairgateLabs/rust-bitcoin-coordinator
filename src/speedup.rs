@@ -1,4 +1,5 @@
 use crate::errors::BitcoinCoordinatorStoreError;
+use crate::settings::{MAX_LIMIT_UNCONFIRMED_PARENTS, MIN_UNCONFIRMED_TXS_FOR_CPFP};
 use crate::storage::BitcoinCoordinatorStore;
 use crate::types::{CoordinatedSpeedUpTransaction, SpeedupState};
 use bitcoin::Txid;
@@ -18,19 +19,16 @@ pub trait SpeedupStore {
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
 
-    /// Saves a speedup transaction to the list of speedups.
     fn save_speedup(
         &self,
         speedup: CoordinatedSpeedUpTransaction,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
-    /// Gets a speedup transaction by its txid.
     fn get_speedup(
         &self,
         txid: &Txid,
     ) -> Result<CoordinatedSpeedUpTransaction, BitcoinCoordinatorStoreError>;
 
-    /// Gets the list of speedups that have not been confirmed.
     fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
 
     // This function will return the last speedup (CPFP) transaction to be bumped with RBF + the amount of RBF that were done to it.
@@ -46,10 +44,13 @@ pub trait SpeedupStore {
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn has_reached_max_unconfirmed_speedups(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
+
+    fn get_available_unconfirmed_txs(&self) -> Result<u32, BitcoinCoordinatorStoreError>;
 }
 
 enum SpeedupStoreKey {
     PendingSpeedUpList,
+    // SpeedupInfo,
     SpeedUpTransaction(Txid),
 }
 
@@ -84,6 +85,42 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         self.save_speedup(funding_to_speedup)?;
 
         Ok(())
+    }
+
+    fn get_available_unconfirmed_txs(&self) -> Result<u32, BitcoinCoordinatorStoreError> {
+        let speedups = self.get_all_pending_speedups()?;
+
+        let mut available_utxos = MAX_LIMIT_UNCONFIRMED_PARENTS;
+
+        let mut is_rbf_active = false;
+
+        for speedup in speedups.iter() {
+            // In case there is a RBF at the top, we neccesary need to find a confirmed RBF
+            // to be able to fund otherwise there is no capacity for funding unconfirmed txs.
+            if is_rbf_active && !speedup.is_rbf {
+                return Ok(0);
+            }
+
+            if speedup.state == SpeedupState::Confirmed || speedup.state == SpeedupState::Finalized
+            {
+                return Ok(available_utxos);
+            }
+
+            if speedup.is_rbf && speedup.state == SpeedupState::Dispatched {
+                is_rbf_active = true;
+                continue;
+            }
+
+            if is_rbf_active && speedup.is_rbf {
+                return Ok(0);
+            }
+
+            let cpfp_tx = 1;
+            let to_subtract = speedup.child_tx_ids.len() as u32 + cpfp_tx;
+            available_utxos = available_utxos.saturating_sub(to_subtract);
+        }
+
+        Ok(available_utxos)
     }
 
     fn get_funding(&self) -> Result<Option<Utxo>, BitcoinCoordinatorStoreError> {
@@ -194,9 +231,19 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         Ok(pending_speedups)
     }
 
+    /// Determines if a speedup (CPFP) transaction can be created and dispatched.
+    ///
+    /// Returns `true` if:
+    ///   - There is a funding transaction available to pay for the speedup.
+    ///   - There are enough available unconfirmed transaction slots to satisfy Bitcoin's mempool chain limit policy.
+    ///     (At least `MIN_UNCONFIRMED_TXS_FOR_CPFP` unconfirmed transactions are required: one for the CPFP itself and at least one unconfirmed output to spend.)
     fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError> {
         let funding = self.get_funding()?;
-        Ok(funding.is_some())
+        let available_unconfirmed_txs = self.get_available_unconfirmed_txs()?;
+        let is_funding_available = funding.is_some();
+        let is_enough_unconfirmed_txs = available_unconfirmed_txs >= MIN_UNCONFIRMED_TXS_FOR_CPFP;
+
+        Ok(is_funding_available && is_enough_unconfirmed_txs)
     }
 
     fn save_speedup(
