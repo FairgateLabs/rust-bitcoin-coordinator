@@ -15,5 +15,5 @@ $ git clone git@github.com:FairgateLabs/rust-bitcoin-coordinator.git
 If you make some changes please run tests to verify everything still working as expected.
 
 ```
-cargo test
+cargo test -- --ignored
 ```
