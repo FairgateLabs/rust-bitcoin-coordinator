@@ -23,7 +23,7 @@ use protocol_builder::{
     builder::ProtocolBuilder,
     types::{output::SpeedupData, Utxo},
 };
-use std::{ops::Add, rc::Rc};
+use std::rc::Rc;
 use storage_backend::storage::Storage;
 use tracing::{error, info, warn};
 
