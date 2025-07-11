@@ -580,7 +580,7 @@ impl BitcoinCoordinator {
         &self,
         txs_data: &Vec<CoordinatedTransaction>,
         funding: &Utxo,
-        fee_porcentage: f64,
+        bump_fee_percentage: f64,
         is_rbf: bool,
     ) -> Result<(Transaction, u64), BitcoinCoordinatorError> {
         let speedups_data: Vec<SpeedupData> = txs_data
@@ -588,53 +588,60 @@ impl BitcoinCoordinator {
             .map(|tx_data| tx_data.speedup_data.as_ref().unwrap().clone())
             .collect();
 
-        // SMALL TRICK:
-        // - Create the child tx with an dummy fee to get the vsize of the tx.
-        // - Then we use child_vbytes to calculate the total fee.
-        // - Now we have the total fee, we can create the speedup tx.
-        let speedup_trick_vb = (ProtocolBuilder {})
-            .speedup_transactions(
-                speedups_data.as_slice(),
-                funding.clone(),
-                &funding.pub_key,
-                10000, // Dummy fee
-                &self.key_manager,
-            )?
-            .vsize();
+        let estimate_fee: u64 = self.client.estimate_smart_fee()?;
 
-        let speedup_fee =
-            self.calculate_speedup_fee(&txs_data, speedup_trick_vb, fee_porcentage, is_rbf)?;
+        // TRICK:
+        // - Create the child transaction with a dummy fee to determine the transaction's virtual size (vsize).
+        // - Use the vsize of the child transaction to calculate the total fee required.
+        // - With the total fee calculated, create the final speedup transaction.
+        // - If the child vsize is greater than or equal to the final speedup vsize,
+        //  means the final speedup has sufficient fee.
+        // - Otherwise, we need to increase the fee, we will use the final speedup vsize as the new child vsize.
 
-        let speedup_tx = (ProtocolBuilder {}).speedup_transactions(
-            &speedups_data,
-            funding.clone(),
-            &funding.pub_key,
-            speedup_fee,
-            &self.key_manager,
-        )?;
+        let mut child_vsize = 0;
 
-        if speedup_tx.vsize() != speedup_trick_vb {
-            // Recalculate the speedup transaction fee if there's a discrepancy of 1 in the vsize.
-            // Use speedup_tx.vsize() + 1 for the recalculation.
-            let speedup_fee_rec = self.calculate_speedup_fee(
+        loop {
+            let dummy_speedup_vsize = (ProtocolBuilder {})
+                .speedup_transactions(
+                    speedups_data.as_slice(),
+                    funding.clone(),
+                    &funding.pub_key,
+                    10000, // Dummy fee
+                    &self.key_manager,
+                )?
+                .vsize();
+
+            if child_vsize == 0 {
+                child_vsize = dummy_speedup_vsize;
+            }
+
+            let speedup_fee = self.calculate_speedup_fee(
                 &txs_data,
-                speedup_trick_vb.add(1),
-                fee_porcentage,
+                child_vsize,
+                bump_fee_percentage,
+                estimate_fee,
                 is_rbf,
             )?;
 
-            let speedup_tx_rec = (ProtocolBuilder {}).speedup_transactions(
+            let final_speedup_tx = (ProtocolBuilder {}).speedup_transactions(
                 &speedups_data,
                 funding.clone(),
                 &funding.pub_key,
-                speedup_fee_rec,
+                speedup_fee,
                 &self.key_manager,
             )?;
 
-            return Ok((speedup_tx_rec, speedup_fee_rec));
-        }
+            let final_speedup_vsize = final_speedup_tx.vsize();
 
-        Ok((speedup_tx, speedup_fee))
+            if child_vsize >= final_speedup_vsize {
+                // If the child vsize is greater than or equal to the final speedup vsize,
+                //  means the final speedup has sufficient fee.
+                return Ok((final_speedup_tx, speedup_fee));
+            } else {
+                // Otherwise, we need to increase the fee, we will use the final speedup vsize as the new child vsize.
+                child_vsize = final_speedup_vsize;
+            }
+        }
     }
 
     fn rbf_last_speedup(&self) -> Result<(), BitcoinCoordinatorError> {
@@ -668,13 +675,12 @@ impl BitcoinCoordinator {
         parents: &[CoordinatedTransaction],
         child_vbytes: usize,
         bump_fee_percentage: f64,
+        mut estimate_fee: u64,
         is_rbf: bool,
     ) -> Result<u64, BitcoinCoordinatorError> {
         // Assumes that each parent transaction pays 1 sat/vbyte.
         // To calculate the total fee, we need to know the vsize of the child (CPFP) + the vsize of each parent.
         // Also we have to subtract the parent's transaction vbytes and the total output amounts once.
-
-        let mut estimate_fee: u64 = self.client.estimate_smart_fee()?;
 
         if estimate_fee > self.settings.max_feerate_sat_vb {
             warn!(
