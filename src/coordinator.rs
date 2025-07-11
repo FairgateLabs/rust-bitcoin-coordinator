@@ -527,33 +527,8 @@ impl BitcoinCoordinator {
             return Ok(());
         }
 
-        // TODO: This logic may need to be updated to use OutputType from the protocol builder for greater flexibility.
-        // Currently, we derive the change address as a P2PKH address from the funding UTXO's public key.
-        //let compressed = CompressedPublicKey::try_from(funding.pub_key).unwrap();
-        //let change_address = Address::p2wpkh(&compressed, self.network);
-
-        let speedups_data: Vec<SpeedupData> = txs_data
-            .iter()
-            .map(|tx_data| tx_data.speedup_data.as_ref().unwrap().clone())
-            .collect();
-
-        // SMALL TICK:
-        // - Create the child tx with an dummy fee to get the vsize of the tx.
-        // - Then we use child_vbytes to calculate the total fee.
-        // - Now we have the total fee, we can create the speedup tx.
-        let child_vbytes = (ProtocolBuilder {})
-            .speedup_transactions(
-                speedups_data.as_slice(),
-                funding.clone(),
-                &funding.pub_key,
-                10000, // Dummy fee
-                &self.key_manager,
-            )?
-            .vsize();
-
-        let speedup_fee =
-            self.calculate_speedup_fee(&txs_data, child_vbytes, fee_porcentage, is_rbf)?;
-
+        let (speedup_tx, speedup_fee) =
+            self.get_speedup_tx(&txs_data, &funding, fee_porcentage, is_rbf)?;
         // Validate that funding can cover the fee
         if speedup_fee > funding.amount {
             let news =
@@ -561,14 +536,6 @@ impl BitcoinCoordinator {
             self.store.add_news(news)?;
             return Ok(());
         }
-
-        let speedup_tx = (ProtocolBuilder {}).speedup_transactions(
-            &speedups_data,
-            funding.clone(),
-            &funding.pub_key,
-            speedup_fee,
-            &self.key_manager,
-        )?;
 
         let speedup_tx_id = speedup_tx.compute_txid();
         let txids: Vec<Txid> = txs_data.iter().map(|tx| tx.tx_id).collect();
@@ -609,6 +576,74 @@ impl BitcoinCoordinator {
         Ok(())
     }
 
+    fn get_speedup_tx(
+        &self,
+        txs_data: &Vec<CoordinatedTransaction>,
+        funding: &Utxo,
+        bump_fee_percentage: f64,
+        is_rbf: bool,
+    ) -> Result<(Transaction, u64), BitcoinCoordinatorError> {
+        let speedups_data: Vec<SpeedupData> = txs_data
+            .iter()
+            .map(|tx_data| tx_data.speedup_data.as_ref().unwrap().clone())
+            .collect();
+
+        let estimate_fee: u64 = self.client.estimate_smart_fee()?;
+
+        // TRICK:
+        // - Create the child transaction with a dummy fee to determine the transaction's virtual size (vsize).
+        // - Use the vsize of the child transaction to calculate the total fee required.
+        // - With the total fee calculated, create the final speedup transaction.
+        // - If the child vsize is greater than or equal to the final speedup vsize,
+        //  means the final speedup has sufficient fee.
+        // - Otherwise, we need to increase the fee, we will use the final speedup vsize as the new child vsize.
+
+        let mut child_vsize = 0;
+
+        loop {
+            let dummy_speedup_vsize = (ProtocolBuilder {})
+                .speedup_transactions(
+                    speedups_data.as_slice(),
+                    funding.clone(),
+                    &funding.pub_key,
+                    10000, // Dummy fee
+                    &self.key_manager,
+                )?
+                .vsize();
+
+            if child_vsize == 0 {
+                child_vsize = dummy_speedup_vsize;
+            }
+
+            let speedup_fee = self.calculate_speedup_fee(
+                &txs_data,
+                child_vsize,
+                bump_fee_percentage,
+                estimate_fee,
+                is_rbf,
+            )?;
+
+            let final_speedup_tx = (ProtocolBuilder {}).speedup_transactions(
+                &speedups_data,
+                funding.clone(),
+                &funding.pub_key,
+                speedup_fee,
+                &self.key_manager,
+            )?;
+
+            let final_speedup_vsize = final_speedup_tx.vsize();
+
+            if child_vsize >= final_speedup_vsize {
+                // If the child vsize is greater than or equal to the final speedup vsize,
+                //  means the final speedup has sufficient fee.
+                return Ok((final_speedup_tx, speedup_fee));
+            } else {
+                // Otherwise, we need to increase the fee, we will use the final speedup vsize as the new child vsize.
+                child_vsize = final_speedup_vsize;
+            }
+        }
+    }
+
     fn rbf_last_speedup(&self) -> Result<(), BitcoinCoordinatorError> {
         // When this function is called, we know that the last speedup exists to be replaced.
         let (speedup, replace_speedup_count) = self.store.get_last_speedup_to_rbf()?.unwrap();
@@ -640,13 +675,12 @@ impl BitcoinCoordinator {
         parents: &[CoordinatedTransaction],
         child_vbytes: usize,
         bump_fee_percentage: f64,
+        mut estimate_fee: u64,
         is_rbf: bool,
     ) -> Result<u64, BitcoinCoordinatorError> {
         // Assumes that each parent transaction pays 1 sat/vbyte.
         // To calculate the total fee, we need to know the vsize of the child (CPFP) + the vsize of each parent.
         // Also we have to subtract the parent's transaction vbytes and the total output amounts once.
-
-        let mut estimate_fee: u64 = self.client.estimate_smart_fee()?;
 
         if estimate_fee > self.settings.max_feerate_sat_vb {
             warn!(
@@ -690,15 +724,12 @@ impl BitcoinCoordinator {
         let total_sats = parent_total_sats + child_total_sats;
         let total_fee = (total_sats as f64 * bump_fee_percentage).ceil().round() as u64;
         let total_fee = total_fee
-            .add(1)  // there is a round error somewhere
             .saturating_sub(parent_amount_outputs as u64)
             .saturating_sub(parent_vbytes as u64);
 
         if is_rbf && total_fee < child_total_sats as u64 {
-            // Sometimes new calculated fee for the child tx is less than the previous child tx (+-1).
-            // In this case we add 10 sats to the fee to avoid underpaying.
-            let fee_to_add = child_total_sats as u64 + 10;
-            return Ok(fee_to_add);
+            // total fee can not be less than the child tx total sats.
+            return Ok(child_total_sats as u64);
         }
 
         Ok(total_fee)
