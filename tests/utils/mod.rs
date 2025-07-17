@@ -122,7 +122,7 @@ fn create_tx_to_speedup(
     let mut protocol = Protocol::new("transfer_tx");
     protocol.add_external_transaction("origin").unwrap();
     protocol
-        .add_unkwnoun_outputs("origin", outpoint.vout)
+        .add_unknown_outputs("origin", outpoint.vout)
         .unwrap();
     protocol
         .add_connection(
