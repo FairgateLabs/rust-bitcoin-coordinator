@@ -25,7 +25,7 @@ use protocol_builder::{
 };
 use std::rc::Rc;
 use storage_backend::storage::Storage;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 pub struct BitcoinCoordinator {
     monitor: MonitorType,
@@ -214,7 +214,7 @@ impl BitcoinCoordinator {
                     txs_sent,
                     funding.unwrap(),
                     bump_fee_porcentage,
-                    false,
+                    None,
                 )?;
             }
         }
@@ -513,7 +513,7 @@ impl BitcoinCoordinator {
         txs_data: Vec<CoordinatedTransaction>,
         funding: Utxo,
         fee_porcentage: f64,
-        is_rbf: bool,
+        cpfp_id_to_replace: Option<Txid>,
     ) -> Result<(), BitcoinCoordinatorError> {
         // Check if the funding amount is below the minimum required for a speedup.
         // If so, notify via CoordinatorNews and exit early.
@@ -526,6 +526,8 @@ impl BitcoinCoordinator {
             self.store.add_news(news)?;
             return Ok(());
         }
+
+        let is_rbf = cpfp_id_to_replace.is_some();
 
         let (speedup_tx, speedup_fee) =
             self.get_speedup_tx(&txs_data, &funding, fee_porcentage, is_rbf)?;
@@ -541,15 +543,21 @@ impl BitcoinCoordinator {
         let txids: Vec<Txid> = txs_data.iter().map(|tx| tx.tx_id).collect();
 
         let speedup_type = if is_rbf { "RBF" } else { "CPFP" };
+        let mut cpfp_to_replace = String::new();
+
+        if is_rbf {
+            cpfp_to_replace = format!("| CPFP_TO_REPLACE({})", cpfp_id_to_replace.unwrap());
+        }
 
         info!(
-            "{} New {} Transaction({}) | Fee({}) | Transactions#({}) | FundingTx({})",
+            "{} New {} Transaction({}) | Fee({}) | Transactions#({}) | FundingTx({}) {}",
             style("Coordinator").green(),
             speedup_type,
             style(speedup_tx_id).yellow(),
             style(speedup_fee).blue(),
             style(txids.len()).blue(),
-            style(funding.txid).blue()
+            style(funding.txid).blue(),
+            style(cpfp_to_replace).blue(),
         );
 
         let new_funding_utxo = Utxo::new(
@@ -664,7 +672,7 @@ impl BitcoinCoordinator {
             txs_to_speedup,
             speedup.prev_funding,
             bump_fee_porcentage,
-            true,
+            Some(speedup.tx_id),
         )?;
 
         Ok(())
@@ -720,19 +728,42 @@ impl BitcoinCoordinator {
         // We substract the vbytes of the parents and the amount of outputs.
         // Because the child pays for the parents and the parents pay for the outputs
         let parent_total_sats = parent_vbytes * estimate_fee as usize;
-        let child_total_sats = child_vbytes * estimate_fee as usize;
-        let total_sats = parent_total_sats + child_total_sats;
-        let total_fee = (total_sats as f64 * bump_fee_percentage).ceil().round() as u64;
-        let total_fee = total_fee
-            .saturating_sub(parent_amount_outputs as u64)
-            .saturating_sub(parent_vbytes as u64);
+        let mut child_total_sats = child_vbytes * estimate_fee as usize;
 
-        if is_rbf && total_fee < child_total_sats as u64 {
-            // total fee can not be less than the child tx total sats.
-            return Ok(child_total_sats as u64);
+        if is_rbf {
+            // Bitcoin Policy (https://github.com/bitcoin/bitcoin/blob/master/doc/policy/mempool-replacements.md?plain=1#L32):
+            // The additional fees (difference between absolute fee paid by the replacement transaction and the
+            // sum paid by the original transactions) pays for the replacement transaction's bandwidth at or
+            // above the rate set by the node's incremental relay feerate. For example, if the incremental relay
+            // feerate is 1 satoshi/vB and the replacement transaction is 500 virtual bytes total, then the
+            // replacement pays a fee at least 500 satoshis higher than the sum of the original transactions.
+
+            // *Rationale*: Try to prevent DoS attacks where an attacker causes the network to repeatedly relay
+            // transactions each paying a tiny additional amount in fees, e.g. just 1 satoshi.
+            child_total_sats = child_total_sats * 2;
         }
 
-        Ok(total_fee)
+        let total_sats = parent_total_sats + child_total_sats;
+        let total_fee = total_sats
+            .saturating_sub(parent_amount_outputs) // amount comming from the parents to discount
+            .saturating_sub(parent_vbytes); // min relay fee of the parents to discount
+        let total_fee_bumped = (total_fee as f64 * bump_fee_percentage).ceil().round() as u64;
+
+        // TODO IMPORTANT:
+        // To accurately calculate the fee when the estimated fee changes over time, it is essential to retain the estimate_fee
+        // used for each CPFP and recalculate the new value if the estimate_fee differs. Failing to do so may result in overpayment or underpayment.
+        // In this scenario, we need to compute the fee difference between the parent transactions already sent in the previous CPFP chain and the new estimate_fee value.
+
+        debug!(
+            "{} EstimateNetworkFee({}) | ParentTotalSats({}) | CPFPTotalSats({}) | BumpFeePercentage({})",
+            style("Coordinator").green(),
+            style(estimate_fee).red(),
+            style(parent_total_sats).red(),
+            style(child_total_sats).red(),
+            style(bump_fee_percentage).red(),
+        );
+
+        Ok(total_fee_bumped)
     }
 
     fn get_bump_fee_porcentage_strategy(
@@ -780,6 +811,15 @@ impl BitcoinCoordinator {
                 .saturating_sub(speedup.broadcast_block_height + replace_speedup_count)
                 >= self.settings.min_blocks_before_rbf
             {
+                debug!(
+                    "{} RBF condition reached | CurrentHeight({}) | BroadcastHeight({}) | ReplaceCount({}) | MinBlocksBeforeRBF({})",
+                    style("Coordinator").green(),
+                    style(current_block_height).blue(),
+                    style(speedup.broadcast_block_height).blue(),
+                    style(replace_speedup_count).blue(),
+                    style(self.settings.min_blocks_before_rbf).blue(),
+                );
+
                 info!(
                     "{} RBF last speedup | CurrentHeight({}) | BroadcastHeight({}) | ReplaceCount({}) ",
                     style("Coordinator").green(),
@@ -787,6 +827,7 @@ impl BitcoinCoordinator {
                     style(speedup.broadcast_block_height).blue(),
                     style(replace_speedup_count).blue(),
                 );
+
                 return Ok(true);
             }
         }
