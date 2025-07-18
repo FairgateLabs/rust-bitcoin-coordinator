@@ -1,6 +1,13 @@
 # Bitcoin Coordinator
 Bitcoin Coordinator is a Rust-based project that serves as a core component for Bitvmx client for transaction management and monitoring. This project integrates several key components:
 
+## ⚠️ Disclaimer
+
+This library is currently under development and may not be fully stable.
+It is not production-ready, has not been audited, and future updates may introduce breaking changes without preserving backward compatibility.
+
+## Features
+
 - **Transaction Monitor**: Uses `bitvmx-transaction-monitor` for monitoring bitcoin transaction
 - **Storage**: Integrates with `rust-bitvmx-storage-backend` for persistent data storage.
 - **Key Management**: Employs `bitvmx-key-manager` for cryptographic key operations.
