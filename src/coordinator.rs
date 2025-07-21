@@ -255,8 +255,6 @@ impl BitcoinCoordinator {
                     style(speedup_data.tx_id).yellow()
                 );
 
-                return Err(BitcoinCoordinatorError::BitcoinClientError(e));
-
                 let news = CoordinatorNews::DispatchTransactionError(
                     speedup_data.tx_id,
                     CPFP_TRANSACTION_CONTEXT.to_string(),
