@@ -255,6 +255,8 @@ impl BitcoinCoordinator {
                     style(speedup_data.tx_id).yellow()
                 );
 
+                return Err(BitcoinCoordinatorError::BitcoinClientError(e));
+
                 let news = CoordinatorNews::DispatchTransactionError(
                     speedup_data.tx_id,
                     CPFP_TRANSACTION_CONTEXT.to_string(),
@@ -728,7 +730,12 @@ impl BitcoinCoordinator {
         // We substract the vbytes of the parents and the amount of outputs.
         // Because the child pays for the parents and the parents pay for the outputs
         let parent_total_sats = parent_vbytes * estimate_fee as usize;
-        let mut child_total_sats = child_vbytes * estimate_fee as usize;
+        let child_total_sats = child_vbytes * estimate_fee as usize;
+        let total_sats = parent_total_sats + child_total_sats;
+
+        let mut total_fee = total_sats
+            .saturating_sub(parent_amount_outputs) // amount comming from the parents to discount
+            .saturating_sub(parent_vbytes); // min relay fee of the parents to discount
 
         if is_rbf {
             // Bitcoin Policy (https://github.com/bitcoin/bitcoin/blob/master/doc/policy/mempool-replacements.md?plain=1#L32):
@@ -740,13 +747,9 @@ impl BitcoinCoordinator {
 
             // *Rationale*: Try to prevent DoS attacks where an attacker causes the network to repeatedly relay
             // transactions each paying a tiny additional amount in fees, e.g. just 1 satoshi.
-            child_total_sats = child_total_sats * 2;
+            total_fee = child_total_sats * 2;
         }
 
-        let total_sats = parent_total_sats + child_total_sats;
-        let total_fee = total_sats
-            .saturating_sub(parent_amount_outputs) // amount comming from the parents to discount
-            .saturating_sub(parent_vbytes); // min relay fee of the parents to discount
         let total_fee_bumped = (total_fee as f64 * bump_fee_percentage).ceil().round() as u64;
 
         // TODO IMPORTANT:
@@ -755,12 +758,15 @@ impl BitcoinCoordinator {
         // In this scenario, we need to compute the fee difference between the parent transactions already sent in the previous CPFP chain and the new estimate_fee value.
 
         debug!(
-            "{} EstimateNetworkFee({}) | ParentTotalSats({}) | CPFPTotalSats({}) | BumpFeePercentage({})",
+            "{} EstimateNetworkFee({}) | ParentTotalSats({}) | ChildTotalSats({}) | BumpFeePercentage({}) | ParentAmountOutputs({}) | ParentVbytes({}) | TotalFee({})",
             style("Coordinator").green(),
             style(estimate_fee).red(),
             style(parent_total_sats).red(),
             style(child_total_sats).red(),
             style(bump_fee_percentage).red(),
+            style(parent_amount_outputs).red(),
+            style(parent_vbytes).red(),
+            style(total_fee_bumped).red(),
         );
 
         Ok(total_fee_bumped)
