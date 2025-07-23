@@ -32,7 +32,7 @@ pub trait SpeedupStore {
     fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
 
     // This function will return the last speedup (CPFP) transaction to be bumped with RBF + the amount of RBF that were done to it.
-    fn get_last_speedup_to_rbf(
+    fn get_last_speedup(
         &self,
     ) -> Result<Option<(CoordinatedSpeedUpTransaction, u32)>, BitcoinCoordinatorStoreError>;
 
@@ -80,6 +80,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             false,
             0,
             SpeedupState::Finalized,
+            1.0,
         );
 
         self.save_speedup(funding_to_speedup)?;
@@ -336,7 +337,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn get_last_speedup_to_rbf(
+    fn get_last_speedup(
         &self,
     ) -> Result<Option<(CoordinatedSpeedUpTransaction, u32)>, BitcoinCoordinatorStoreError> {
         let speedups = self.get_pending_speedups()?;

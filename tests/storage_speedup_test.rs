@@ -47,6 +47,7 @@ fn dummy_speedup_tx(
         is_replace,
         block_height,
         state,
+        0.0,
     )
 }
 

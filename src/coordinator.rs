@@ -162,7 +162,6 @@ impl BitcoinCoordinator {
             );
             // Check if we can send transactions or we stop the process until CPFP transactions start to be confirmed.
             if self.store.can_speedup()? {
-                // TODO: Transaction that don't need speedup should be dispatched
                 self.speedup_and_dispatch_in_batch(txs_to_dispatch_with_speedup)?;
             } else {
                 warn!("{} Can not speedup", style("Coordinator").green());
@@ -200,8 +199,6 @@ impl BitcoinCoordinator {
             // Only create a CPFP (Child Pays For Parent) transaction if there are transactions that were successfully sent in this batch.
             // If no transactions were sent, skip CPFP creation for this batch.
             if !txs_sent.is_empty() {
-                let bump_fee_porcentage = self.get_bump_fee_porcentage_strategy(0)?;
-
                 let funding = self.store.get_funding()?;
 
                 if funding.is_none() {
@@ -210,13 +207,37 @@ impl BitcoinCoordinator {
                     return Ok(());
                 }
 
-                self.create_and_send_cpfp_tx(
-                    txs_sent,
-                    funding.unwrap(),
-                    bump_fee_porcentage,
-                    None,
-                )?;
+                self.create_and_send_cpfp_tx(txs_sent, funding.unwrap(), 1.0, None)?;
             }
+        }
+
+        Ok(())
+    }
+
+    fn speedup_cpfp_tx(&self) -> Result<(), BitcoinCoordinatorError> {
+        // This function is used to speed up a CPFP (Child Pays For Parent) transaction.
+        // We create another CPFP transaction to pay for the previous one more.
+
+        let funding = self.store.get_funding()?;
+
+        if funding.is_none() {
+            let news = CoordinatorNews::FundingNotFound;
+            self.store.add_news(news)?;
+            return Ok(());
+        }
+
+        let last_speedup = self.store.get_last_speedup()?;
+
+        if let Some((speedup, _)) = last_speedup {
+            let bump_fee_porcentage =
+                self.get_bump_fee_porcentage_strategy(speedup.bump_fee_porcentage_used)?;
+
+            info!(
+                "{} Boosting CPFP Transaction({})",
+                style("Coordinator").green(),
+                style(speedup.tx_id).yellow()
+            );
+            self.create_and_send_cpfp_tx(vec![], funding.unwrap(), bump_fee_porcentage, None)?;
         }
 
         Ok(())
@@ -512,7 +533,7 @@ impl BitcoinCoordinator {
         &self,
         txs_data: Vec<CoordinatedTransaction>,
         funding: Utxo,
-        fee_porcentage: f64,
+        bump_fee: f64,
         cpfp_id_to_replace: Option<Txid>,
     ) -> Result<(), BitcoinCoordinatorError> {
         // Check if the funding amount is below the minimum required for a speedup.
@@ -530,7 +551,7 @@ impl BitcoinCoordinator {
         let is_rbf = cpfp_id_to_replace.is_some();
 
         let (speedup_tx, speedup_fee) =
-            self.get_speedup_tx(&txs_data, &funding, fee_porcentage, is_rbf)?;
+            self.get_speedup_tx(&txs_data, &funding, bump_fee, is_rbf)?;
         // Validate that funding can cover the fee
         if speedup_fee > funding.amount {
             let news =
@@ -550,7 +571,7 @@ impl BitcoinCoordinator {
         }
 
         info!(
-            "{} New {} Transaction({}) | Fee({}) | Transactions#({}) | FundingTx({}) {}",
+            "{} New {} Transaction({}) | Fee({}) | Transactions#({}) | FundingTx({}) {} | BumpFee({})",
             style("Coordinator").green(),
             speedup_type,
             style(speedup_tx_id).yellow(),
@@ -558,6 +579,7 @@ impl BitcoinCoordinator {
             style(txids.len()).blue(),
             style(funding.txid).blue(),
             style(cpfp_to_replace).blue(),
+            style(bump_fee).blue(),
         );
 
         let new_funding_utxo = Utxo::new(
@@ -577,6 +599,7 @@ impl BitcoinCoordinator {
             is_rbf,
             monitor_height,
             SpeedupState::Dispatched,
+            bump_fee,
         );
 
         self.dispatch_speedup(speedup_tx, speedup_data)?;
@@ -654,7 +677,7 @@ impl BitcoinCoordinator {
 
     fn rbf_last_speedup(&self) -> Result<(), BitcoinCoordinatorError> {
         // When this function is called, we know that the last speedup exists to be replaced.
-        let (speedup, replace_speedup_count) = self.store.get_last_speedup_to_rbf()?.unwrap();
+        let (speedup, replace_speedup_count) = self.store.get_last_speedup()?.unwrap();
 
         let child_tx_ids = speedup.child_tx_ids;
 
@@ -665,15 +688,26 @@ impl BitcoinCoordinator {
             txs_to_speedup.push(tx);
         }
 
-        let bump_fee_porcentage =
-            self.get_bump_fee_porcentage_strategy(replace_speedup_count + 1)?;
+        // We used the counting of replacements done as previous bump fee.
+        let new_bump_fee = self.get_bump_fee_porcentage_strategy(replace_speedup_count as f64)?;
 
         self.create_and_send_cpfp_tx(
             txs_to_speedup,
             speedup.prev_funding,
-            bump_fee_porcentage,
+            new_bump_fee,
             Some(speedup.tx_id),
         )?;
+
+        Ok(())
+    }
+
+    fn boost_speedup_again(&self) -> Result<(), BitcoinCoordinatorError> {
+        // Check if we can send transactions or we stop the process until CPFP transactions start to be confirmed.
+        if self.store.can_speedup()? {
+            self.speedup_cpfp_tx()?;
+        } else {
+            warn!("{} Can not speedup", style("Coordinator").green());
+        }
 
         Ok(())
     }
@@ -772,21 +806,20 @@ impl BitcoinCoordinator {
 
     fn get_bump_fee_porcentage_strategy(
         &self,
-        previous_count_rbf: u32,
+        prev_bump_fee: f64,
     ) -> Result<f64, BitcoinCoordinatorError> {
-        if previous_count_rbf == 0 {
+        if prev_bump_fee <= 0.0 {
             return Ok(1.0);
         }
 
-        // Strategy explanation:
-        // This function determines the bumping strategy for increasing the fee rate when performing a Speedup on a transaction.
-        // The input `previous_count_rbf` represents how many times the transaction has already been replaced/bumped.
-        // The current approach is simple: for each previous RBF, we multiply the count by 1.5 to get the new bump factor.
-        // For example, if this is the first RBF (previous_count_rbf == 1), the bump factor is 1.5.
-        // If this is the second RBF (previous_count_rbf == 2), the bump factor is 3.0, and so on.
-        // This means the fee rate increases linearly with the number of RBF attempts, scaled by 1.5.
+        // This method increases the previous bump fee by 50%.
+        // The `prev_bump_fee` parameter is the fee used in the last bump.
+        // The new bump factor is calculated by multiplying the previous bump fee by 1.5.
+        // For instance, if the previous bump fee was 1, the new bump factor becomes 1.5.
+        // If the previous bump fee was 2, the new bump factor becomes 3.0.
+        // This approach ensures a proportional increase in the fee rate with each bump attempt.
 
-        let bumped_feerate = previous_count_rbf as f64 * 1.5;
+        let bumped_feerate = prev_bump_fee * 1.5;
         Ok(bumped_feerate)
     }
 
@@ -802,7 +835,11 @@ impl BitcoinCoordinator {
             return Ok(true);
         }
 
-        let last_speedup = self.store.get_last_speedup_to_rbf()?;
+        Ok(false)
+    }
+
+    fn should_boost_speedup_again(&self) -> Result<bool, BitcoinCoordinatorError> {
+        let last_speedup = self.store.get_last_speedup()?;
 
         if let Some((speedup, replace_speedup_count)) = last_speedup {
             let current_block_height = self.monitor.get_monitor_height()?;
@@ -816,20 +853,12 @@ impl BitcoinCoordinator {
                 >= self.settings.min_blocks_before_rbf
             {
                 debug!(
-                    "{} RBF condition reached | CurrentHeight({}) | BroadcastHeight({}) | ReplaceCount({}) | MinBlocksBeforeRBF({})",
+                    "{} Last CPFP should be bumped | CurrentHeight({}) | BroadcastHeight({}) | ReplaceCount({}) | MinBlocksBeforeRBF({})",
                     style("Coordinator").green(),
                     style(current_block_height).blue(),
                     style(speedup.broadcast_block_height).blue(),
                     style(replace_speedup_count).blue(),
                     style(self.settings.min_blocks_before_rbf).blue(),
-                );
-
-                info!(
-                    "{} RBF last speedup | CurrentHeight({}) | BroadcastHeight({}) | ReplaceCount({}) ",
-                    style("Coordinator").green(),
-                    style(current_block_height).blue(),
-                    style(speedup.broadcast_block_height).blue(),
-                    style(replace_speedup_count).blue(),
                 );
 
                 return Ok(true);
@@ -858,10 +887,13 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         self.process_in_progress_txs()?;
         self.process_in_progress_speedup_txs()?;
 
-        let should_rbf_last_speedup = self.should_rbf_last_speedup()?;
-
-        if should_rbf_last_speedup {
+        if self.should_rbf_last_speedup()? {
             self.rbf_last_speedup()?;
+            return Ok(());
+        }
+
+        if self.should_boost_speedup_again()? {
+            self.boost_speedup_again()?;
         }
 
         Ok(())
