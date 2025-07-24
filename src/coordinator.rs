@@ -689,9 +689,9 @@ impl BitcoinCoordinator {
         }
 
         // The new_bump_fee will increase the previous bump fee from the CPFP used by adding the number of RBF operations performed + 1.
-        let new_bump_fee = self.get_bump_fee_porcentage_strategy(
-            speedup.bump_fee_porcentage_used + (replace_speedup_count + 1) as f64,
-        )?;
+        let increase_last_bump_fee =
+            speedup.bump_fee_porcentage_used + replace_speedup_count as f64 + 1.0;
+        let new_bump_fee = self.get_bump_fee_porcentage_strategy(increase_last_bump_fee)?;
 
         self.create_and_send_cpfp_tx(
             txs_to_speedup,
