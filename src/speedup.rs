@@ -31,10 +31,16 @@ pub trait SpeedupStore {
 
     fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
 
-    // This function will return the last speedup (CPFP) transaction to be bumped with RBF + the amount of RBF that were done to it.
+    // This function will return the last speedup (CPFP) transaction to be bumped with RBF + the last replacement speedup.
     fn get_last_speedup(
         &self,
-    ) -> Result<Option<(CoordinatedSpeedUpTransaction, u32)>, BitcoinCoordinatorStoreError>;
+    ) -> Result<
+        Option<(
+            CoordinatedSpeedUpTransaction,
+            Option<CoordinatedSpeedUpTransaction>,
+        )>,
+        BitcoinCoordinatorStoreError,
+    >;
 
     /// Updates the state of a speedup transaction (e.g., confirmed or finalized).
     fn update_speedup_state(
@@ -339,14 +345,23 @@ impl SpeedupStore for BitcoinCoordinatorStore {
 
     fn get_last_speedup(
         &self,
-    ) -> Result<Option<(CoordinatedSpeedUpTransaction, u32)>, BitcoinCoordinatorStoreError> {
+    ) -> Result<
+        Option<(
+            CoordinatedSpeedUpTransaction,
+            Option<CoordinatedSpeedUpTransaction>,
+        )>,
+        BitcoinCoordinatorStoreError,
+    > {
         let speedups = self.get_pending_speedups()?;
 
-        let mut replace_speedup_count = 0;
+        let mut last_rbf_tx = None;
 
         for speedup in speedups.iter() {
             if speedup.is_rbf && speedup.state == SpeedupState::Dispatched {
-                replace_speedup_count += 1;
+                if last_rbf_tx.is_none() {
+                    last_rbf_tx = Some(speedup.clone());
+                }
+
                 continue;
             }
 
@@ -355,7 +370,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
                 return Ok(None);
             }
 
-            return Ok(Some((speedup.clone(), replace_speedup_count)));
+            return Ok(Some((speedup.clone(), last_rbf_tx)));
         }
 
         Ok(None)
