@@ -677,7 +677,7 @@ impl BitcoinCoordinator {
 
     fn rbf_last_speedup(&self) -> Result<(), BitcoinCoordinatorError> {
         // When this function is called, we know that the last speedup exists to be replaced.
-        let (speedup, replace_speedup_count) = self.store.get_last_speedup()?.unwrap();
+        let (speedup, rbf_tx) = self.store.get_last_speedup()?.unwrap();
 
         let child_tx_ids = speedup.child_tx_ids;
 
@@ -688,8 +688,14 @@ impl BitcoinCoordinator {
             txs_to_speedup.push(tx);
         }
 
-        // We used the counting of replacements done as previous bump fee.
-        let new_bump_fee = self.get_bump_fee_porcentage_strategy(replace_speedup_count as f64)?;
+        // The new_bump_fee will increase the previous bump fee from the CPFP used by adding the number of RBF operations performed + 1.
+        let mut increase_last_bump_fee = speedup.bump_fee_porcentage_used;
+
+        if let Some(rbf_tx) = rbf_tx {
+            increase_last_bump_fee = rbf_tx.bump_fee_porcentage_used;
+        }
+
+        let new_bump_fee = self.get_bump_fee_porcentage_strategy(increase_last_bump_fee)?;
 
         self.create_and_send_cpfp_tx(
             txs_to_speedup,
@@ -825,6 +831,12 @@ impl BitcoinCoordinator {
         // If the previous bump fee was 2, the new bump factor becomes 3.0.
         // This approach ensures a proportional increase in the fee rate with each bump attempt.
 
+        info!(
+            "{} Bumping fee from {} to {}",
+            style("Coordinator").green(),
+            style(prev_bump_fee).blue(),
+            style(prev_bump_fee * 1.5).blue(),
+        );
         let bumped_feerate = prev_bump_fee * 1.5;
         Ok(bumped_feerate)
     }
@@ -847,23 +859,27 @@ impl BitcoinCoordinator {
     fn should_boost_speedup_again(&self) -> Result<bool, BitcoinCoordinatorError> {
         let last_speedup = self.store.get_last_speedup()?;
 
-        if let Some((speedup, replace_speedup_count)) = last_speedup {
+        if let Some((speedup, rbf_tx)) = last_speedup {
             let current_block_height = self.monitor.get_monitor_height()?;
             // This block checks if the last speedup transaction should be replaced-by-fee.
             // It retrieves the last speedup transaction and the number of times it has already been replaced (replace_speedup_count).
             // The logic is: if the current block height is greater than the sum of the speedup's broadcast block height and the number of RBFs,
             // then enough blocks have passed without confirmation, so we should bump the fee again.
             // This helps ensure that stuck transactions are periodically rebroadcast with higher fees to improve their chances of confirmation.
-            if current_block_height
-                .saturating_sub(speedup.broadcast_block_height + replace_speedup_count)
+            let last_broadcast_block_height = if let Some(rbf_tx) = rbf_tx {
+                rbf_tx.broadcast_block_height
+            } else {
+                speedup.broadcast_block_height
+            };
+
+            if current_block_height.saturating_sub(last_broadcast_block_height)
                 >= self.settings.min_blocks_before_rbf
             {
                 debug!(
-                    "{} Last CPFP should be bumped | CurrentHeight({}) | BroadcastHeight({}) | ReplaceCount({}) | MinBlocksBeforeRBF({})",
+                    "{} Last CPFP should be bumped | CurrentHeight({}) | BroadcastHeight({}) | MinBlocksBeforeRBF({})",
                     style("Coordinator").green(),
                     style(current_block_height).blue(),
-                    style(speedup.broadcast_block_height).blue(),
-                    style(replace_speedup_count).blue(),
+                    style(last_broadcast_block_height).blue(),
                     style(self.settings.min_blocks_before_rbf).blue(),
                 );
 
