@@ -160,11 +160,17 @@ impl BitcoinCoordinator {
                 style("Coordinator").green(),
                 style(txs_to_dispatch_with_speedup.len()).yellow()
             );
+
             // Check if we can send transactions or we stop the process until CPFP transactions start to be confirmed.
             if self.store.can_speedup()? {
                 self.speedup_and_dispatch_in_batch(txs_to_dispatch_with_speedup)?;
             } else {
                 warn!("{} Can not speedup", style("Coordinator").green());
+                let is_funding_available = self.store.is_funding_available()?;
+
+                if !is_funding_available {
+                    self.notify_funding_not_found()?;
+                }
             }
         }
 
@@ -199,32 +205,26 @@ impl BitcoinCoordinator {
             // Only create a CPFP (Child Pays For Parent) transaction if there are transactions that were successfully sent in this batch.
             // If no transactions were sent, skip CPFP creation for this batch.
             if !txs_sent.is_empty() {
-                let funding = self.store.get_funding()?;
-
-                if funding.is_none() {
-                    let news = CoordinatorNews::FundingNotFound;
-                    self.store.add_news(news)?;
-                    return Ok(());
-                }
-
-                self.create_and_send_cpfp_tx(txs_sent, funding.unwrap(), 1.0, None)?;
+                // Up to here we have funding and we are sure we have funding.
+                let funding = self.store.get_funding()?.unwrap();
+                self.create_and_send_cpfp_tx(txs_sent, funding, 1.0, None)?;
             }
         }
 
         Ok(())
     }
 
+    fn notify_funding_not_found(&self) -> Result<(), BitcoinCoordinatorError> {
+        let news = CoordinatorNews::FundingNotFound;
+        self.store.add_news(news)?;
+        Ok(())
+    }
+
+    // This function is designed to expedite a CPFP (Child Pays For Parent) transaction.
+    // It achieves this by creating an additional CPFP transaction to provide further funding to the previous one.
+    // It is ensured that funding is available before invoking this function.
     fn speedup_cpfp_tx(&self) -> Result<(), BitcoinCoordinatorError> {
-        // This function is used to speed up a CPFP (Child Pays For Parent) transaction.
-        // We create another CPFP transaction to pay for the previous one more.
-
-        let funding = self.store.get_funding()?;
-
-        if funding.is_none() {
-            let news = CoordinatorNews::FundingNotFound;
-            self.store.add_news(news)?;
-            return Ok(());
-        }
+        let funding = self.store.get_funding()?.unwrap();
 
         let last_speedup = self.store.get_last_speedup()?;
 
@@ -237,7 +237,7 @@ impl BitcoinCoordinator {
                 style("Coordinator").green(),
                 style(speedup.tx_id).yellow()
             );
-            self.create_and_send_cpfp_tx(vec![], funding.unwrap(), bump_fee_porcentage, None)?;
+            self.create_and_send_cpfp_tx(vec![], funding, bump_fee_porcentage, None)?;
         }
 
         Ok(())
@@ -713,6 +713,12 @@ impl BitcoinCoordinator {
             self.speedup_cpfp_tx()?;
         } else {
             warn!("{} Can not speedup", style("Coordinator").green());
+
+            let is_funding_available = self.store.is_funding_available()?;
+
+            if !is_funding_available {
+                self.notify_funding_not_found()?;
+            }
         }
 
         Ok(())

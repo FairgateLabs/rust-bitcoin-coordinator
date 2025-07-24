@@ -31,6 +31,8 @@ pub trait SpeedupStore {
 
     fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
 
+    fn is_funding_available(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
+
     // This function will return the last speedup (CPFP) transaction to be bumped with RBF + the last replacement speedup.
     fn get_last_speedup(
         &self,
@@ -245,12 +247,17 @@ impl SpeedupStore for BitcoinCoordinatorStore {
     ///   - There are enough available unconfirmed transaction slots to satisfy Bitcoin's mempool chain limit policy.
     ///     (At least `MIN_UNCONFIRMED_TXS_FOR_CPFP` unconfirmed transactions are required: one for the CPFP itself and at least one unconfirmed output to spend.)
     fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError> {
-        let funding = self.get_funding()?;
+        let is_funding_available = self.is_funding_available()?;
         let available_unconfirmed_txs = self.get_available_unconfirmed_txs()?;
-        let is_funding_available = funding.is_some();
         let is_enough_unconfirmed_txs = available_unconfirmed_txs >= MIN_UNCONFIRMED_TXS_FOR_CPFP;
 
         Ok(is_funding_available && is_enough_unconfirmed_txs)
+    }
+
+    fn is_funding_available(&self) -> Result<bool, BitcoinCoordinatorStoreError> {
+        let funding = self.get_funding()?;
+        let is_funding_available = funding.is_some();
+        Ok(is_funding_available)
     }
 
     fn save_speedup(
