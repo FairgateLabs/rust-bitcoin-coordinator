@@ -821,6 +821,12 @@ impl BitcoinCoordinator {
         // If the previous bump fee was 2, the new bump factor becomes 3.0.
         // This approach ensures a proportional increase in the fee rate with each bump attempt.
 
+        info!(
+            "{} Bumping fee from {} to {}",
+            style("Coordinator").green(),
+            style(prev_bump_fee).blue(),
+            style(prev_bump_fee * 1.5).blue(),
+        );
         let bumped_feerate = prev_bump_fee * 1.5;
         Ok(bumped_feerate)
     }
