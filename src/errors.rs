@@ -41,7 +41,7 @@ pub enum BitcoinCoordinatorStoreError {
     #[error("Funding transaction already exists")]
     FundingTransactionAlreadyExists,
 
-    #[error("Speed up transaction not found")]
+    #[error("Speedup transaction not found")]
     SpeedupNotFound,
 
     #[error("Invalid transaction state")]

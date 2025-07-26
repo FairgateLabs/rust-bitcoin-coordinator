@@ -79,7 +79,7 @@ pub enum SpeedupState {
 pub struct CoordinatedSpeedUpTransaction {
     pub tx_id: Txid,
 
-    // The child tx ids that are being speeded up.
+    // The child tx ids that are being sped up.
     pub child_tx_ids: Vec<Txid>,
 
     // The previous funding utxo.
@@ -88,7 +88,7 @@ pub struct CoordinatedSpeedUpTransaction {
     // The change funding utxo.
     pub next_funding: Utxo,
 
-    // If true, this speed is is a replacement (RBF) for a previous speedup.
+    // If true, this speedup is a replacement (RBF) for a previous speedup.
     // Otherwise, it is a new speedup (CPFP)
     pub is_rbf: bool,
 
@@ -98,7 +98,7 @@ pub struct CoordinatedSpeedUpTransaction {
 
     pub context: String,
 
-    pub bump_fee_porcentage_used: f64,
+    pub bump_fee_percentage_used: f64,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -111,7 +111,7 @@ impl CoordinatedSpeedUpTransaction {
         is_rbf: bool,
         broadcast_block_height: BlockHeight,
         state: SpeedupState,
-        bump_fee_porcentage_used: f64,
+        bump_fee_percentage_used: f64,
     ) -> Self {
         let mut context = if is_rbf {
             RBF_TRANSACTION_CONTEXT.to_string()
@@ -135,7 +135,7 @@ impl CoordinatedSpeedUpTransaction {
             broadcast_block_height,
             state,
             context,
-            bump_fee_porcentage_used,
+            bump_fee_percentage_used,
         }
     }
 }
@@ -188,7 +188,7 @@ pub enum CoordinatorNews {
     /// - String: Error message describing what went wrong
     DispatchSpeedUpError(Vec<Txid>, Vec<String>, Txid, String),
 
-    /// Indicates insufficient funds for a  funding transaction
+    /// Indicates insufficient funds for a funding transaction
     /// - Txid: The funding transaction ID that was insufficient
     /// - u64: The available funding amount
     /// - u64: The amount required for a speedup

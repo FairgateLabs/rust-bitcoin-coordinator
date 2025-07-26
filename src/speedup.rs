@@ -104,7 +104,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         let mut is_rbf_active = false;
 
         for speedup in speedups.iter() {
-            // In case there is a RBF at the top, we neccesary need to find a confirmed RBF
+            // In case there is a RBF at the top, we necessary need to find a confirmed RBF
             // to be able to fund otherwise there is no capacity for funding unconfirmed txs.
             if is_rbf_active && !speedup.is_rbf {
                 return Ok(0);
@@ -187,7 +187,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
                 return Ok(Some(speedup.next_funding.clone()));
             } else {
                 // Found an unconfirmed regular speedup; cannot use as funding.
-                // This current speedup is the responsible for getting into a chain of replacements.
+                // This current speedup is responsible for getting into a chain of replacements.
                 return Ok(None);
             }
         }

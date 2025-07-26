@@ -49,7 +49,7 @@ pub trait BitcoinCoordinatorApi {
     /// The data will be tracked for confirmations and status changes, and updates will be reported through the news.
     ///
     /// # Arguments
-    /// * `data` - The data to monitors
+    /// * `data` - The data to monitor
     fn monitor(&self, data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError>;
 
     /// Dispatches a transaction to the Bitcoin network
@@ -194,7 +194,7 @@ impl BitcoinCoordinator {
 
         for txs_batch in txs_in_batch_by_policies {
             // For each batch, attempt to broadcast all transactions individually. After determining which transactions were successfully sent,
-            // construct and broadcast a single CPFP  transaction to pay for the entire batch.
+            // construct and broadcast a single CPFP transaction to pay for the entire batch.
             let txs_sent: Vec<CoordinatedTransaction> = self.dispatch_txs(txs_batch)?;
 
             info!(
@@ -229,15 +229,15 @@ impl BitcoinCoordinator {
         let last_speedup = self.store.get_last_speedup()?;
 
         if let Some((speedup, _)) = last_speedup {
-            let bump_fee_porcentage =
-                self.get_bump_fee_porcentage_strategy(speedup.bump_fee_porcentage_used)?;
+            let bump_fee_percentage =
+                self.get_bump_fee_percentage_strategy(speedup.bump_fee_percentage_used)?;
 
             info!(
                 "{} Boosting CPFP Transaction({})",
                 style("Coordinator").green(),
                 style(speedup.tx_id).yellow()
             );
-            self.create_and_send_cpfp_tx(vec![], funding, bump_fee_porcentage, None)?;
+            self.create_and_send_cpfp_tx(vec![], funding, bump_fee_percentage, None)?;
         }
 
         Ok(())
@@ -286,7 +286,6 @@ impl BitcoinCoordinator {
             }
         }
 
-        // TODO: Implement this function.
         Ok(())
     }
 
@@ -321,7 +320,7 @@ impl BitcoinCoordinator {
                         style(tx.tx_id).blue()
                     );
 
-                    //TODO: Handle specific errors when we send a tx and decide what to do.
+                    // TODO: Handle specific errors when we send a tx and decide what to do.
                     let error_msg = e.to_string();
 
                     // let coordinator_error = if error_msg.contains("already in mempool") {
@@ -436,7 +435,7 @@ impl BitcoinCoordinator {
                     }
 
                     if tx_status.is_confirmed() {
-                        // We want to keep the the confirmation on the storage to  calculate the maximum speedups
+                        // We want to keep the confirmation on the storage to calculate the maximum speedups
                         self.store
                             .update_speedup_state(tx_status.tx_id, SpeedupState::Confirmed)?;
                         continue;
@@ -689,13 +688,13 @@ impl BitcoinCoordinator {
         }
 
         // The new_bump_fee will increase the previous bump fee from the CPFP used by adding the number of RBF operations performed + 1.
-        let mut increase_last_bump_fee = speedup.bump_fee_porcentage_used;
+        let mut increase_last_bump_fee = speedup.bump_fee_percentage_used;
 
         if let Some(rbf_tx) = rbf_tx {
-            increase_last_bump_fee = rbf_tx.bump_fee_porcentage_used;
+            increase_last_bump_fee = rbf_tx.bump_fee_percentage_used;
         }
 
-        let new_bump_fee = self.get_bump_fee_porcentage_strategy(increase_last_bump_fee)?;
+        let new_bump_fee = self.get_bump_fee_percentage_strategy(increase_last_bump_fee)?;
 
         self.create_and_send_cpfp_tx(
             txs_to_speedup,
@@ -816,7 +815,7 @@ impl BitcoinCoordinator {
         Ok(total_fee_bumped)
     }
 
-    fn get_bump_fee_porcentage_strategy(
+    fn get_bump_fee_percentage_strategy(
         &self,
         prev_bump_fee: f64,
     ) -> Result<f64, BitcoinCoordinatorError> {
@@ -936,8 +935,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
     }
 
     fn is_ready(&self) -> Result<bool, BitcoinCoordinatorError> {
-        //TODO: The coordinator is currently considered ready when the monitor is ready.
-        // However, we may decide to take into consideration pending and in progress transactions in the future.
+        // The coordinator is currently considered ready when the monitor is ready.
         Ok(self.monitor.is_ready()?)
     }
 
@@ -992,7 +990,6 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
     fn get_news(&self) -> Result<News, BitcoinCoordinatorError> {
         let list_monitor_news = self.monitor.get_news()?;
 
-        //TODO: Remove transactions new that are speed up transactions.
         let monitor_news = list_monitor_news
             .into_iter()
             .filter(|tx| {
