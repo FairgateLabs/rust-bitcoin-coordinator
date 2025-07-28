@@ -908,12 +908,12 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         self.process_in_progress_txs()?;
         self.process_in_progress_speedup_txs()?;
 
-        if self.should_rbf_last_speedup()? {
-            self.rbf_last_speedup()?;
-            return Ok(());
-        }
-
         if self.should_boost_speedup_again()? {
+            if self.should_rbf_last_speedup()? {
+                self.rbf_last_speedup()?;
+                return Ok(());
+            }
+
             self.boost_speedup_again()?;
         }
 
