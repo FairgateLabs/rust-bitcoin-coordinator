@@ -674,7 +674,7 @@ impl BitcoinCoordinator {
         }
     }
 
-    fn rbf_last_speedup(&self) -> Result<(), BitcoinCoordinatorError> {
+    fn rbf_last_cpfp(&self) -> Result<(), BitcoinCoordinatorError> {
         // When this function is called, we know that the last speedup exists to be replaced.
         let (speedup, rbf_tx) = self.store.get_last_speedup()?.unwrap();
 
@@ -706,7 +706,7 @@ impl BitcoinCoordinator {
         Ok(())
     }
 
-    fn boost_speedup_again(&self) -> Result<(), BitcoinCoordinatorError> {
+    fn boost_cpfp_again(&self) -> Result<(), BitcoinCoordinatorError> {
         // Check if we can send transactions or we stop the process until CPFP transactions start to be confirmed.
         if self.store.can_speedup()? {
             self.speedup_cpfp_tx()?;
@@ -872,14 +872,14 @@ impl BitcoinCoordinator {
             };
 
             if current_block_height.saturating_sub(last_broadcast_block_height)
-                >= self.settings.min_blocks_before_rbf
+                >= self.settings.min_blocks_before_resend_speedup
             {
                 debug!(
                     "{} Last CPFP should be bumped | CurrentHeight({}) | BroadcastHeight({}) | MinBlocksBeforeRBF({})",
                     style("Coordinator").green(),
                     style(current_block_height).blue(),
                     style(last_broadcast_block_height).blue(),
-                    style(self.settings.min_blocks_before_rbf).blue(),
+                    style(self.settings.min_blocks_before_resend_speedup).blue(),
                 );
 
                 return Ok(true);
@@ -910,11 +910,11 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
 
         if self.should_boost_speedup_again()? {
             if self.should_rbf_last_speedup()? {
-                self.rbf_last_speedup()?;
+                self.rbf_last_cpfp()?;
                 return Ok(());
             }
 
-            self.boost_speedup_again()?;
+            self.boost_cpfp_again()?;
         }
 
         Ok(())
