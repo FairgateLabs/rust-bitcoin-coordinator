@@ -13,7 +13,7 @@ use protocol_builder::builder::Protocol;
 use protocol_builder::types::connection::InputSpec;
 use protocol_builder::types::input::{SighashType, SpendMode};
 use protocol_builder::types::{InputArgs, OutputType, Utxo};
-use std::rc::Rc;
+use std::sync::Arc;
 use std::str::FromStr;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
@@ -41,7 +41,7 @@ pub fn get_mocks() -> (
     let mock_monitor = MockMonitorApi::new();
     let path = format!("test_output/test/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config).unwrap());
+    let storage = Arc::new(Storage::new(&config).unwrap());
     let store = BitcoinCoordinatorStore::new(storage.clone(), 1).unwrap();
     let bitcoin_client = MockBitcoinClient::new();
     let config = KeyManagerConfig::new(Network::Regtest.to_string(), None, None, None);
@@ -182,6 +182,6 @@ fn create_tx_to_speedup(
 pub fn create_store() -> BitcoinCoordinatorStore {
     let path = format!("test_output/speedup/{}", generate_random_string());
     let storage_config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&storage_config).unwrap());
+    let storage = Arc::new(Storage::new(&storage_config).unwrap());
     BitcoinCoordinatorStore::new(storage, 10).unwrap()
 }

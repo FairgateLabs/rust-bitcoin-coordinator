@@ -14,7 +14,7 @@ use key_manager::create_key_manager_from_config;
 use key_manager::key_store::KeyStore;
 use key_manager::{config::KeyManagerConfig, key_manager::KeyManager};
 use protocol_builder::types::{output::SpeedupData, Utxo};
-use std::rc::Rc;
+use std::sync::Arc;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 use tracing::info;
@@ -60,7 +60,7 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     let network = Network::Regtest;
     let path = format!("test_output/test/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config).unwrap());
+    let storage = Arc::new(Storage::new(&config).unwrap());
     let config_bitcoin_client = RpcConfig::new(
         network,
         "http://127.0.0.1:18443".to_string(),
@@ -71,8 +71,8 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     let config = KeyManagerConfig::new(network.to_string(), None, None, None);
     let key_store = KeyStore::new(storage.clone());
     let key_manager =
-        Rc::new(create_key_manager_from_config(&config, key_store, storage.clone()).unwrap());
-    let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
+        Arc::new(create_key_manager_from_config(&config, key_store, storage.clone()).unwrap());
+    let bitcoin_client = Arc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
 
     let bitcoind = Bitcoind::new(
         "bitcoin-regtest",

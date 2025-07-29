@@ -3,7 +3,7 @@ use bitcoin_coordinator::{
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::TransactionState,
 };
-use std::rc::Rc;
+use std::sync::Arc;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use utils::{clear_output, generate_random_string};
 mod utils;
@@ -14,7 +14,7 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
         format!("test_output/test/{}", generate_random_string()),
         None,
     );
-    let storage = Rc::new(Storage::new(&storage_config)?);
+    let storage = Arc::new(Storage::new(&storage_config)?);
 
     let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
@@ -66,7 +66,7 @@ fn test_multiple_transactions() -> Result<(), anyhow::Error> {
         format!("test_output/test/{}", generate_random_string()),
         None,
     );
-    let storage = Rc::new(Storage::new(&storage_config)?);
+    let storage = Arc::new(Storage::new(&storage_config)?);
     let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
     // Create a transaction
@@ -144,7 +144,7 @@ fn test_cancel_monitor() -> Result<(), anyhow::Error> {
         ),
         None,
     );
-    let storage = Rc::new(Storage::new(&storage_config)?);
+    let storage = Arc::new(Storage::new(&storage_config)?);
     let coordinator = BitcoinCoordinatorStore::new(storage, 1)?;
     // Create first transaction
     let tx1 = Transaction {

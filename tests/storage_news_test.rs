@@ -3,7 +3,7 @@ use bitcoin_coordinator::{
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{AckCoordinatorNews, CoordinatorNews},
 };
-use std::{rc::Rc, str::FromStr};
+use std::{str::FromStr, sync::Arc};
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use utils::{clear_output, generate_random_string};
 mod utils;
@@ -16,7 +16,7 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     );
 
     let storage_config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&storage_config)?);
+    let storage = Arc::new(Storage::new(&storage_config)?);
 
     let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
