@@ -99,6 +99,8 @@ pub struct CoordinatedSpeedUpTransaction {
     pub context: String,
 
     pub bump_fee_percentage_used: f64,
+
+    pub prev_cpfp_vsize: u64,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -112,6 +114,7 @@ impl CoordinatedSpeedUpTransaction {
         broadcast_block_height: BlockHeight,
         state: SpeedupState,
         bump_fee_percentage_used: f64,
+        prev_cpfp_vsize: u64,
     ) -> Self {
         let mut context = if is_rbf {
             RBF_TRANSACTION_CONTEXT.to_string()
@@ -136,6 +139,7 @@ impl CoordinatedSpeedUpTransaction {
             state,
             context,
             bump_fee_percentage_used,
+            prev_cpfp_vsize,
         }
     }
 }

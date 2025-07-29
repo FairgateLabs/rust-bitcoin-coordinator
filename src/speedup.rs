@@ -89,6 +89,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             0,
             SpeedupState::Finalized,
             1.0,
+            0,
         );
 
         self.save_speedup(funding_to_speedup)?;

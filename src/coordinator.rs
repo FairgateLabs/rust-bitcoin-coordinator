@@ -207,7 +207,7 @@ impl BitcoinCoordinator {
             if !txs_sent.is_empty() {
                 // Up to here we have funding and we are sure we have funding.
                 let funding = self.store.get_funding()?.unwrap();
-                self.create_and_send_cpfp_tx(txs_sent, funding, 1.0, None)?;
+                self.create_and_send_cpfp_tx(txs_sent, funding, 1.0, None, 0)?;
             }
         }
 
@@ -237,7 +237,13 @@ impl BitcoinCoordinator {
                 style("Coordinator").green(),
                 style(speedup.tx_id).yellow()
             );
-            self.create_and_send_cpfp_tx(vec![], funding, bump_fee_percentage, None)?;
+            self.create_and_send_cpfp_tx(
+                vec![],
+                funding,
+                bump_fee_percentage,
+                None,
+                speedup.prev_cpfp_vsize,
+            )?;
         }
 
         Ok(())
@@ -534,6 +540,7 @@ impl BitcoinCoordinator {
         funding: Utxo,
         bump_fee: f64,
         cpfp_id_to_replace: Option<Txid>,
+        prev_cpfp_vsize: u64,
     ) -> Result<(), BitcoinCoordinatorError> {
         // Check if the funding amount is below the minimum required for a speedup.
         // If so, notify via CoordinatorNews and exit early.
@@ -550,7 +557,7 @@ impl BitcoinCoordinator {
         let is_rbf = cpfp_id_to_replace.is_some();
 
         let (speedup_tx, speedup_fee) =
-            self.get_speedup_tx(&txs_data, &funding, bump_fee, is_rbf)?;
+            self.get_speedup_tx(&txs_data, &funding, bump_fee, is_rbf, prev_cpfp_vsize)?;
         // Validate that funding can cover the fee
         if speedup_fee > funding.amount {
             let news =
@@ -599,6 +606,7 @@ impl BitcoinCoordinator {
             monitor_height,
             SpeedupState::Dispatched,
             bump_fee,
+            prev_cpfp_vsize + speedup_tx.vsize() as u64,
         );
 
         self.dispatch_speedup(speedup_tx, speedup_data)?;
@@ -612,13 +620,17 @@ impl BitcoinCoordinator {
         funding: &Utxo,
         bump_fee_percentage: f64,
         is_rbf: bool,
+        prev_cpfp_vsize: u64,
     ) -> Result<(Transaction, u64), BitcoinCoordinatorError> {
         let speedups_data: Vec<SpeedupData> = txs_data
             .iter()
             .map(|tx_data| tx_data.speedup_data.as_ref().unwrap().clone())
             .collect();
 
-        let estimate_fee: u64 = self.client.estimate_smart_fee()?;
+        let estimate_fee: u64 = self
+            .settings
+            .force_estimate_fee
+            .unwrap_or(self.client.estimate_smart_fee()?);
 
         // TRICK:
         // - Create the child transaction with a dummy fee to determine the transaction's virtual size (vsize).
@@ -648,6 +660,7 @@ impl BitcoinCoordinator {
             let speedup_fee = self.calculate_speedup_fee(
                 &txs_data,
                 child_vsize,
+                prev_cpfp_vsize,
                 bump_fee_percentage,
                 estimate_fee,
                 is_rbf,
@@ -689,8 +702,10 @@ impl BitcoinCoordinator {
 
         // The new_bump_fee will increase the previous bump fee from the CPFP used by adding the number of RBF operations performed + 1.
         let mut increase_last_bump_fee = speedup.bump_fee_percentage_used;
+        let mut prev_cpfp_vsize = 0;
 
         if let Some(rbf_tx) = rbf_tx {
+            prev_cpfp_vsize = rbf_tx.prev_cpfp_vsize;
             increase_last_bump_fee = rbf_tx.bump_fee_percentage_used;
         }
 
@@ -701,6 +716,7 @@ impl BitcoinCoordinator {
             speedup.prev_funding,
             new_bump_fee,
             Some(speedup.tx_id),
+            prev_cpfp_vsize,
         )?;
 
         Ok(())
@@ -727,6 +743,7 @@ impl BitcoinCoordinator {
         &self,
         parents: &[CoordinatedTransaction],
         child_vbytes: usize,
+        prev_cpfp_vsize: u64,
         bump_fee_percentage: f64,
         mut estimate_fee: u64,
         is_rbf: bool,
@@ -772,9 +789,10 @@ impl BitcoinCoordinator {
 
         // We substract the vbytes of the parents and the amount of outputs.
         // Because the child pays for the parents and the parents pay for the outputs
+        let prev_cpfp_sats = prev_cpfp_vsize * estimate_fee;
         let parent_total_sats = parent_vbytes * estimate_fee as usize;
         let child_total_sats = child_vbytes * estimate_fee as usize;
-        let total_sats = parent_total_sats + child_total_sats;
+        let total_sats = parent_total_sats + child_total_sats + prev_cpfp_sats as usize;
 
         let mut total_fee = total_sats
             .saturating_sub(parent_amount_outputs) // amount comming from the parents to discount
@@ -804,7 +822,7 @@ impl BitcoinCoordinator {
             "{} EstimateNetworkFee({}) | ParentTotalSats({}) | ChildTotalSats({}) | BumpFeePercentage({}) | ParentAmountOutputs({}) | ParentVbytes({}) | TotalFee({})",
             style("Coordinator").green(),
             style(estimate_fee).red(),
-            style(parent_total_sats).red(),
+            style(parent_total_sats + prev_cpfp_sats as usize).red(),
             style(child_total_sats).red(),
             style(bump_fee_percentage).red(),
             style(parent_amount_outputs).red(),
@@ -904,6 +922,12 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
             return Ok(());
         }
 
+        let current_block = self.monitor.get_monitor_height()?;
+        info!(
+            "{} Current Block Height: {}",
+            style("Coordinator").green(),
+            style(current_block).blue()
+        );
         self.process_pending_txs_to_dispatch()?;
         self.process_in_progress_txs()?;
         self.process_in_progress_speedup_txs()?;

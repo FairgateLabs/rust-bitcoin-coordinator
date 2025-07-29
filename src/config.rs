@@ -28,6 +28,7 @@ pub struct CoordinatorSettings {
     pub rbf_fee_percentage: f64,
     pub min_blocks_before_resend_speedup: u32,
     pub max_feerate_sat_vb: u64,
+    pub force_estimate_fee: Option<u64>,
     pub monitor_settings: MonitorSettings,
 }
 
@@ -41,6 +42,7 @@ impl Default for CoordinatorSettings {
             rbf_fee_percentage: DEFAULT_RBF_FEE_PERCENTAGE,
             min_blocks_before_resend_speedup: DEFAULT_MIN_BLOCKS_BEFORE_RESEND_SPEEDUP,
             max_feerate_sat_vb: DEFAULT_MAX_FEERATE_SAT_VB,
+            force_estimate_fee: None,
             monitor_settings: MonitorSettings::default(),
         }
     }

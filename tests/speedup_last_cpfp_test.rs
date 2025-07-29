@@ -50,7 +50,7 @@ fn config_trace_aux() {
 
 #[test]
 #[ignore = "This test works, but it runs in regtest with a bitcoind running"]
-fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
+fn a_replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
