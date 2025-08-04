@@ -1,6 +1,6 @@
 use crate::settings::{
     DEFAULT_MAX_FEERATE_SAT_VB, DEFAULT_MAX_RBF_ATTEMPTS, DEFAULT_MAX_TX_WEIGHT,
-    DEFAULT_MAX_UNCONFIRMED_SPEEDUPS, DEFAULT_MIN_BLOCKS_BEFORE_RBF,
+    DEFAULT_MAX_UNCONFIRMED_SPEEDUPS, DEFAULT_MIN_BLOCKS_BEFORE_RESEND_SPEEDUP,
     DEFAULT_MIN_FUNDING_AMOUNT_SATS, DEFAULT_RBF_FEE_PERCENTAGE,
 };
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
@@ -26,7 +26,7 @@ pub struct CoordinatorSettings {
     pub max_rbf_attempts: u32,
     pub min_funding_amount_sats: u64,
     pub rbf_fee_percentage: f64,
-    pub min_blocks_before_rbf: u32,
+    pub min_blocks_before_resend_speedup: u32,
     pub max_feerate_sat_vb: u64,
     pub monitor_settings: MonitorSettings,
 }
@@ -39,7 +39,7 @@ impl Default for CoordinatorSettings {
             max_rbf_attempts: DEFAULT_MAX_RBF_ATTEMPTS,
             min_funding_amount_sats: DEFAULT_MIN_FUNDING_AMOUNT_SATS,
             rbf_fee_percentage: DEFAULT_RBF_FEE_PERCENTAGE,
-            min_blocks_before_rbf: DEFAULT_MIN_BLOCKS_BEFORE_RBF,
+            min_blocks_before_resend_speedup: DEFAULT_MIN_BLOCKS_BEFORE_RESEND_SPEEDUP,
             max_feerate_sat_vb: DEFAULT_MAX_FEERATE_SAT_VB,
             monitor_settings: MonitorSettings::default(),
         }

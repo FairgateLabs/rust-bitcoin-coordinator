@@ -33,8 +33,8 @@ pub const DEFAULT_MIN_FUNDING_AMOUNT_SATS: u64 = 10000;
 // Fee percentage increase for RBF (150% of original fee)
 pub const DEFAULT_RBF_FEE_PERCENTAGE: f64 = 1.5;
 
-// Minimum blocks to wait before attempting RBF
-pub const DEFAULT_MIN_BLOCKS_BEFORE_RBF: u32 = 1;
+// Minimum blocks to wait before attempting to resend a speedup transaction (CPFP or RBF)
+pub const DEFAULT_MIN_BLOCKS_BEFORE_RESEND_SPEEDUP: u32 = 1;
 
 // Maximum feerate sat/vbyte allowed for speedups
 pub const DEFAULT_MAX_FEERATE_SAT_VB: u64 = 1000;
