@@ -23,7 +23,7 @@ use protocol_builder::{
     builder::ProtocolBuilder,
     types::{output::SpeedupData, Utxo},
 };
-use std::rc::Rc;
+use std::{rc::Rc, vec};
 use storage_backend::storage::Storage;
 use tracing::{debug, error, info, warn};
 
@@ -205,9 +205,18 @@ impl BitcoinCoordinator {
             // Only create a CPFP (Child Pays For Parent) transaction if there are transactions that were successfully sent in this batch.
             // If no transactions were sent, skip CPFP creation for this batch.
             if !txs_sent.is_empty() {
+                let txs_data = txs_sent
+                    .iter()
+                    .map(|coordinated_tx| {
+                        (
+                            coordinated_tx.speedup_data.clone().unwrap(),
+                            coordinated_tx.tx.clone(),
+                        )
+                    })
+                    .collect();
                 // Up to here we have funding and we are sure we have funding.
                 let funding = self.store.get_funding()?.unwrap();
-                self.create_and_send_cpfp_tx(txs_sent, funding, 1.0, None)?;
+                self.create_and_send_cpfp_tx(txs_data, funding, 1.0, None)?;
             }
         }
 
@@ -530,7 +539,7 @@ impl BitcoinCoordinator {
 
     fn create_and_send_cpfp_tx(
         &self,
-        txs_data: Vec<CoordinatedTransaction>,
+        txs_data: Vec<(SpeedupData, Transaction)>,
         funding: Utxo,
         bump_fee: f64,
         cpfp_id_to_replace: Option<Txid>,
@@ -549,8 +558,24 @@ impl BitcoinCoordinator {
 
         let is_rbf = cpfp_id_to_replace.is_some();
 
-        let (speedup_tx, speedup_fee) =
-            self.get_speedup_tx(&txs_data, &funding, bump_fee, is_rbf)?;
+        let txs_speedup_data = txs_data
+            .iter()
+            .map(|(speedup_data, tx)| (speedup_data.clone(), tx.vsize()))
+            .collect();
+
+        let new_network_fee_rate = self.get_network_fee_rate()?;
+
+        let diff_fee_for_unconfirmed_chain =
+            self.get_diff_fee_for_unconfirmed_chain(new_network_fee_rate)?;
+
+        let (speedup_tx, speedup_fee) = self.get_speedup_tx(
+            &txs_speedup_data,
+            &funding,
+            bump_fee,
+            is_rbf,
+            new_network_fee_rate,
+            diff_fee_for_unconfirmed_chain,
+        )?;
         // Validate that funding can cover the fee
         if speedup_fee > funding.amount {
             let news =
@@ -560,7 +585,7 @@ impl BitcoinCoordinator {
         }
 
         let speedup_tx_id = speedup_tx.compute_txid();
-        let txids: Vec<Txid> = txs_data.iter().map(|tx| tx.tx_id).collect();
+        let txids: Vec<Txid> = txs_data.iter().map(|(_, tx)| tx.compute_txid()).collect();
 
         let speedup_type = if is_rbf { "RBF" } else { "CPFP" };
         let mut cpfp_to_replace = String::new();
@@ -592,13 +617,14 @@ impl BitcoinCoordinator {
 
         let speedup_data = CoordinatedSpeedUpTransaction::new(
             speedup_tx_id,
-            txids,
             funding,
             new_funding_utxo,
             is_rbf,
             monitor_height,
             SpeedupState::Dispatched,
             bump_fee,
+            txs_data,
+            new_network_fee_rate,
         );
 
         self.dispatch_speedup(speedup_tx, speedup_data)?;
@@ -606,19 +632,83 @@ impl BitcoinCoordinator {
         Ok(())
     }
 
+    fn get_diff_fee_for_unconfirmed_chain(
+        &self,
+        new_network_fee_rate: u64,
+    ) -> Result<u64, BitcoinCoordinatorError> {
+        let speedups_unconfirmed = self.store.get_unconfirmed_speedups()?;
+
+        if speedups_unconfirmed.is_empty() {
+            return Ok(0);
+        }
+
+        let last_fee_rate_used = speedups_unconfirmed.last().unwrap().network_fee_rate_used;
+
+        if last_fee_rate_used >= new_network_fee_rate {
+            return Ok(0);
+        }
+
+        let mut fee_chain_difference = 0;
+
+        for speedup in speedups_unconfirmed {
+            let fee_rate_to_pay = new_network_fee_rate.saturating_sub(last_fee_rate_used);
+            let txs_data = speedup
+                .speedup_tx_data
+                .iter()
+                .map(|(speedup_data, tx)| (speedup_data.clone(), tx.vsize()))
+                .collect();
+
+            let (_, fee_to_pay) = self.get_speedup_tx(
+                &txs_data,
+                &speedup.prev_funding,
+                1.0, // We should not bump this fee, we are just calculating the difference.
+                speedup.is_rbf,
+                fee_rate_to_pay,
+                0,
+            )?;
+
+            fee_chain_difference += fee_to_pay;
+        }
+
+        Ok(fee_chain_difference)
+    }
+
+    fn get_network_fee_rate(&self) -> Result<u64, BitcoinCoordinatorError> {
+        let mut network_fee_rate: u64 = self.client.estimate_smart_fee()?;
+
+        if network_fee_rate > self.settings.max_feerate_sat_vb {
+            warn!(
+                "{} Estimate feerate sat/vbyte is greater than the max allowed. This could be a bug. | EstimateFeerate({}) | MaxAllowed({})",
+                style("Coordinator").red(),
+                style(network_fee_rate).red(),
+                style(self.settings.max_feerate_sat_vb).red(),
+            );
+
+            // Inform this with news
+            let news = CoordinatorNews::EstimateFeerateTooHigh(
+                network_fee_rate,
+                self.settings.max_feerate_sat_vb,
+            );
+
+            self.store.add_news(news)?;
+
+            // Set the estimate feerate to the max allowed
+            network_fee_rate = self.settings.max_feerate_sat_vb;
+        }
+        Ok(network_fee_rate)
+    }
+
     fn get_speedup_tx(
         &self,
-        txs_data: &Vec<CoordinatedTransaction>,
+        txs_data: &Vec<(SpeedupData, usize)>,
         funding: &Utxo,
         bump_fee_percentage: f64,
         is_rbf: bool,
+        network_fee_rate: u64,
+        diff_fee_for_unconfirmed_chain: u64,
     ) -> Result<(Transaction, u64), BitcoinCoordinatorError> {
-        let speedups_data: Vec<SpeedupData> = txs_data
-            .iter()
-            .map(|tx_data| tx_data.speedup_data.as_ref().unwrap().clone())
-            .collect();
-
-        let estimate_fee: u64 = self.client.estimate_smart_fee()?;
+        let speedups_data: Vec<SpeedupData> =
+            txs_data.iter().map(|tx_data| tx_data.0.clone()).collect();
 
         // TRICK:
         // - Create the child transaction with a dummy fee to determine the transaction's virtual size (vsize).
@@ -649,8 +739,9 @@ impl BitcoinCoordinator {
                 &txs_data,
                 child_vsize,
                 bump_fee_percentage,
-                estimate_fee,
+                network_fee_rate,
                 is_rbf,
+                diff_fee_for_unconfirmed_chain,
             )?;
 
             let final_speedup_tx = (ProtocolBuilder {}).speedup_transactions(
@@ -678,12 +769,10 @@ impl BitcoinCoordinator {
         // When this function is called, we know that the last speedup exists to be replaced.
         let (speedup, rbf_tx) = self.store.get_last_speedup()?.unwrap();
 
-        let child_tx_ids = speedup.child_tx_ids;
-
         let mut txs_to_speedup: Vec<CoordinatedTransaction> = Vec::new();
 
-        for tx_id in child_tx_ids {
-            let tx = self.store.get_tx(&tx_id)?;
+        for (_, tx) in speedup.speedup_tx_data.clone() {
+            let tx = self.store.get_tx(&tx.compute_txid())?;
             txs_to_speedup.push(tx);
         }
 
@@ -697,7 +786,7 @@ impl BitcoinCoordinator {
         let new_bump_fee = self.get_bump_fee_percentage_strategy(increase_last_bump_fee)?;
 
         self.create_and_send_cpfp_tx(
-            txs_to_speedup,
+            speedup.speedup_tx_data,
             speedup.prev_funding,
             new_bump_fee,
             Some(speedup.tx_id),
@@ -725,62 +814,41 @@ impl BitcoinCoordinator {
 
     fn calculate_speedup_fee(
         &self,
-        parents: &[CoordinatedTransaction],
+        tx_to_speedup_info: &[(SpeedupData, usize)],
         child_vbytes: usize,
         bump_fee_percentage: f64,
-        mut estimate_fee: u64,
+        network_fee_rate: u64,
         is_rbf: bool,
+        fee_chain_difference: u64,
     ) -> Result<u64, BitcoinCoordinatorError> {
         // Assumes that each parent transaction pays 1 sat/vbyte.
         // To calculate the total fee, we need to know the vsize of the child (CPFP) + the vsize of each parent.
         // Also we have to subtract the parent's transaction vbytes and the total output amounts once.
 
-        if estimate_fee > self.settings.max_feerate_sat_vb {
-            warn!(
-                "{} Estimate feerate sat/vbyte is greater than the max allowed. This could be a bug. | EstimateFeerate({}) | MaxAllowed({})",
-                style("Coordinator").red(),
-                style(estimate_fee).red(),
-                style(self.settings.max_feerate_sat_vb).red(),
-            );
-
-            // Inform this with news
-            let news = CoordinatorNews::EstimateFeerateTooHigh(
-                estimate_fee,
-                self.settings.max_feerate_sat_vb,
-            );
-
-            self.store.add_news(news)?;
-
-            // Set the estimate feerate to the max allowed
-            estimate_fee = self.settings.max_feerate_sat_vb;
-        }
-
-        let parent_vbytes: usize = parents.iter().map(|tx_data| tx_data.tx.vsize()).sum();
-
         let mut parent_amount_outputs: usize = 0;
+        let mut parent_vbytes: usize = 0;
 
-        for tx_data in parents {
-            if let Some(speedup) = &tx_data.speedup_data {
-                let amount = if let Some(utxo) = &speedup.utxo {
-                    utxo.amount as usize
-                } else {
-                    speedup.partial_utxo.as_ref().unwrap().2 as usize
-                };
-                parent_amount_outputs += amount;
-            }
+        for (speedup_data, vsize) in tx_to_speedup_info {
+            let amount = if let Some(utxo) = &speedup_data.utxo {
+                utxo.amount as usize
+            } else {
+                speedup_data.partial_utxo.as_ref().unwrap().2 as usize
+            };
+            parent_amount_outputs += amount;
+            parent_vbytes += vsize;
         }
 
         // We substract the vbytes of the parents and the amount of outputs.
         // Because the child pays for the parents and the parents pay for the outputs
-        let parent_total_sats = parent_vbytes * estimate_fee as usize;
-        let child_total_sats = child_vbytes * estimate_fee as usize;
+        let parent_total_sats = parent_vbytes * network_fee_rate as usize;
+        let child_total_sats = child_vbytes * network_fee_rate as usize;
         let total_sats = parent_total_sats + child_total_sats;
 
         let mut total_fee = total_sats
             .saturating_sub(parent_amount_outputs) // amount comming from the parents to discount
             .saturating_sub(parent_vbytes); // min relay fee of the parents to discount
 
-        if is_rbf {
+        if is_rbf && total_fee < child_total_sats * 2 {
             // Bitcoin Policy (https://github.com/bitcoin/bitcoin/blob/master/doc/policy/mempool-replacements.md?plain=1#L32):
             // The additional fees (difference between absolute fee paid by the replacement transaction and the
             // sum paid by the original transactions) pays for the replacement transaction's bandwidth at or
@@ -793,6 +861,8 @@ impl BitcoinCoordinator {
             total_fee = child_total_sats * 2;
         }
 
+        total_fee += fee_chain_difference as usize;
+
         let total_fee_bumped = (total_fee as f64 * bump_fee_percentage).ceil().round() as u64;
 
         // TODO IMPORTANT:
@@ -803,7 +873,7 @@ impl BitcoinCoordinator {
         debug!(
             "{} EstimateNetworkFee({}) | ParentTotalSats({}) | ChildTotalSats({}) | BumpFeePercentage({}) | ParentAmountOutputs({}) | ParentVbytes({}) | TotalFee({})",
             style("Coordinator").green(),
-            style(estimate_fee).red(),
+            style(network_fee_rate).red(),
             style(parent_total_sats).red(),
             style(child_total_sats).red(),
             style(bump_fee_percentage).red(),

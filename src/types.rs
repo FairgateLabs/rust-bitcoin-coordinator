@@ -75,12 +75,9 @@ pub enum SpeedupState {
     Finalized,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct CoordinatedSpeedUpTransaction {
     pub tx_id: Txid,
-
-    // The child tx ids that are being sped up.
-    pub child_tx_ids: Vec<Txid>,
 
     // The previous funding utxo.
     pub prev_funding: Utxo,
@@ -99,19 +96,24 @@ pub struct CoordinatedSpeedUpTransaction {
     pub context: String,
 
     pub bump_fee_percentage_used: f64,
+
+    pub speedup_tx_data: Vec<(SpeedupData, Transaction)>,
+
+    pub network_fee_rate_used: u64,
 }
 
 #[allow(clippy::too_many_arguments)]
 impl CoordinatedSpeedUpTransaction {
     pub fn new(
         tx_id: Txid,
-        child_tx_ids: Vec<Txid>,
         prev_funding: Utxo,
         next_funding: Utxo,
         is_rbf: bool,
         broadcast_block_height: BlockHeight,
         state: SpeedupState,
         bump_fee_percentage_used: f64,
+        speedup_tx_data: Vec<(SpeedupData, Transaction)>,
+        network_fee_used: u64,
     ) -> Self {
         let mut context = if is_rbf {
             RBF_TRANSACTION_CONTEXT.to_string()
@@ -121,14 +123,13 @@ impl CoordinatedSpeedUpTransaction {
 
         if broadcast_block_height == 0
             && state == SpeedupState::Finalized
-            && child_tx_ids.is_empty()
+            && speedup_tx_data.is_empty()
         {
             context = FUNDING_TRANSACTION_CONTEXT.to_string();
         }
 
         Self {
             tx_id,
-            child_tx_ids,
             prev_funding,
             next_funding,
             is_rbf,
@@ -136,6 +137,8 @@ impl CoordinatedSpeedUpTransaction {
             state,
             context,
             bump_fee_percentage_used,
+            speedup_tx_data,
+            network_fee_rate_used: network_fee_used,
         }
     }
 }
@@ -144,7 +147,7 @@ impl CoordinatedSpeedUpTransaction {
     pub fn is_funding(&self) -> bool {
         self.broadcast_block_height == 0
             && self.state == SpeedupState::Finalized
-            && self.child_tx_ids.is_empty()
+            && self.speedup_tx_data.is_empty()
     }
 
     pub fn is_rbf(&self) -> bool {

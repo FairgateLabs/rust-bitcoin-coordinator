@@ -15,6 +15,10 @@ pub trait SpeedupStore {
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
 
+    fn get_unconfirmed_speedups(
+        &self,
+    ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
+
     fn get_all_pending_speedups(
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
@@ -82,13 +86,14 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         // The broadcast block height is set to 0 and Finalized because funding should be confirmed on chain.
         let funding_to_speedup = CoordinatedSpeedUpTransaction::new(
             next_funding.txid,
-            vec![],
             next_funding.clone(),
             next_funding,
             false,
             0,
             SpeedupState::Finalized,
             1.0,
+            vec![],
+            1,
         );
 
         self.save_speedup(funding_to_speedup)?;
@@ -125,7 +130,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             }
 
             let cpfp_tx = 1;
-            let to_subtract = speedup.child_tx_ids.len() as u32 + cpfp_tx;
+            let to_subtract = speedup.speedup_tx_data.len() as u32 + cpfp_tx;
             available_utxos = available_utxos.saturating_sub(to_subtract);
         }
 
@@ -218,6 +223,30 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         }
 
         pending_speedups.reverse();
+
+        Ok(pending_speedups)
+    }
+
+    fn get_unconfirmed_speedups(
+        &self,
+    ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
+        let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
+        let speedups = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
+
+        let mut pending_speedups = Vec::new();
+
+        for txid in speedups.iter().rev() {
+            let speedup = self.get_speedup(txid)?;
+
+            if speedup.state == SpeedupState::Confirmed || speedup.state == SpeedupState::Finalized
+            {
+                // No need to check further; confirmed or finalized speedup found.
+                return Ok(pending_speedups);
+            }
+
+            // If the speedup is not finalized or confirmed, it means that it is still unconfirmed.
+            pending_speedups.push(speedup);
+        }
 
         Ok(pending_speedups)
     }
