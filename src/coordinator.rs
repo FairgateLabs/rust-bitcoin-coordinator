@@ -595,13 +595,14 @@ impl BitcoinCoordinator {
         }
 
         info!(
-            "{} New {} Transaction({}) | Fee({}) | Transactions#({}) | FundingTx({}) {} | BumpFee({})",
+            "{} New {} Transaction({}) | Fee({}) | Transactions#({}) | FundingTx({}) | UTXO({}) {} | BumpFee({})",
             style("Coordinator").green(),
             speedup_type,
             style(speedup_tx_id).yellow(),
             style(speedup_fee).blue(),
             style(txids.len()).blue(),
             style(funding.txid).blue(),
+            style(funding.vout).blue(),
             style(cpfp_to_replace).blue(),
             style(bump_fee).blue(),
         );
@@ -869,10 +870,15 @@ impl BitcoinCoordinator {
         // To accurately calculate the fee when the estimated fee changes over time, it is essential to retain the estimate_fee
         // used for each CPFP and recalculate the new value if the estimate_fee differs. Failing to do so may result in overpayment or underpayment.
         // In this scenario, we need to compute the fee difference between the parent transactions already sent in the previous CPFP chain and the new estimate_fee value.
+        let mut fee_chain_difference_str = String::new();
+        if fee_chain_difference > 0 {
+            fee_chain_difference_str = "Recomputing fee for chain ".to_string();
+        }
 
         debug!(
-            "{} EstimateNetworkFee({}) | ParentTotalSats({}) | ChildTotalSats({}) | BumpFeePercentage({}) | ParentAmountOutputs({}) | ParentVbytes({}) | TotalFee({})",
+            "{} {}EstimateNetworkFee({}) | ParentTotalSats({}) | ChildTotalSats({}) | BumpFeePercentage({}) | ParentAmountOutputs({}) | ParentVbytes({}) | TotalFee({}) | FeeChainDifference({})",
             style("Coordinator").green(),
+            style(fee_chain_difference_str),
             style(network_fee_rate).red(),
             style(parent_total_sats).red(),
             style(child_total_sats).red(),
@@ -880,6 +886,7 @@ impl BitcoinCoordinator {
             style(parent_amount_outputs).red(),
             style(parent_vbytes).red(),
             style(total_fee_bumped).red(),
+            style(fee_chain_difference).red(),
         );
 
         Ok(total_fee_bumped)

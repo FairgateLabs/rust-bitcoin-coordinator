@@ -113,7 +113,7 @@ impl CoordinatedSpeedUpTransaction {
         state: SpeedupState,
         bump_fee_percentage_used: f64,
         speedup_tx_data: Vec<(SpeedupData, Transaction)>,
-        network_fee_used: u64,
+        network_fee_rate_used: u64,
     ) -> Self {
         let mut context = if is_rbf {
             RBF_TRANSACTION_CONTEXT.to_string()
@@ -138,7 +138,7 @@ impl CoordinatedSpeedUpTransaction {
             context,
             bump_fee_percentage_used,
             speedup_tx_data,
-            network_fee_rate_used: network_fee_used,
+            network_fee_rate_used,
         }
     }
 }
