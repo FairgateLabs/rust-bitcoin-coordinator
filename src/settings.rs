@@ -38,3 +38,9 @@ pub const DEFAULT_MIN_BLOCKS_BEFORE_RESEND_SPEEDUP: u32 = 1;
 
 // Maximum feerate sat/vbyte allowed for speedups
 pub const DEFAULT_MAX_FEERATE_SAT_VB: u64 = 1000;
+
+// Fee multiplier for base fee multiplier
+pub const DEFAULT_BASE_FEE_MULTIPLIER: f64 = 1.0;
+
+// Bump fee percentage
+pub const DEFAULT_BUMP_FEE_PERCENTAGE: f64 = 1.5;

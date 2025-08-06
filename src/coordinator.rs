@@ -216,7 +216,12 @@ impl BitcoinCoordinator {
                     .collect();
                 // Up to here we have funding and we are sure we have funding.
                 let funding = self.store.get_funding()?.unwrap();
-                self.create_and_send_cpfp_tx(txs_data, funding, 1.0, None)?;
+                self.create_and_send_cpfp_tx(
+                    txs_data,
+                    funding,
+                    self.settings.base_fee_multiplier,
+                    None,
+                )?;
             }
         }
 
@@ -565,7 +570,7 @@ impl BitcoinCoordinator {
 
         let new_network_fee_rate = self.get_network_fee_rate()?;
 
-        let diff_fee_for_unconfirmed_chain =
+        let (diff_fee_for_unconfirmed_chain, chain_vsize) =
             self.get_diff_fee_for_unconfirmed_chain(new_network_fee_rate)?;
 
         let (speedup_tx, speedup_fee) = self.get_speedup_tx(
@@ -575,6 +580,7 @@ impl BitcoinCoordinator {
             is_rbf,
             new_network_fee_rate,
             diff_fee_for_unconfirmed_chain,
+            chain_vsize,
         )?;
         // Validate that funding can cover the fee
         if speedup_fee > funding.amount {
@@ -636,20 +642,17 @@ impl BitcoinCoordinator {
     fn get_diff_fee_for_unconfirmed_chain(
         &self,
         new_network_fee_rate: u64,
-    ) -> Result<u64, BitcoinCoordinatorError> {
+    ) -> Result<(u64, usize), BitcoinCoordinatorError> {
         let speedups_unconfirmed = self.store.get_unconfirmed_speedups()?;
 
         if speedups_unconfirmed.is_empty() {
-            return Ok(0);
+            return Ok((0, 0));
         }
 
         let last_fee_rate_used = speedups_unconfirmed.last().unwrap().network_fee_rate_used;
 
-        if last_fee_rate_used >= new_network_fee_rate {
-            return Ok(0);
-        }
-
         let mut fee_chain_difference = 0;
+        let mut chain_vsize = 0;
 
         for speedup in speedups_unconfirmed {
             let fee_rate_to_pay = new_network_fee_rate.saturating_sub(last_fee_rate_used);
@@ -659,19 +662,21 @@ impl BitcoinCoordinator {
                 .map(|(speedup_data, tx)| (speedup_data.clone(), tx.vsize()))
                 .collect();
 
-            let (_, fee_to_pay) = self.get_speedup_tx(
+            let (tx, fee_to_pay) = self.get_speedup_tx(
                 &txs_data,
                 &speedup.prev_funding,
-                1.0, // We should not bump this fee, we are just calculating the difference.
+                self.settings.base_fee_multiplier, // We should not bump this fee, we are just calculating the difference.
                 speedup.is_rbf,
                 fee_rate_to_pay,
                 0,
+                0,
             )?;
 
+            chain_vsize += tx.vsize();
             fee_chain_difference += fee_to_pay;
         }
 
-        Ok(fee_chain_difference)
+        Ok((fee_chain_difference, chain_vsize))
     }
 
     fn get_network_fee_rate(&self) -> Result<u64, BitcoinCoordinatorError> {
@@ -707,6 +712,7 @@ impl BitcoinCoordinator {
         is_rbf: bool,
         network_fee_rate: u64,
         diff_fee_for_unconfirmed_chain: u64,
+        chain_vsize: usize,
     ) -> Result<(Transaction, u64), BitcoinCoordinatorError> {
         let speedups_data: Vec<SpeedupData> =
             txs_data.iter().map(|tx_data| tx_data.0.clone()).collect();
@@ -743,6 +749,7 @@ impl BitcoinCoordinator {
                 network_fee_rate,
                 is_rbf,
                 diff_fee_for_unconfirmed_chain,
+                chain_vsize,
             )?;
 
             let final_speedup_tx = (ProtocolBuilder {}).speedup_transactions(
@@ -821,6 +828,7 @@ impl BitcoinCoordinator {
         network_fee_rate: u64,
         is_rbf: bool,
         fee_chain_difference: u64,
+        chain_vsize: usize,
     ) -> Result<u64, BitcoinCoordinatorError> {
         // Assumes that each parent transaction pays 1 sat/vbyte.
         // To calculate the total fee, we need to know the vsize of the child (CPFP) + the vsize of each parent.
@@ -864,6 +872,11 @@ impl BitcoinCoordinator {
 
         total_fee += fee_chain_difference as usize;
 
+        // If a fee bump is being applied, add the virtual size of the transaction chain to the total fee to incentivize the miners to include the chain in the next block.
+        if chain_vsize > 0 && bump_fee_percentage > self.settings.base_fee_multiplier {
+            total_fee += chain_vsize;
+        }
+
         let total_fee_bumped = (total_fee as f64 * bump_fee_percentage).ceil().round() as u64;
 
         // TODO IMPORTANT:
@@ -897,7 +910,7 @@ impl BitcoinCoordinator {
         prev_bump_fee: f64,
     ) -> Result<f64, BitcoinCoordinatorError> {
         if prev_bump_fee <= 0.0 {
-            return Ok(1.0);
+            return Ok(self.settings.base_fee_multiplier);
         }
 
         // This method increases the previous bump fee by 50%.
@@ -911,9 +924,9 @@ impl BitcoinCoordinator {
             "{} Bumping fee from {} to {}",
             style("Coordinator").green(),
             style(prev_bump_fee).blue(),
-            style(prev_bump_fee * 1.5).blue(),
+            style(prev_bump_fee * self.settings.bump_fee_percentage).blue(),
         );
-        let bumped_feerate = prev_bump_fee * 1.5;
+        let bumped_feerate = prev_bump_fee * self.settings.bump_fee_percentage;
         Ok(bumped_feerate)
     }
 

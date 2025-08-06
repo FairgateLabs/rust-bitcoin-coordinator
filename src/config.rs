@@ -1,7 +1,8 @@
 use crate::settings::{
-    DEFAULT_MAX_FEERATE_SAT_VB, DEFAULT_MAX_RBF_ATTEMPTS, DEFAULT_MAX_TX_WEIGHT,
-    DEFAULT_MAX_UNCONFIRMED_SPEEDUPS, DEFAULT_MIN_BLOCKS_BEFORE_RESEND_SPEEDUP,
-    DEFAULT_MIN_FUNDING_AMOUNT_SATS, DEFAULT_RBF_FEE_PERCENTAGE,
+    DEFAULT_BASE_FEE_MULTIPLIER, DEFAULT_BUMP_FEE_PERCENTAGE, DEFAULT_MAX_FEERATE_SAT_VB,
+    DEFAULT_MAX_RBF_ATTEMPTS, DEFAULT_MAX_TX_WEIGHT, DEFAULT_MAX_UNCONFIRMED_SPEEDUPS,
+    DEFAULT_MIN_BLOCKS_BEFORE_RESEND_SPEEDUP, DEFAULT_MIN_FUNDING_AMOUNT_SATS,
+    DEFAULT_RBF_FEE_PERCENTAGE,
 };
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_transaction_monitor::config::MonitorSettings;
@@ -29,6 +30,8 @@ pub struct CoordinatorSettings {
     pub min_blocks_before_resend_speedup: u32,
     pub max_feerate_sat_vb: u64,
     pub monitor_settings: MonitorSettings,
+    pub base_fee_multiplier: f64,
+    pub bump_fee_percentage: f64,
 }
 
 impl Default for CoordinatorSettings {
@@ -42,6 +45,8 @@ impl Default for CoordinatorSettings {
             min_blocks_before_resend_speedup: DEFAULT_MIN_BLOCKS_BEFORE_RESEND_SPEEDUP,
             max_feerate_sat_vb: DEFAULT_MAX_FEERATE_SAT_VB,
             monitor_settings: MonitorSettings::default(),
+            base_fee_multiplier: DEFAULT_BASE_FEE_MULTIPLIER,
+            bump_fee_percentage: DEFAULT_BUMP_FEE_PERCENTAGE,
         }
     }
 }
