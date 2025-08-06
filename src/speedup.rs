@@ -353,18 +353,26 @@ impl SpeedupStore for BitcoinCoordinatorStore {
                 .get::<&str, Vec<Txid>>(&key)?
                 .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
-            let position = speedups
+            let index = speedups
                 .iter()
                 .position(|id| *id == txid)
                 .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
-            speedups.remove(position);
+            // Create a vector of speedup transactions that precede the current transaction in the list.
+            let prev_speedups = speedups[0..index].to_vec();
 
-            self.store.set(&key, &speedups, None)?;
+            // Iterate over the previous speedup transactions in reverse order to find any finalized transaction.
+            for (index, txid) in prev_speedups.iter().rev().enumerate() {
+                if self.get_speedup(txid)?.state == SpeedupState::Finalized {
+                    // If a finalized transaction is found, remove it from the list and update the store.
+                    speedups.remove(index);
+                    self.store.set(&key, &speedups, None)?;
+                    break;
+                }
+            }
         }
 
         // Update the new state of the transaction in transaction by id.
-
         let key = SpeedupStoreKey::SpeedUpTransaction(txid).get_key();
 
         let mut speedup = self

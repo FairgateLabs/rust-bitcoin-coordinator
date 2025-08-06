@@ -268,15 +268,54 @@ fn test_update_speedup_state_and_remove_from_pending() -> Result<(), anyhow::Err
     let s = dummy_speedup_tx(&tx.compute_txid(), SpeedupState::Dispatched, false, 0);
     store.save_speedup(s.clone())?;
 
-    // Update to Finalized (should remove from pending list)
-    store.update_speedup_state(tx.compute_txid(), SpeedupState::Finalized)?;
+    // Update to Confirmed
+    store.update_speedup_state(tx.compute_txid(), SpeedupState::Confirmed)?;
 
     // Should not be in pending speedups
     let pending = store.get_pending_speedups()?;
-    assert!(pending.is_empty());
+    assert_eq!(pending.len(), 1);
+
+    let funding = store.get_funding()?;
+    assert!(funding.is_some());
+    assert_eq!(funding.unwrap().txid, tx.compute_txid());
+
+    let tx2 = generate_random_tx();
+    let s2 = dummy_speedup_tx(&tx2.compute_txid(), SpeedupState::Dispatched, false, 0);
+    store.save_speedup(s2.clone())?;
+
+    // Update to Confirmed
+    store.update_speedup_state(tx2.compute_txid(), SpeedupState::Confirmed)?;
+
+    // Should not be in pending speedups
+    let pending = store.get_pending_speedups()?;
+    assert_eq!(pending.len(), 2);
+
+    let funding = store.get_funding()?;
+    assert!(funding.is_some());
+    assert_eq!(funding.unwrap().txid, tx2.compute_txid());
+
+    // Update to Finalized
+    store.update_speedup_state(tx.compute_txid(), SpeedupState::Finalized)?;
+
+    // Should not be in pending speedups
+    let funding = store.get_funding()?;
+    assert!(funding.is_some());
+    assert_eq!(funding.unwrap().txid, tx2.compute_txid());
+
+    // Update to Finalized
+    store.update_speedup_state(tx2.compute_txid(), SpeedupState::Finalized)?;
+
+    // Should not be in pending speedups
+    let funding = store.get_funding()?;
+    assert!(funding.is_some());
+    assert_eq!(funding.unwrap().txid, tx2.compute_txid());
 
     // Should still be able to fetch by id, and state should be Finalized
     let fetched = store.get_speedup(&tx.compute_txid())?;
+    assert_eq!(fetched.state, SpeedupState::Finalized);
+
+    // Should not be in pending speedups
+    let fetched = store.get_speedup(&tx2.compute_txid())?;
     assert_eq!(fetched.state, SpeedupState::Finalized);
 
     clear_output();

@@ -595,7 +595,7 @@ impl BitcoinCoordinator {
         }
 
         info!(
-            "{} New {} Transaction({}) | Fee({}) | Transactions#({}) | FundingTx({}) | UTXO({}) {} | BumpFee({})",
+            "{} New {} Transaction({}) | Fee({}) | Transactions#({}) | FundingTx({}) | Vout({}) {} | BumpFee({})",
             style("Coordinator").green(),
             speedup_type,
             style(speedup_tx_id).yellow(),
