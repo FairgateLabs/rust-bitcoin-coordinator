@@ -277,7 +277,8 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
 #[test]
 fn test_load_config_file() -> Result<(), anyhow::Error> {
     // Load the configuration file to verify that the keys in regtest.yaml are present and ensure the structure remains valid
-    let settings = load_config_file::<CoordinatorConfig>(Some("config/regtest.yaml".to_string()));
+    let settings =
+        load_config_file::<CoordinatorConfig>(Some("config/coordinator_config.yaml".to_string()));
     assert!(settings.is_ok());
 
     Ok(())

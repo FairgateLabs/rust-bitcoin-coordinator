@@ -1,5 +1,5 @@
 use crate::{
-    config::{CoordinatorSettings, Settings},
+    config::{CoordinatorSettings, CoordinatorSettingsConfig},
     errors::BitcoinCoordinatorError,
     settings::CPFP_TRANSACTION_CONTEXT,
     speedup::SpeedupStore,
@@ -33,7 +33,7 @@ pub struct BitcoinCoordinator {
     store: BitcoinCoordinatorStore,
     client: BitcoinClient,
     _network: Network,
-    settings: Settings,
+    settings: CoordinatorSettings,
 }
 
 pub trait BitcoinCoordinatorApi {
@@ -101,19 +101,16 @@ impl BitcoinCoordinator {
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
         key_manager: Rc<KeyManager>,
-        settings: Option<CoordinatorSettings>,
+        settings: Option<CoordinatorSettingsConfig>,
     ) -> Result<Self, BitcoinCoordinatorError> {
-        let settings: Settings = Settings::from(settings.unwrap_or_default());
+        let monitor_settings = settings.clone().unwrap_or_default().monitor_settings;
+        let monitor = Monitor::new_with_paths(rpc_config, storage.clone(), monitor_settings)?;
 
-        println!("settings: {:#?}", settings);
+        let coordinator_settings: CoordinatorSettings =
+            CoordinatorSettings::from(settings.unwrap_or_default());
 
-        let monitor = Monitor::new_with_paths(
-            rpc_config,
-            storage.clone(),
-            Some(settings.monitor_settings.clone()),
-        )?;
-
-        let store = BitcoinCoordinatorStore::new(storage, settings.max_unconfirmed_speedups)?;
+        let store =
+            BitcoinCoordinatorStore::new(storage, coordinator_settings.max_unconfirmed_speedups)?;
         let client = BitcoinClient::new_from_config(rpc_config)?;
         let network = rpc_config.network;
 
@@ -123,7 +120,7 @@ impl BitcoinCoordinator {
             key_manager,
             client,
             _network: network,
-            settings,
+            settings: coordinator_settings,
         })
     }
 
