@@ -1,5 +1,5 @@
 use crate::{
-    config::CoordinatorSettings,
+    config::{CoordinatorSettings, Settings},
     errors::BitcoinCoordinatorError,
     settings::CPFP_TRANSACTION_CONTEXT,
     speedup::SpeedupStore,
@@ -33,7 +33,7 @@ pub struct BitcoinCoordinator {
     store: BitcoinCoordinatorStore,
     client: BitcoinClient,
     _network: Network,
-    settings: CoordinatorSettings,
+    settings: Settings,
 }
 
 pub trait BitcoinCoordinatorApi {
@@ -103,7 +103,9 @@ impl BitcoinCoordinator {
         key_manager: Rc<KeyManager>,
         settings: Option<CoordinatorSettings>,
     ) -> Result<Self, BitcoinCoordinatorError> {
-        let settings = settings.unwrap_or_default();
+        let settings: Settings = Settings::from(settings.unwrap_or_default());
+
+        println!("settings: {:#?}", settings);
 
         let monitor = Monitor::new_with_paths(
             rpc_config,
