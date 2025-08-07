@@ -874,6 +874,12 @@ impl BitcoinCoordinator {
 
         // If a fee bump is being applied, add the virtual size of the transaction chain to the total fee to incentivize the miners to include the chain in the next block.
         if chain_vsize > 0 && bump_fee_percentage > self.settings.base_fee_multiplier {
+            debug!(
+                "{} Adding to total fee ChainVsize({}) for bump fee {}",
+                style("Coordinator").green(),
+                style(chain_vsize).blue(),
+                style(bump_fee_percentage).blue()
+            );
             total_fee += chain_vsize;
         }
 
@@ -889,7 +895,7 @@ impl BitcoinCoordinator {
         }
 
         debug!(
-            "{} {}EstimateNetworkFee({}) | ParentTotalSats({}) | ChildTotalSats({}) | BumpFeePercentage({}) | ParentAmountOutputs({}) | ParentVbytes({}) | TotalFee({}) | FeeChainDifference({})",
+            "{} {}EstimateNetworkFee({}) | ParentTotalSats({}) | ChildTotalSats({}) | BumpFeePercentage({}) | ParentAmountOutputs({}) | ParentVbytes({}) | TotalFee({}) | FeeChainDifference({}) | ChainVsize({})",
             style("Coordinator").green(),
             style(fee_chain_difference_str),
             style(network_fee_rate).red(),
@@ -900,6 +906,7 @@ impl BitcoinCoordinator {
             style(parent_vbytes).red(),
             style(total_fee_bumped).red(),
             style(fee_chain_difference).red(),
+            style(chain_vsize).red(),
         );
 
         Ok(total_fee_bumped)
