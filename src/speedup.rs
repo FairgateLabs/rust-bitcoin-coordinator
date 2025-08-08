@@ -5,6 +5,7 @@ use crate::types::{CoordinatedSpeedUpTransaction, SpeedupState};
 use bitcoin::Txid;
 use protocol_builder::types::Utxo;
 use storage_backend::storage::KeyValueStore;
+use tracing::info;
 
 pub trait SpeedupStore {
     fn add_funding(&self, funding: Utxo) -> Result<(), BitcoinCoordinatorStoreError>;
@@ -344,35 +345,33 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         txid: Txid,
         state: SpeedupState,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
-        // Commented out for now...
+        if state == SpeedupState::Finalized {
+            // Means that the speedup transaction was finalized.
+            // Then we need to remove it from the pending list.
+            let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
+            let mut speedups = self
+                .store
+                .get::<&str, Vec<Txid>>(&key)?
+                .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
-        // if state == SpeedupState::Finalized {
-        //     // Means that the speedup transaction was finalized.
-        //     // Then we need to remove it from the pending list.
-        //     let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
-        //     let mut speedups = self
-        //         .store
-        //         .get::<&str, Vec<Txid>>(&key)?
-        //         .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
+            let index = speedups
+                .iter()
+                .position(|id| *id == txid)
+                .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
-        //     let index = speedups
-        //         .iter()
-        //         .position(|id| *id == txid)
-        //         .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
-
-        //     // Create a vector of speedup transactions that precede the current transaction in the list.
-        //     let prev_speedups = speedups[0..index].to_vec();
-
-        //     // Iterate over the previous speedup transactions in reverse order to find any finalized transaction.
-        //     for (index, txid) in prev_speedups.iter().rev().enumerate() {
-        //         if self.get_speedup(txid)?.state == SpeedupState::Finalized {
-        //             // If a finalized transaction is found, remove it from the list and update the store.
-        //             speedups.remove(index);
-        //             self.store.set(&key, &speedups, None)?;
-        //             break;
-        //         }
-        //     }
-        // }
+            // Iterate over all previous speedup transactions (before the current index)
+            // to find any that have reached the Finalized state and remove them from the pending list.
+            // This cleanup prevents the pending speedup list from growing indefinitely with finalized entries.
+            // TODO: Consider also removing unconfirmed transactions if necessary to further manage list size.
+            for (i, txid) in speedups[0..index].iter().enumerate() {
+                if self.get_speedup(txid)?.state == SpeedupState::Finalized {
+                    // If a finalized transaction is found, remove it from the list and update the store.
+                    speedups.remove(i);
+                    self.store.set(&key, &speedups, None)?;
+                    break;
+                }
+            }
+        }
 
         // Update the new state of the transaction in transaction by id.
         let key = SpeedupStoreKey::SpeedUpTransaction(txid).get_key();
