@@ -344,33 +344,35 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         txid: Txid,
         state: SpeedupState,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
-        if state == SpeedupState::Finalized {
-            // Means that the speedup transaction was finalized.
-            // Then we need to remove it from the pending list.
-            let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
-            let mut speedups = self
-                .store
-                .get::<&str, Vec<Txid>>(&key)?
-                .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
+        // Commented out for now...
 
-            let index = speedups
-                .iter()
-                .position(|id| *id == txid)
-                .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
+        // if state == SpeedupState::Finalized {
+        //     // Means that the speedup transaction was finalized.
+        //     // Then we need to remove it from the pending list.
+        //     let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
+        //     let mut speedups = self
+        //         .store
+        //         .get::<&str, Vec<Txid>>(&key)?
+        //         .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
-            // Create a vector of speedup transactions that precede the current transaction in the list.
-            let prev_speedups = speedups[0..index].to_vec();
+        //     let index = speedups
+        //         .iter()
+        //         .position(|id| *id == txid)
+        //         .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
-            // Iterate over the previous speedup transactions in reverse order to find any finalized transaction.
-            for (index, txid) in prev_speedups.iter().rev().enumerate() {
-                if self.get_speedup(txid)?.state == SpeedupState::Finalized {
-                    // If a finalized transaction is found, remove it from the list and update the store.
-                    speedups.remove(index);
-                    self.store.set(&key, &speedups, None)?;
-                    break;
-                }
-            }
-        }
+        //     // Create a vector of speedup transactions that precede the current transaction in the list.
+        //     let prev_speedups = speedups[0..index].to_vec();
+
+        //     // Iterate over the previous speedup transactions in reverse order to find any finalized transaction.
+        //     for (index, txid) in prev_speedups.iter().rev().enumerate() {
+        //         if self.get_speedup(txid)?.state == SpeedupState::Finalized {
+        //             // If a finalized transaction is found, remove it from the list and update the store.
+        //             speedups.remove(index);
+        //             self.store.set(&key, &speedups, None)?;
+        //             break;
+        //         }
+        //     }
+        // }
 
         // Update the new state of the transaction in transaction by id.
         let key = SpeedupStoreKey::SpeedUpTransaction(txid).get_key();
