@@ -362,7 +362,6 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             // Iterate over all previous speedup transactions (before the current index)
             // to find any that have reached the Finalized state and remove them from the pending list.
             // This cleanup prevents the pending speedup list from growing indefinitely with finalized entries.
-            // TODO: Consider also removing unconfirmed transactions if necessary to further manage list size.
             for (i, txid) in speedups[0..index].iter().enumerate() {
                 if self.get_speedup(txid)?.state == SpeedupState::Finalized {
                     // If a finalized transaction is found, remove it from the list and update the store.

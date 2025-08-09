@@ -264,12 +264,12 @@ fn test_update_speedup_state_and_remove_from_pending() -> Result<(), anyhow::Err
     let store = create_store();
 
     // Add a speedup tx
-    let tx = generate_random_tx();
-    let s = dummy_speedup_tx(&tx.compute_txid(), SpeedupState::Dispatched, false, 0);
+    let tx1 = generate_random_tx();
+    let s = dummy_speedup_tx(&tx1.compute_txid(), SpeedupState::Dispatched, false, 0);
     store.save_speedup(s.clone())?;
 
     // Update to Confirmed
-    store.update_speedup_state(tx.compute_txid(), SpeedupState::Confirmed)?;
+    store.update_speedup_state(tx1.compute_txid(), SpeedupState::Confirmed)?;
 
     // Should not be in pending speedups
     let pending = store.get_pending_speedups()?;
@@ -277,7 +277,7 @@ fn test_update_speedup_state_and_remove_from_pending() -> Result<(), anyhow::Err
 
     let funding = store.get_funding()?;
     assert!(funding.is_some());
-    assert_eq!(funding.unwrap().txid, tx.compute_txid());
+    assert_eq!(funding.unwrap().txid, tx1.compute_txid());
 
     let tx2 = generate_random_tx();
     let s2 = dummy_speedup_tx(&tx2.compute_txid(), SpeedupState::Dispatched, false, 0);
@@ -295,7 +295,7 @@ fn test_update_speedup_state_and_remove_from_pending() -> Result<(), anyhow::Err
     assert_eq!(funding.unwrap().txid, tx2.compute_txid());
 
     // Update to Finalized
-    store.update_speedup_state(tx.compute_txid(), SpeedupState::Finalized)?;
+    store.update_speedup_state(tx1.compute_txid(), SpeedupState::Finalized)?;
 
     // Should not be in pending speedups
     let funding = store.get_funding()?;
@@ -311,12 +311,39 @@ fn test_update_speedup_state_and_remove_from_pending() -> Result<(), anyhow::Err
     assert_eq!(funding.unwrap().txid, tx2.compute_txid());
 
     // Should still be able to fetch by id, and state should be Finalized
-    let fetched = store.get_speedup(&tx.compute_txid())?;
+    let fetched = store.get_speedup(&tx1.compute_txid())?;
     assert_eq!(fetched.state, SpeedupState::Finalized);
 
     // Should not be in pending speedups
     let fetched = store.get_speedup(&tx2.compute_txid())?;
     assert_eq!(fetched.state, SpeedupState::Finalized);
+
+    // Add a speedup tx
+    let tx3 = generate_random_tx();
+    let s = dummy_speedup_tx(&tx3.compute_txid(), SpeedupState::Dispatched, false, 0);
+    store.save_speedup(s.clone())?;
+
+    // Add a speedup tx
+    let tx4 = generate_random_tx();
+    let s = dummy_speedup_tx(&tx4.compute_txid(), SpeedupState::Confirmed, false, 0);
+    store.save_speedup(s.clone())?;
+
+    // Add a speedup tx
+    let tx5: Transaction = generate_random_tx();
+    let s = dummy_speedup_tx(&tx5.compute_txid(), SpeedupState::Confirmed, false, 0);
+    store.save_speedup(s.clone())?;
+    store.update_speedup_state(tx5.compute_txid(), SpeedupState::Finalized)?;
+
+    // Only the Confirmed and last Finalized speedups should be returned, pending speedups comes
+    // in reverse order.
+    let all = store.get_all_pending_speedups()?;
+    assert_eq!(all.len(), 3);
+    assert_eq!(all[0].state, SpeedupState::Finalized);
+    assert_eq!(all[1].state, SpeedupState::Confirmed);
+    assert_eq!(all[2].state, SpeedupState::Dispatched);
+    assert_eq!(all[0].tx_id, tx5.compute_txid());
+    assert_eq!(all[1].tx_id, tx4.compute_txid());
+    assert_eq!(all[2].tx_id, tx3.compute_txid());
 
     clear_output();
     Ok(())
