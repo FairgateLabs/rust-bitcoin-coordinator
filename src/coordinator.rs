@@ -23,7 +23,7 @@ use protocol_builder::{
     builder::ProtocolBuilder,
     types::{output::SpeedupData, Utxo},
 };
-use std::{rc::Rc, vec};
+use std::{rc::Rc, thread::sleep, vec};
 use storage_backend::storage::Storage;
 use tracing::{debug, error, info, warn};
 
@@ -271,7 +271,37 @@ impl BitcoinCoordinator {
             style(speedup_data.tx_id).yellow(),
         );
 
-        let dispatch_result = self.client.send_transaction(&tx);
+        let mut dispatch_result = self.client.send_transaction(&tx);
+
+        let mut count = 0;
+
+        // resend if error 5 times
+        while !dispatch_result.is_ok() {
+            count += 1;
+
+            error!(
+                "{} Error Sending {} Transaction({}): {:?}",
+                style("Coordinator").green(),
+                speedup_type,
+                style(speedup_data.tx_id).yellow(),
+                style(&tx).magenta()
+            );
+
+            let news = CoordinatorNews::DispatchTransactionError(
+                speedup_data.tx_id,
+                CPFP_TRANSACTION_CONTEXT.to_string(),
+                dispatch_result.as_ref().err().as_ref().unwrap().to_string(),
+            );
+
+            self.store.add_news(news)?;
+            if count < 10 {
+                dispatch_result = self.client.send_transaction(&tx);
+                info!("Going to sleep 5 secs and check again");
+                sleep(std::time::Duration::from_secs(5));
+            } else {
+                break;
+            }
+        }
 
         match dispatch_result {
             Ok(_) => {
@@ -280,14 +310,23 @@ impl BitcoinCoordinator {
                     CPFP_TRANSACTION_CONTEXT.to_string(),
                 ))?;
 
+                info!(
+                    "{} Successfully sent {} Transaction({}): {:?}",
+                    style("Coordinator").green(),
+                    speedup_type,
+                    style(speedup_data.tx_id).yellow(),
+                    style(&tx).magenta()
+                );
+
                 self.store.save_speedup(speedup_data)?;
             }
             Err(e) => {
                 error!(
-                    "{} Error Sending {} Transaction({})",
+                    "{} Error Sending {} Transaction({}): {:?}",
                     style("Coordinator").green(),
                     speedup_type,
-                    style(speedup_data.tx_id).yellow()
+                    style(speedup_data.tx_id).yellow(),
+                    style(&tx).magenta()
                 );
 
                 let news = CoordinatorNews::DispatchTransactionError(

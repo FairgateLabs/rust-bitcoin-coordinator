@@ -5,7 +5,6 @@ use crate::types::{CoordinatedSpeedUpTransaction, SpeedupState};
 use bitcoin::Txid;
 use protocol_builder::types::Utxo;
 use storage_backend::storage::KeyValueStore;
-use tracing::info;
 
 pub trait SpeedupStore {
     fn add_funding(&self, funding: Utxo) -> Result<(), BitcoinCoordinatorStoreError>;
