@@ -137,7 +137,7 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         &config_bitcoin_client,
         storage.clone(),
         key_manager.clone(),
-        Some(CoordinatorSettings::default()),
+        None,
     )?);
 
     // Since we've already mined 102 blocks, we need to advance the coordinator by 102 ticks

@@ -1,6 +1,6 @@
 use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
 use bitcoin_coordinator::{
-    config::CoordinatorSettings,
+    config::{CoordinatorSettings, CoordinatorSettingsConfig},
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
     TypesToMonitor,
 };
@@ -111,20 +111,17 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
         .mine_blocks_to_address(blocks_mined, &regtest_wallet)
         .unwrap();
 
-    let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
-
     // Fund address mines 1 block
     blocks_mined = blocks_mined + 1;
 
-    let (funding_speedup, funding_speedup_vout) =
-        bitcoin_client.fund_address(&funding_wallet, amount)?;
+    let (funding_speedup, _) = bitcoin_client.fund_address(&funding_wallet, amount)?;
 
     // Funding speed up tx mines 1 block
     blocks_mined = blocks_mined + 1;
 
-    let mut settings = CoordinatorSettings::default();
-    settings.retry_attempts_sending_tx = 4;
-    settings.retry_interval_seconds = 1;
+    let mut settings = CoordinatorSettingsConfig::default();
+    settings.retry_attempts_sending_tx = Some(4);
+    settings.retry_interval_seconds = Some(1);
 
     let coordinator = Rc::new(BitcoinCoordinator::new_with_paths(
         &config_bitcoin_client,

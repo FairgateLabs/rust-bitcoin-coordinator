@@ -1,5 +1,5 @@
 use crate::{
-    config::CoordinatorSettings,
+    config::{CoordinatorSettings, CoordinatorSettingsConfig},
     errors::BitcoinCoordinatorError,
     settings::CPFP_TRANSACTION_CONTEXT,
     speedup::SpeedupStore,
@@ -101,17 +101,16 @@ impl BitcoinCoordinator {
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
         key_manager: Rc<KeyManager>,
-        settings: Option<CoordinatorSettings>,
+        settings: Option<CoordinatorSettingsConfig>,
     ) -> Result<Self, BitcoinCoordinatorError> {
-        let settings = settings.unwrap_or_default();
+        let monitor_settings = settings.clone().unwrap_or_default().monitor_settings;
+        let monitor = Monitor::new_with_paths(rpc_config, storage.clone(), monitor_settings)?;
 
-        let monitor = Monitor::new_with_paths(
-            rpc_config,
-            storage.clone(),
-            Some(settings.monitor_settings.clone()),
-        )?;
+        let coordinator_settings: CoordinatorSettings =
+            CoordinatorSettings::from(settings.unwrap_or_default());
 
-        let store = BitcoinCoordinatorStore::new(storage, settings.max_unconfirmed_speedups)?;
+        let store =
+            BitcoinCoordinatorStore::new(storage, coordinator_settings.max_unconfirmed_speedups)?;
         let client = BitcoinClient::new_from_config(rpc_config)?;
         let network = rpc_config.network;
 
@@ -121,7 +120,7 @@ impl BitcoinCoordinator {
             key_manager,
             client,
             _network: network,
-            settings,
+            settings: coordinator_settings,
         })
     }
 
@@ -332,7 +331,7 @@ impl BitcoinCoordinator {
 
         let mut retry_attempt = self.settings.retry_attempts_sending_tx;
 
-        while retry_attempt > 0 {
+        while retry_attempt > 0 && dispatch_result.is_err() {
             debug!(
                 "{} Sleeping({} Seconds) before retrying",
                 style("Coordinator").green(),
@@ -361,23 +360,20 @@ impl BitcoinCoordinator {
             )?;
         }
 
-        match dispatch_result {
-            Ok(_) => {
-                self.monitor.monitor(TypesToMonitor::Transactions(
-                    vec![speedup_data.tx_id],
-                    CPFP_TRANSACTION_CONTEXT.to_string(),
-                ))?;
+        if dispatch_result.is_ok() {
+            self.monitor.monitor(TypesToMonitor::Transactions(
+                vec![speedup_data.tx_id],
+                CPFP_TRANSACTION_CONTEXT.to_string(),
+            ))?;
 
-                info!(
-                    "{} Successfully sent {} Transaction({})",
-                    style("Coordinator").green(),
-                    speedup_type,
-                    style(speedup_data.tx_id).yellow(),
-                );
+            info!(
+                "{} Successfully sent {} Transaction({})",
+                style("Coordinator").green(),
+                speedup_type,
+                style(speedup_data.tx_id).yellow(),
+            );
 
-                self.store.save_speedup(speedup_data)?;
-            }
-            _ => {}
+            self.store.save_speedup(speedup_data)?;
         }
 
         Ok(())
@@ -826,7 +822,7 @@ impl BitcoinCoordinator {
             }
 
             let speedup_fee = self.calculate_speedup_fee(
-                &txs_data,
+                txs_data,
                 child_vsize,
                 bump_fee_percentage,
                 network_fee_rate,
