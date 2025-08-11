@@ -97,7 +97,7 @@ pub struct CoordinatedSpeedUpTransaction {
 
     pub bump_fee_percentage_used: f64,
 
-    pub speedup_tx_data: Vec<(SpeedupData, Transaction)>,
+    pub speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
 
     pub network_fee_rate_used: u64,
 }
@@ -112,7 +112,7 @@ impl CoordinatedSpeedUpTransaction {
         broadcast_block_height: BlockHeight,
         state: SpeedupState,
         bump_fee_percentage_used: f64,
-        speedup_tx_data: Vec<(SpeedupData, Transaction)>,
+        speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
         network_fee_rate_used: u64,
     ) -> Self {
         let mut context = if is_rbf {
@@ -185,9 +185,9 @@ pub enum CoordinatorNews {
     DispatchTransactionError(Txid, String, String),
 
     /// Error when attempting to speed up a transaction
-    /// - Txid: The transaction ID that failed to speed up
-    /// - String: Context information about the transaction
-    /// - Txid: The funding transaction ID that was insufficient
+    /// - Vec<Txid>: The transaction IDs that failed to speed up
+    /// - Vec<String>: Context information about the transactions that failed to be sent
+    /// - Txid: The cpfp/rbf transaction ID that failed to be sent
     /// - String: Error message describing what went wrong
     DispatchSpeedUpError(Vec<Txid>, Vec<String>, Txid, String),
 

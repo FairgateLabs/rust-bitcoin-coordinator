@@ -50,9 +50,9 @@ fn dummy_speedup_tx(
         state,
         0.0,
         vec![
-            (speedup_data_1, tx_1),
-            (speedup_data_2, tx_2),
-            (speedup_data_3, tx_3),
+            (speedup_data_1, tx_1, "Context 1".to_string()),
+            (speedup_data_2, tx_2, "Context 2".to_string()),
+            (speedup_data_3, tx_3, "Context 3".to_string()),
         ],
         1,
     )

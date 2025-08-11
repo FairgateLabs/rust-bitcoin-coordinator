@@ -211,6 +211,7 @@ impl BitcoinCoordinator {
                         (
                             coordinated_tx.speedup_data.clone().unwrap(),
                             coordinated_tx.tx.clone(),
+                            coordinated_tx.context.clone(),
                         )
                     })
                     .collect();
@@ -257,6 +258,45 @@ impl BitcoinCoordinator {
         Ok(())
     }
 
+    fn inform_dispatch_speedup_error(
+        &self,
+        txs_info: (Vec<Txid>, Vec<String>),
+        speedup_type: String,
+        retry_attempts_count: Option<u32>,
+        speedup_tx_id: Txid,
+        tx: Transaction,
+        dispatch_error: String,
+    ) -> Result<(), BitcoinCoordinatorError> {
+        if retry_attempts_count.is_some() {
+            error!(
+                "{} Error Resending {} Transaction({}) | RetryAttempt({})",
+                style("Coordinator").green(),
+                speedup_type,
+                style(speedup_tx_id).yellow(),
+                retry_attempts_count.unwrap(),
+            );
+        } else {
+            error!(
+                "{} Error Sending  {} Transaction({}): {:?}",
+                style("Coordinator").green(),
+                speedup_type,
+                style(speedup_tx_id).yellow(),
+                style(&tx).magenta(),
+            );
+        }
+
+        let news = CoordinatorNews::DispatchSpeedUpError(
+            txs_info.0,
+            txs_info.1,
+            speedup_tx_id,
+            dispatch_error,
+        );
+
+        self.store.add_news(news)?;
+
+        Ok(())
+    }
+
     fn dispatch_speedup(
         &self,
         tx: Transaction,
@@ -273,34 +313,52 @@ impl BitcoinCoordinator {
 
         let mut dispatch_result = self.client.send_transaction(&tx);
 
-        let mut count = 0;
+        let txs_info: (Vec<Txid>, Vec<String>) = speedup_data
+            .speedup_tx_data
+            .iter()
+            .map(|(_, tx, context)| (tx.compute_txid(), context.clone()))
+            .collect();
 
-        // resend if error 5 times
-        while !dispatch_result.is_ok() {
-            count += 1;
-
-            error!(
-                "{} Error Sending {} Transaction({}): {:?}",
-                style("Coordinator").green(),
-                speedup_type,
-                style(speedup_data.tx_id).yellow(),
-                style(&tx).magenta()
-            );
-
-            let news = CoordinatorNews::DispatchTransactionError(
+        if dispatch_result.is_err() {
+            self.inform_dispatch_speedup_error(
+                txs_info.clone(),
+                speedup_type.clone(),
+                None,
                 speedup_data.tx_id,
-                CPFP_TRANSACTION_CONTEXT.to_string(),
+                tx.clone(),
                 dispatch_result.as_ref().err().as_ref().unwrap().to_string(),
+            )?;
+        }
+
+        let mut retry_attempt = self.settings.retry_attempts_sending_tx;
+
+        while retry_attempt > 0 {
+            debug!(
+                "{} Sleeping({} Seconds) before retrying",
+                style("Coordinator").green(),
+                style(self.settings.retry_interval_seconds).yellow()
             );
 
-            self.store.add_news(news)?;
-            if count < 10 {
-                dispatch_result = self.client.send_transaction(&tx);
-                info!("Going to sleep 5 secs and check again");
-                sleep(std::time::Duration::from_secs(5));
-            } else {
+            sleep(std::time::Duration::from_secs(
+                self.settings.retry_interval_seconds,
+            ));
+
+            dispatch_result = self.client.send_transaction(&tx);
+
+            if dispatch_result.is_ok() {
                 break;
             }
+
+            retry_attempt -= 1;
+
+            self.inform_dispatch_speedup_error(
+                txs_info.clone(),
+                speedup_type.clone(),
+                Some(retry_attempt),
+                speedup_data.tx_id,
+                tx.clone(),
+                dispatch_result.as_ref().err().as_ref().unwrap().to_string(),
+            )?;
         }
 
         match dispatch_result {
@@ -311,32 +369,15 @@ impl BitcoinCoordinator {
                 ))?;
 
                 info!(
-                    "{} Successfully sent {} Transaction({}): {:?}",
+                    "{} Successfully sent {} Transaction({})",
                     style("Coordinator").green(),
                     speedup_type,
                     style(speedup_data.tx_id).yellow(),
-                    style(&tx).magenta()
                 );
 
                 self.store.save_speedup(speedup_data)?;
             }
-            Err(e) => {
-                error!(
-                    "{} Error Sending {} Transaction({}): {:?}",
-                    style("Coordinator").green(),
-                    speedup_type,
-                    style(speedup_data.tx_id).yellow(),
-                    style(&tx).magenta()
-                );
-
-                let news = CoordinatorNews::DispatchTransactionError(
-                    speedup_data.tx_id,
-                    CPFP_TRANSACTION_CONTEXT.to_string(),
-                    e.to_string(),
-                );
-
-                self.store.add_news(news)?;
-            }
+            _ => {}
         }
 
         Ok(())
@@ -465,7 +506,7 @@ impl BitcoinCoordinator {
 
             match tx_status {
                 Ok(tx_status) => {
-                    info!(
+                    debug!(
                         "{} {} Transaction({}) | Confirmations({})",
                         style("Coordinator").green(),
                         tx.get_tx_name(),
@@ -516,7 +557,7 @@ impl BitcoinCoordinator {
 
             match tx_status {
                 Ok(tx_status) => {
-                    info!(
+                    debug!(
                         "{} Transaction({}) | Confirmations({})",
                         style("Coordinator").green(),
                         style(tx.tx_id).yellow(),
@@ -583,7 +624,7 @@ impl BitcoinCoordinator {
 
     fn create_and_send_cpfp_tx(
         &self,
-        txs_data: Vec<(SpeedupData, Transaction)>,
+        txs_data: Vec<(SpeedupData, Transaction, String)>,
         funding: Utxo,
         bump_fee: f64,
         cpfp_id_to_replace: Option<Txid>,
@@ -604,7 +645,7 @@ impl BitcoinCoordinator {
 
         let txs_speedup_data = txs_data
             .iter()
-            .map(|(speedup_data, tx)| (speedup_data.clone(), tx.vsize()))
+            .map(|(speedup_data, tx, _)| (speedup_data.clone(), tx.vsize()))
             .collect();
 
         let new_network_fee_rate = self.get_network_fee_rate()?;
@@ -630,7 +671,10 @@ impl BitcoinCoordinator {
         }
 
         let speedup_tx_id = speedup_tx.compute_txid();
-        let txids: Vec<Txid> = txs_data.iter().map(|(_, tx)| tx.compute_txid()).collect();
+        let txs_info: Vec<(Txid, String)> = txs_data
+            .iter()
+            .map(|(_, tx, context)| (tx.compute_txid(), context.clone()))
+            .collect();
 
         let speedup_type = if is_rbf { "RBF" } else { "CPFP" };
         let mut cpfp_to_replace = String::new();
@@ -645,7 +689,7 @@ impl BitcoinCoordinator {
             speedup_type,
             style(speedup_tx_id).yellow(),
             style(speedup_fee).blue(),
-            style(txids.len()).blue(),
+            style(txs_info.len()).blue(),
             style(funding.txid).blue(),
             style(funding.vout).blue(),
             style(cpfp_to_replace).blue(),
@@ -698,7 +742,7 @@ impl BitcoinCoordinator {
             let txs_data = speedup
                 .speedup_tx_data
                 .iter()
-                .map(|(speedup_data, tx)| (speedup_data.clone(), tx.vsize()))
+                .map(|(speedup_data, tx, _)| (speedup_data.clone(), tx.vsize()))
                 .collect();
 
             let (tx, fee_to_pay) = self.get_speedup_tx(
@@ -818,7 +862,7 @@ impl BitcoinCoordinator {
 
         let mut txs_to_speedup: Vec<CoordinatedTransaction> = Vec::new();
 
-        for (_, tx) in speedup.speedup_tx_data.clone() {
+        for (_, tx, _) in speedup.speedup_tx_data.clone() {
             let tx = self.store.get_tx(&tx.compute_txid())?;
             txs_to_speedup.push(tx);
         }
@@ -1034,7 +1078,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         let is_ready = self.monitor.is_ready()?;
 
         let is_ready_str = if is_ready { "Ready" } else { "Not Ready" };
-        info!("{} {}", style("Coordinator").green(), is_ready_str);
+        debug!("{} {}", style("Coordinator").green(), is_ready_str);
 
         if !is_ready {
             return Ok(());

@@ -1,5 +1,6 @@
 use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
 use bitcoin_coordinator::{
+    config::CoordinatorSettings,
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
     TypesToMonitor,
 };
@@ -48,9 +49,16 @@ fn config_trace_aux() {
         .init();
 }
 
+// This test is designed to verify the behavior of the BitcoinCoordinator
+// when there is an error sending a speedup (CPFP or RBF) transaction.
+//
+// The test will:
+// - Attempt to dispatch a transaction that requires a speedup (e.g., CPFP).
+// - Trigger an error when sending the speedup transaction (because funding utxo is invalid).
+// - Assert that the coordinator correctly reports the error.
 #[test]
 #[ignore = "This test works, but it runs in regtest with a bitcoind running"]
-fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
+fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
@@ -108,37 +116,21 @@ fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
     // Fund address mines 1 block
     blocks_mined = blocks_mined + 1;
 
-    info!(
-        "{} Funding tx address {:?}",
-        style("Test").green(),
-        funding_wallet
-    );
-
-    info!(
-        "{} Funding tx: {:?} | vout: {:?}",
-        style("Test").green(),
-        funding_tx.compute_txid(),
-        funding_vout
-    );
-
     let (funding_speedup, funding_speedup_vout) =
         bitcoin_client.fund_address(&funding_wallet, amount)?;
 
     // Funding speed up tx mines 1 block
     blocks_mined = blocks_mined + 1;
 
-    info!(
-        "{} Funding speed up tx: {:?} | vout: {:?}",
-        style("Test").green(),
-        funding_speedup.compute_txid(),
-        funding_speedup_vout
-    );
+    let mut settings = CoordinatorSettings::default();
+    settings.retry_attempts_sending_tx = 4;
+    settings.retry_interval_seconds = 1;
 
     let coordinator = Rc::new(BitcoinCoordinator::new_with_paths(
         &config_bitcoin_client,
         storage.clone(),
         key_manager.clone(),
-        None,
+        Some(settings),
     )?);
 
     // Since we've already mined 102 blocks, we need to advance the coordinator by 102 ticks
@@ -147,10 +139,10 @@ fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
         coordinator.tick()?;
     }
 
-    // Add funding for speed up transaction
+    // Add funding for speed up transaction, in this case we will use the funding_speedup_vout in 10, to get an error after sending CPFP transaction.lleellesad
     coordinator.add_funding(Utxo::new(
         funding_speedup.compute_txid(),
-        funding_speedup_vout,
+        10,
         amount.to_sat(),
         &public_key,
     ))?;
@@ -172,37 +164,12 @@ fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
         .unwrap();
 
     coordinator.tick()?;
-
-    let news = coordinator.get_news()?;
-    assert_eq!(news.monitor_news.len(), 0);
-
-    let mut old_fee_rate = bitcoin_client.estimate_smart_fee()?;
-
-    for _ in 0..16 {
-        bitcoin_client.fund_address(&funding_wallet, amount)?;
-
-        let fee_rate = bitcoin_client.estimate_smart_fee()?;
-
-        if old_fee_rate != fee_rate {
-            info!(
-                "Fee rate changed: Old: {} | New: {}",
-                old_fee_rate, fee_rate
-            );
-            old_fee_rate = fee_rate;
-        }
-        info!("Fee rate: {}", fee_rate);
-    }
-
-    for _ in 0..17 {
-        // Tick coordinator
-        coordinator.tick()?;
-    }
-
-    bitcoin_client.mine_blocks_to_address(1, &funding_wallet)?;
+    coordinator.tick()?;
     coordinator.tick()?;
 
     let news = coordinator.get_news()?;
-    assert_eq!(news.monitor_news.len(), 1);
+    // First send + 4 retries = 5
+    assert_eq!(news.coordinator_news.len(), 5);
 
     bitcoind.stop()?;
 
