@@ -196,14 +196,15 @@ impl BitcoinCoordinator {
             // construct and broadcast a single CPFP transaction to pay for the entire batch.
             let txs_sent: Vec<CoordinatedTransaction> = self.dispatch_txs(txs_batch)?;
 
-            info!(
-                "{} Sending batch of {} transactions",
-                style("Coordinator").green(),
-                txs_sent.len()
-            );
             // Only create a CPFP (Child Pays For Parent) transaction if there are transactions that were successfully sent in this batch.
             // If no transactions were sent, skip CPFP creation for this batch.
             if !txs_sent.is_empty() {
+                info!(
+                    "{} Sending batch of {} transactions",
+                    style("Coordinator").green(),
+                    txs_sent.len()
+                );
+
                 let txs_data = txs_sent
                     .iter()
                     .map(|coordinated_tx| {
@@ -1188,6 +1189,14 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
     }
 
     fn add_funding(&self, utxo: Utxo) -> Result<(), BitcoinCoordinatorError> {
+        info!(
+            "{} Funding added | Txid({}) | Vout({}) | Amount({}) | PublicKey({})",
+            style("Coordinator").green(),
+            style(utxo.txid).cyan(),
+            style(utxo.vout).cyan(),
+            style(utxo.amount).cyan(),
+            style(utxo.pub_key).cyan()
+        );
         // Each time a speedup transaction is generated, it consumes the previous funding UTXO and leaves any change as the new funding for subsequent speedups.
         // Therefore, every new funding UTXO should be recorded in the same format as a speedup transaction, ensuring the coordinator always tracks the latest available funding.
         self.store.add_funding(utxo)?;

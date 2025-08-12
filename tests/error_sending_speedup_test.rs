@@ -49,13 +49,12 @@ fn config_trace_aux() {
         .init();
 }
 
-// This test is designed to verify the behavior of the BitcoinCoordinator
-// when there is an error sending a speedup (CPFP or RBF) transaction.
+// This test verifies the behavior of the BitcoinCoordinator when an error occurs while sending a speedup transaction (either CPFP or RBF).
 //
-// The test will:
-// - Attempt to dispatch a transaction that requires a speedup (e.g., CPFP).
-// - Trigger an error when sending the speedup transaction (because funding utxo is invalid).
-// - Assert that the coordinator correctly reports the error.
+// The test procedure includes:
+// - Dispatching a transaction that requires a speedup (e.g., CPFP).
+// - Intentionally causing an error by using an invalid funding UTXO for the speedup transaction.
+// - Asserting that the coordinator accurately reports the error.
 #[test]
 #[ignore = "This test works, but it runs in regtest with a bitcoind running"]
 fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
@@ -84,7 +83,7 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
         "ruimarinho/bitcoin-core",
         config_bitcoin_client.clone(),
         BitcoindFlags {
-            block_min_tx_fee: 0.00004,
+            block_min_tx_fee: 0.00002,
             ..Default::default()
         },
     );
@@ -111,13 +110,13 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
         .mine_blocks_to_address(blocks_mined, &regtest_wallet)
         .unwrap();
 
-    // Fund address mines 1 block
-    blocks_mined = blocks_mined + 1;
+    // Increment the block count after mining 1 block to fund the address
+    blocks_mined += 1;
 
     let (funding_speedup, _) = bitcoin_client.fund_address(&funding_wallet, amount)?;
 
-    // Funding speed up tx mines 1 block
-    blocks_mined = blocks_mined + 1;
+    // Increment the block count after mining 1 block for the funding speedup transaction
+    blocks_mined += 1;
 
     const RETRY_INTERVAL_SECONDS: u64 = 1;
     let mut settings = CoordinatorSettingsConfig::default();
@@ -131,19 +130,20 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
         Some(settings),
     )?);
 
-    // Since we've already mined 102 blocks, we need to advance the coordinator by 102 ticks
-    // so the indexer can catch up with the current blockchain height.
+    // Advance the coordinator by the number of blocks mined to synchronize with the current blockchain height
     for _ in 0..blocks_mined {
         coordinator.tick()?;
     }
 
-    // Add funding for speed up transaction, in this case we will use the funding_speedup_vout in 10, to get an error after sending CPFP transaction.lleellesad
+    // Add funding for the speedup transaction using an invalid output index to trigger an error
     coordinator.add_funding(Utxo::new(
         funding_speedup.compute_txid(),
         10,
         amount.to_sat(),
         &public_key,
     ))?;
+
+    coordinator.tick()?;
 
     coordinate_tx(
         coordinator.clone(),
@@ -153,37 +153,77 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
         bitcoin_client.clone(),
     )?;
 
-    // First tick, will dispatch tx and get error
-    coordinator.tick()?;
-
-    // Mine a block to mined txs (tx1 and speedup tx)
+    // Mine a block to confirm the initial transactions (tx1 and speedup tx)
     bitcoin_client
         .mine_blocks_to_address(1, &funding_wallet)
         .unwrap();
+    coordinator.tick()?;
 
-    // Second tick, will retry tx 1 time
+    // First tick: Attempt to send the transaction for the first time, expecting an error
+    info!("Should print error 1");
     std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
     coordinator.tick()?;
 
-    // Third tick, will retry tx 2 times
+    // Second tick: Retry sending the transaction, expecting another error
+    info!("Should print error 2");
     std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
     coordinator.tick()?;
 
-    // Fourth tick, will retry tx 3 times
+    // Third tick: Retry sending the transaction again, expecting a third error
+    info!("Should print error 3");
     std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
     coordinator.tick()?;
 
-    // Fifth tick, will retry tx 4 times
-    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
+    // Before the final retry, update the funding with a valid UTXO to allow successful dispatch
+    let (funding_speedup, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
+
+    coordinator.add_funding(Utxo::new(
+        funding_speedup.compute_txid(),
+        funding_vout,
+        amount.to_sat(),
+        &public_key,
+    ))?;
+
     coordinator.tick()?;
 
-    // Sixth tick, will NOT retry because max retries reached
+    // Dispatch a new transaction (tx2) to be processed
+    coordinate_tx(
+        coordinator.clone(),
+        amount,
+        network,
+        key_manager.clone(),
+        bitcoin_client.clone(),
+    )?;
+
+    // Mine 5 blocks to confirm transaction tx2 and its speedup transaction
+    for _ in 0..5 {
+        coordinator.tick()?;
+
+        bitcoin_client
+            .mine_blocks_to_address(1, &funding_wallet)
+            .unwrap();
+
+        coordinator.tick()?;
+    }
+
+    // Wait for the retry interval to pass before the final retry
     std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
-    coordinator.tick()?;
+
+    // Mine 5 more blocks to ensure transaction tx2 and its speedup transaction are confirmed
+    for _ in 0..5 {
+        coordinator.tick()?;
+
+        bitcoin_client
+            .mine_blocks_to_address(1, &funding_wallet)
+            .unwrap();
+
+        coordinator.tick()?;
+    }
 
     let news = coordinator.get_news()?;
-    // First send + 4 retries = 5
-    assert_eq!(news.coordinator_news.len(), 5);
+    // Verify that there are 3 error reports (initial send + 2 retries) and 2 confirmed transactions
+    assert_eq!(news.coordinator_news.len(), 3);
+    assert_eq!(news.monitor_news.len(), 2);
 
     bitcoind.stop()?;
 
@@ -208,8 +248,6 @@ fn coordinate_tx(
     let funding_wallet = Address::p2wpkh(&compressed, network);
 
     let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
-
-    coordinator.tick()?;
 
     let (tx1, tx1_speedup_utxo) = generate_tx(
         OutPoint::new(funding_tx.compute_txid(), funding_vout),

@@ -6,6 +6,7 @@ use bitcoin::Txid;
 use chrono::Utc;
 use protocol_builder::types::Utxo;
 use storage_backend::storage::KeyValueStore;
+use tracing::debug;
 
 pub trait SpeedupStore {
     fn add_funding(&self, funding: Utxo) -> Result<(), BitcoinCoordinatorStoreError>;
@@ -457,10 +458,20 @@ impl SpeedupStore for BitcoinCoordinatorStore {
 
         for speedup in speedups.iter() {
             if let Some(retry_info) = &speedup.retry_info {
-                if retry_info.retries_count < max_retries
-                    && current_time >= retry_info.last_retry_timestamp + interval_seconds * 1000
-                {
-                    eligible_speedups.push(speedup.clone());
+                if retry_info.retries_count < max_retries {
+                    if current_time >= retry_info.last_retry_timestamp + interval_seconds * 1000 {
+                        eligible_speedups.push(speedup.clone());
+                    } else {
+                        debug!(
+                            "Skipping RetrySpeedup({}) because the retry interval has not passed | CurrentTime({}) | LastRetryTimestamp({}) | IntervalSeconds({})",
+                            speedup.tx_id, current_time, retry_info.last_retry_timestamp, interval_seconds
+                        );
+                    }
+                } else {
+                    debug!(
+                        "Skipping RetrySpeedup({}) because it has reached the max retries | RetriesCount({}) | MaxRetries({})",
+                        speedup.tx_id, retry_info.retries_count, max_retries
+                    );
                 }
             }
         }
