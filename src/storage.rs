@@ -112,7 +112,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let tx = self.store.get::<&str, CoordinatedTransaction>(&key)?;
 
         if tx.is_none() {
-            let message = format!("Transaction not found: {}", tx_id);
+            let message = format!("Transaction not found: {tx_id}");
             return Err(BitcoinCoordinatorStoreError::TransactionNotFound(message));
         }
 

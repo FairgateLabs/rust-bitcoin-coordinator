@@ -1,5 +1,6 @@
 use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
 use bitcoin_coordinator::{
+    config::CoordinatorConfig,
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
     types::AckNews,
     AckMonitorNews, MonitorNews, TypesToMonitor,
@@ -9,6 +10,7 @@ use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     rpc_config::RpcConfig,
 };
+use bitvmx_settings::settings::load_config_file;
 use console::style;
 use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
@@ -268,6 +270,16 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     }
 
     bitcoind.stop()?;
+
+    Ok(())
+}
+
+#[test]
+fn test_load_config_file() -> Result<(), anyhow::Error> {
+    // Load the configuration file to verify that the keys in regtest.yaml are present and ensure the structure remains valid
+    let settings =
+        load_config_file::<CoordinatorConfig>(Some("config/coordinator_config.yaml".to_string()));
+    assert!(settings.is_ok());
 
     Ok(())
 }

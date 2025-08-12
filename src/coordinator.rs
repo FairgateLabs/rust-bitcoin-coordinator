@@ -1,5 +1,5 @@
 use crate::{
-    config::CoordinatorSettings,
+    config::{CoordinatorSettings, CoordinatorSettingsConfig},
     errors::BitcoinCoordinatorError,
     settings::CPFP_TRANSACTION_CONTEXT,
     speedup::SpeedupStore,
@@ -23,7 +23,7 @@ use protocol_builder::{
     builder::ProtocolBuilder,
     types::{output::SpeedupData, Utxo},
 };
-use std::rc::Rc;
+use std::{rc::Rc, vec};
 use storage_backend::storage::Storage;
 use tracing::{debug, error, info, warn};
 
@@ -101,17 +101,16 @@ impl BitcoinCoordinator {
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
         key_manager: Rc<KeyManager>,
-        settings: Option<CoordinatorSettings>,
+        settings: Option<CoordinatorSettingsConfig>,
     ) -> Result<Self, BitcoinCoordinatorError> {
-        let settings = settings.unwrap_or_default();
+        let monitor_settings = settings.clone().unwrap_or_default().monitor_settings;
+        let monitor = Monitor::new_with_paths(rpc_config, storage.clone(), monitor_settings)?;
 
-        let monitor = Monitor::new_with_paths(
-            rpc_config,
-            storage.clone(),
-            Some(settings.monitor_settings.clone()),
-        )?;
+        let coordinator_settings: CoordinatorSettings =
+            CoordinatorSettings::from(settings.unwrap_or_default());
 
-        let store = BitcoinCoordinatorStore::new(storage, settings.max_unconfirmed_speedups)?;
+        let store =
+            BitcoinCoordinatorStore::new(storage, coordinator_settings.max_unconfirmed_speedups)?;
         let client = BitcoinClient::new_from_config(rpc_config)?;
         let network = rpc_config.network;
 
@@ -121,7 +120,7 @@ impl BitcoinCoordinator {
             key_manager,
             client,
             _network: network,
-            settings,
+            settings: coordinator_settings,
         })
     }
 
@@ -197,17 +196,34 @@ impl BitcoinCoordinator {
             // construct and broadcast a single CPFP transaction to pay for the entire batch.
             let txs_sent: Vec<CoordinatedTransaction> = self.dispatch_txs(txs_batch)?;
 
-            info!(
-                "{} Sending batch of {} transactions",
-                style("Coordinator").green(),
-                txs_sent.len()
-            );
             // Only create a CPFP (Child Pays For Parent) transaction if there are transactions that were successfully sent in this batch.
             // If no transactions were sent, skip CPFP creation for this batch.
             if !txs_sent.is_empty() {
+                info!(
+                    "{} Sending batch of {} transactions",
+                    style("Coordinator").green(),
+                    txs_sent.len()
+                );
+
+                let txs_data = txs_sent
+                    .iter()
+                    .map(|coordinated_tx| {
+                        (
+                            coordinated_tx.speedup_data.clone().unwrap(),
+                            coordinated_tx.tx.clone(),
+                            coordinated_tx.context.clone(),
+                        )
+                    })
+                    .collect();
                 // Up to here we have funding and we are sure we have funding.
                 let funding = self.store.get_funding()?.unwrap();
-                self.create_and_send_cpfp_tx(txs_sent, funding, 1.0, None)?;
+                self.create_and_send_cpfp_tx(
+                    txs_data,
+                    funding,
+                    self.settings.base_fee_multiplier,
+                    None,
+                    None,
+                )?;
             }
         }
 
@@ -237,8 +253,47 @@ impl BitcoinCoordinator {
                 style("Coordinator").green(),
                 style(speedup.tx_id).yellow()
             );
-            self.create_and_send_cpfp_tx(vec![], funding, bump_fee_percentage, None)?;
+            self.create_and_send_cpfp_tx(vec![], funding, bump_fee_percentage, None, None)?;
         }
+
+        Ok(())
+    }
+
+    fn inform_dispatch_speedup_error(
+        &self,
+        txs_info: (Vec<Txid>, Vec<String>),
+        speedup_type: String,
+        retry_attempts_count: Option<u32>,
+        speedup_tx_id: Txid,
+        tx: Transaction,
+        dispatch_error: String,
+    ) -> Result<(), BitcoinCoordinatorError> {
+        if retry_attempts_count.is_some() {
+            error!(
+                "{} Error Resending {} Transaction({}) | RetryAttempt({})",
+                style("Coordinator").green(),
+                speedup_type,
+                style(speedup_tx_id).yellow(),
+                retry_attempts_count.unwrap(),
+            );
+        } else {
+            error!(
+                "{} Error Sending  {} Transaction({}): {:?}",
+                style("Coordinator").green(),
+                speedup_type,
+                style(speedup_tx_id).yellow(),
+                style(&tx).magenta(),
+            );
+        }
+
+        let news = CoordinatorNews::DispatchSpeedUpError(
+            txs_info.0,
+            txs_info.1,
+            speedup_tx_id,
+            dispatch_error,
+        );
+
+        self.store.add_news(news)?;
 
         Ok(())
     }
@@ -247,6 +302,7 @@ impl BitcoinCoordinator {
         &self,
         tx: Transaction,
         speedup_data: CoordinatedSpeedUpTransaction,
+        retry_txid: Option<Txid>,
     ) -> Result<(), BitcoinCoordinatorError> {
         let speedup_type = speedup_data.get_tx_name();
 
@@ -259,30 +315,49 @@ impl BitcoinCoordinator {
 
         let dispatch_result = self.client.send_transaction(&tx);
 
-        match dispatch_result {
-            Ok(_) => {
-                self.monitor.monitor(TypesToMonitor::Transactions(
-                    vec![speedup_data.tx_id],
-                    CPFP_TRANSACTION_CONTEXT.to_string(),
-                ))?;
+        let txs_info: (Vec<Txid>, Vec<String>) = speedup_data
+            .speedup_tx_data
+            .iter()
+            .map(|(_, tx, context)| (tx.compute_txid(), context.clone()))
+            .collect();
 
-                self.store.save_speedup(speedup_data)?;
+        if dispatch_result.is_err() {
+            self.inform_dispatch_speedup_error(
+                txs_info.clone(),
+                speedup_type.clone(),
+                None,
+                speedup_data.tx_id,
+                tx.clone(),
+                dispatch_result.as_ref().err().as_ref().unwrap().to_string(),
+            )?;
+
+            if retry_txid.is_some() {
+                self.store
+                    .increment_speedup_retry_count(speedup_data.tx_id)?;
+            } else {
+                self.store.queue_speedup_for_retry(speedup_data)?;
             }
-            Err(e) => {
-                error!(
-                    "{} Error Sending {} Transaction({})",
-                    style("Coordinator").green(),
-                    speedup_type,
-                    style(speedup_data.tx_id).yellow()
-                );
 
-                let news = CoordinatorNews::DispatchTransactionError(
-                    speedup_data.tx_id,
-                    CPFP_TRANSACTION_CONTEXT.to_string(),
-                    e.to_string(),
-                );
+            return Ok(());
+        }
 
-                self.store.add_news(news)?;
+        if dispatch_result.is_ok() {
+            self.monitor.monitor(TypesToMonitor::Transactions(
+                vec![speedup_data.tx_id],
+                CPFP_TRANSACTION_CONTEXT.to_string(),
+            ))?;
+
+            info!(
+                "{} Successfully sent {} Transaction({})",
+                style("Coordinator").green(),
+                speedup_type,
+                style(speedup_data.tx_id).yellow(),
+            );
+
+            self.store.save_speedup(speedup_data)?;
+
+            if retry_txid.is_some() {
+                self.store.enqueue_speedup_for_retry(retry_txid.unwrap())?;
             }
         }
 
@@ -403,6 +478,42 @@ impl BitcoinCoordinator {
         Ok(batches)
     }
 
+    fn process_failed_speedups(&self) -> Result<(), BitcoinCoordinatorError> {
+        let failed_speedups = self.store.get_speedups_for_retry(
+            self.settings.retry_attempts_sending_tx,
+            self.settings.retry_interval_seconds,
+        )?;
+
+        for speedup in failed_speedups {
+            // If a speedup fails in the pass means we have funding transaction, then we do not need to check if we have funding.
+            let funding = self.store.get_funding()?.unwrap();
+
+            let replace_cpfp_txid = if speedup.is_rbf {
+                Some(speedup.tx_id)
+            } else {
+                None
+            };
+
+            let txs_data: Vec<(SpeedupData, Transaction, String)> = speedup
+                .speedup_tx_data
+                .iter()
+                .map(|(speedup_data, tx, _)| {
+                    (speedup_data.clone(), tx.clone(), speedup.context.clone())
+                })
+                .collect();
+
+            self.create_and_send_cpfp_tx(
+                txs_data,
+                funding,
+                speedup.bump_fee_percentage_used,
+                replace_cpfp_txid,
+                Some(speedup.tx_id),
+            )?;
+        }
+
+        Ok(())
+    }
+
     fn process_in_progress_speedup_txs(&self) -> Result<(), BitcoinCoordinatorError> {
         let txs = self.store.get_pending_speedups()?;
 
@@ -412,7 +523,7 @@ impl BitcoinCoordinator {
 
             match tx_status {
                 Ok(tx_status) => {
-                    info!(
+                    debug!(
                         "{} {} Transaction({}) | Confirmations({})",
                         style("Coordinator").green(),
                         tx.get_tx_name(),
@@ -463,7 +574,7 @@ impl BitcoinCoordinator {
 
             match tx_status {
                 Ok(tx_status) => {
-                    info!(
+                    debug!(
                         "{} Transaction({}) | Confirmations({})",
                         style("Coordinator").green(),
                         style(tx.tx_id).yellow(),
@@ -530,10 +641,11 @@ impl BitcoinCoordinator {
 
     fn create_and_send_cpfp_tx(
         &self,
-        txs_data: Vec<CoordinatedTransaction>,
+        txs_data: Vec<(SpeedupData, Transaction, String)>,
         funding: Utxo,
         bump_fee: f64,
-        cpfp_id_to_replace: Option<Txid>,
+        replace_cpfp_txid: Option<Txid>,
+        retry_txid: Option<Txid>,
     ) -> Result<(), BitcoinCoordinatorError> {
         // Check if the funding amount is below the minimum required for a speedup.
         // If so, notify via CoordinatorNews and exit early.
@@ -544,13 +656,39 @@ impl BitcoinCoordinator {
                 self.settings.min_funding_amount_sats,
             );
             self.store.add_news(news)?;
+
+            warn!(
+                "{} Insufficient funds for speedup | FundingTx({}) | Amount({}) | MinRequired({})",
+                style("Coordinator").green(),
+                style(funding.txid).yellow(),
+                style(funding.amount).red(),
+                style(self.settings.min_funding_amount_sats).blue(),
+            );
+
             return Ok(());
         }
 
-        let is_rbf = cpfp_id_to_replace.is_some();
+        let is_rbf = replace_cpfp_txid.is_some();
 
-        let (speedup_tx, speedup_fee) =
-            self.get_speedup_tx(&txs_data, &funding, bump_fee, is_rbf)?;
+        let txs_speedup_data = txs_data
+            .iter()
+            .map(|(speedup_data, tx, _)| (speedup_data.clone(), tx.vsize()))
+            .collect();
+
+        let new_network_fee_rate = self.get_network_fee_rate()?;
+
+        let (diff_fee_for_unconfirmed_chain, chain_vsize) =
+            self.get_diff_fee_for_unconfirmed_chain(new_network_fee_rate)?;
+
+        let (speedup_tx, speedup_fee) = self.get_speedup_tx(
+            &txs_speedup_data,
+            &funding,
+            bump_fee,
+            is_rbf,
+            new_network_fee_rate,
+            diff_fee_for_unconfirmed_chain,
+            chain_vsize,
+        )?;
         // Validate that funding can cover the fee
         if speedup_fee > funding.amount {
             let news =
@@ -560,23 +698,27 @@ impl BitcoinCoordinator {
         }
 
         let speedup_tx_id = speedup_tx.compute_txid();
-        let txids: Vec<Txid> = txs_data.iter().map(|tx| tx.tx_id).collect();
+        let txs_info: Vec<(Txid, String)> = txs_data
+            .iter()
+            .map(|(_, tx, context)| (tx.compute_txid(), context.clone()))
+            .collect();
 
         let speedup_type = if is_rbf { "RBF" } else { "CPFP" };
         let mut cpfp_to_replace = String::new();
 
         if is_rbf {
-            cpfp_to_replace = format!("| CPFP_TO_REPLACE({})", cpfp_id_to_replace.unwrap());
+            cpfp_to_replace = format!("| CPFP_TO_REPLACE({})", replace_cpfp_txid.unwrap());
         }
 
         info!(
-            "{} New {} Transaction({}) | Fee({}) | Transactions#({}) | FundingTx({}) {} | BumpFee({})",
+            "{} New {} Transaction({}) | Fee({}) | Transactions#({}) | FundingTx({}) | Vout({}) {} | BumpFee({})",
             style("Coordinator").green(),
             speedup_type,
             style(speedup_tx_id).yellow(),
             style(speedup_fee).blue(),
-            style(txids.len()).blue(),
+            style(txs_info.len()).blue(),
             style(funding.txid).blue(),
+            style(funding.vout).blue(),
             style(cpfp_to_replace).blue(),
             style(bump_fee).blue(),
         );
@@ -592,33 +734,98 @@ impl BitcoinCoordinator {
 
         let speedup_data = CoordinatedSpeedUpTransaction::new(
             speedup_tx_id,
-            txids,
             funding,
             new_funding_utxo,
             is_rbf,
             monitor_height,
             SpeedupState::Dispatched,
             bump_fee,
+            txs_data,
+            new_network_fee_rate,
         );
 
-        self.dispatch_speedup(speedup_tx, speedup_data)?;
+        self.dispatch_speedup(speedup_tx, speedup_data, retry_txid)?;
 
         Ok(())
     }
 
+    fn get_diff_fee_for_unconfirmed_chain(
+        &self,
+        new_network_fee_rate: u64,
+    ) -> Result<(u64, usize), BitcoinCoordinatorError> {
+        let speedups_unconfirmed = self.store.get_unconfirmed_speedups()?;
+
+        if speedups_unconfirmed.is_empty() {
+            return Ok((0, 0));
+        }
+
+        let last_fee_rate_used = speedups_unconfirmed.last().unwrap().network_fee_rate_used;
+
+        let mut fee_chain_difference = 0;
+        let mut chain_vsize = 0;
+
+        for speedup in speedups_unconfirmed {
+            let fee_rate_to_pay = new_network_fee_rate.saturating_sub(last_fee_rate_used);
+            let txs_data = speedup
+                .speedup_tx_data
+                .iter()
+                .map(|(speedup_data, tx, _)| (speedup_data.clone(), tx.vsize()))
+                .collect();
+
+            let (tx, fee_to_pay) = self.get_speedup_tx(
+                &txs_data,
+                &speedup.prev_funding,
+                self.settings.base_fee_multiplier, // We should not bump this fee, we are just calculating the difference.
+                speedup.is_rbf,
+                fee_rate_to_pay,
+                0,
+                0,
+            )?;
+
+            chain_vsize += tx.vsize();
+            fee_chain_difference += fee_to_pay;
+        }
+
+        Ok((fee_chain_difference, chain_vsize))
+    }
+
+    fn get_network_fee_rate(&self) -> Result<u64, BitcoinCoordinatorError> {
+        let mut network_fee_rate: u64 = self.client.estimate_smart_fee()?;
+
+        if network_fee_rate > self.settings.max_feerate_sat_vb {
+            warn!(
+                "{} Estimate feerate sat/vbyte is greater than the max allowed. This could be a bug. | EstimateFeerate({}) | MaxAllowed({})",
+                style("Coordinator").red(),
+                style(network_fee_rate).red(),
+                style(self.settings.max_feerate_sat_vb).red(),
+            );
+
+            // Inform this with news
+            let news = CoordinatorNews::EstimateFeerateTooHigh(
+                network_fee_rate,
+                self.settings.max_feerate_sat_vb,
+            );
+
+            self.store.add_news(news)?;
+
+            // Set the estimate feerate to the max allowed
+            network_fee_rate = self.settings.max_feerate_sat_vb;
+        }
+        Ok(network_fee_rate)
+    }
+
     fn get_speedup_tx(
         &self,
-        txs_data: &Vec<CoordinatedTransaction>,
+        txs_data: &Vec<(SpeedupData, usize)>,
         funding: &Utxo,
         bump_fee_percentage: f64,
         is_rbf: bool,
+        network_fee_rate: u64,
+        diff_fee_for_unconfirmed_chain: u64,
+        chain_vsize: usize,
     ) -> Result<(Transaction, u64), BitcoinCoordinatorError> {
-        let speedups_data: Vec<SpeedupData> = txs_data
-            .iter()
-            .map(|tx_data| tx_data.speedup_data.as_ref().unwrap().clone())
-            .collect();
-
-        let estimate_fee: u64 = self.client.estimate_smart_fee()?;
+        let speedups_data: Vec<SpeedupData> =
+            txs_data.iter().map(|tx_data| tx_data.0.clone()).collect();
 
         // TRICK:
         // - Create the child transaction with a dummy fee to determine the transaction's virtual size (vsize).
@@ -646,11 +853,13 @@ impl BitcoinCoordinator {
             }
 
             let speedup_fee = self.calculate_speedup_fee(
-                &txs_data,
+                txs_data,
                 child_vsize,
                 bump_fee_percentage,
-                estimate_fee,
+                network_fee_rate,
                 is_rbf,
+                diff_fee_for_unconfirmed_chain,
+                chain_vsize,
             )?;
 
             let final_speedup_tx = (ProtocolBuilder {}).speedup_transactions(
@@ -678,12 +887,10 @@ impl BitcoinCoordinator {
         // When this function is called, we know that the last speedup exists to be replaced.
         let (speedup, rbf_tx) = self.store.get_last_speedup()?.unwrap();
 
-        let child_tx_ids = speedup.child_tx_ids;
-
         let mut txs_to_speedup: Vec<CoordinatedTransaction> = Vec::new();
 
-        for tx_id in child_tx_ids {
-            let tx = self.store.get_tx(&tx_id)?;
+        for (_, tx, _) in speedup.speedup_tx_data.clone() {
+            let tx = self.store.get_tx(&tx.compute_txid())?;
             txs_to_speedup.push(tx);
         }
 
@@ -697,10 +904,11 @@ impl BitcoinCoordinator {
         let new_bump_fee = self.get_bump_fee_percentage_strategy(increase_last_bump_fee)?;
 
         self.create_and_send_cpfp_tx(
-            txs_to_speedup,
+            speedup.speedup_tx_data,
             speedup.prev_funding,
             new_bump_fee,
             Some(speedup.tx_id),
+            None,
         )?;
 
         Ok(())
@@ -725,62 +933,42 @@ impl BitcoinCoordinator {
 
     fn calculate_speedup_fee(
         &self,
-        parents: &[CoordinatedTransaction],
+        tx_to_speedup_info: &[(SpeedupData, usize)],
         child_vbytes: usize,
         bump_fee_percentage: f64,
-        mut estimate_fee: u64,
+        network_fee_rate: u64,
         is_rbf: bool,
+        fee_chain_difference: u64,
+        chain_vsize: usize,
     ) -> Result<u64, BitcoinCoordinatorError> {
         // Assumes that each parent transaction pays 1 sat/vbyte.
         // To calculate the total fee, we need to know the vsize of the child (CPFP) + the vsize of each parent.
         // Also we have to subtract the parent's transaction vbytes and the total output amounts once.
 
-        if estimate_fee > self.settings.max_feerate_sat_vb {
-            warn!(
-                "{} Estimate feerate sat/vbyte is greater than the max allowed. This could be a bug. | EstimateFeerate({}) | MaxAllowed({})",
-                style("Coordinator").red(),
-                style(estimate_fee).red(),
-                style(self.settings.max_feerate_sat_vb).red(),
-            );
-
-            // Inform this with news
-            let news = CoordinatorNews::EstimateFeerateTooHigh(
-                estimate_fee,
-                self.settings.max_feerate_sat_vb,
-            );
-
-            self.store.add_news(news)?;
-
-            // Set the estimate feerate to the max allowed
-            estimate_fee = self.settings.max_feerate_sat_vb;
-        }
-
-        let parent_vbytes: usize = parents.iter().map(|tx_data| tx_data.tx.vsize()).sum();
-
         let mut parent_amount_outputs: usize = 0;
+        let mut parent_vbytes: usize = 0;
 
-        for tx_data in parents {
-            if let Some(speedup) = &tx_data.speedup_data {
-                let amount = if let Some(utxo) = &speedup.utxo {
-                    utxo.amount as usize
-                } else {
-                    speedup.partial_utxo.as_ref().unwrap().2 as usize
-                };
-                parent_amount_outputs += amount;
-            }
+        for (speedup_data, vsize) in tx_to_speedup_info {
+            let amount = if let Some(utxo) = &speedup_data.utxo {
+                utxo.amount as usize
+            } else {
+                speedup_data.partial_utxo.as_ref().unwrap().2 as usize
+            };
+            parent_amount_outputs += amount;
+            parent_vbytes += vsize;
         }
 
         // We substract the vbytes of the parents and the amount of outputs.
         // Because the child pays for the parents and the parents pay for the outputs
-        let parent_total_sats = parent_vbytes * estimate_fee as usize;
-        let child_total_sats = child_vbytes * estimate_fee as usize;
+        let parent_total_sats = parent_vbytes * network_fee_rate as usize;
+        let child_total_sats = child_vbytes * network_fee_rate as usize;
         let total_sats = parent_total_sats + child_total_sats;
 
         let mut total_fee = total_sats
             .saturating_sub(parent_amount_outputs) // amount comming from the parents to discount
             .saturating_sub(parent_vbytes); // min relay fee of the parents to discount
 
-        if is_rbf {
+        if is_rbf && total_fee < child_total_sats * 2 {
             // Bitcoin Policy (https://github.com/bitcoin/bitcoin/blob/master/doc/policy/mempool-replacements.md?plain=1#L32):
             // The additional fees (difference between absolute fee paid by the replacement transaction and the
             // sum paid by the original transactions) pays for the replacement transaction's bandwidth at or
@@ -793,23 +981,43 @@ impl BitcoinCoordinator {
             total_fee = child_total_sats * 2;
         }
 
+        total_fee += fee_chain_difference as usize;
+
+        // If a fee bump is being applied, add the virtual size of the transaction chain to the total fee to incentivize the miners to include the chain in the next block.
+        if chain_vsize > 0 && bump_fee_percentage > self.settings.base_fee_multiplier {
+            debug!(
+                "{} Adding to total fee ChainVsize({}) for bump fee {}",
+                style("Coordinator").green(),
+                style(chain_vsize).blue(),
+                style(bump_fee_percentage).blue()
+            );
+            total_fee += chain_vsize;
+        }
+
         let total_fee_bumped = (total_fee as f64 * bump_fee_percentage).ceil().round() as u64;
 
         // TODO IMPORTANT:
         // To accurately calculate the fee when the estimated fee changes over time, it is essential to retain the estimate_fee
         // used for each CPFP and recalculate the new value if the estimate_fee differs. Failing to do so may result in overpayment or underpayment.
         // In this scenario, we need to compute the fee difference between the parent transactions already sent in the previous CPFP chain and the new estimate_fee value.
+        let mut fee_chain_difference_str = String::new();
+        if fee_chain_difference > 0 {
+            fee_chain_difference_str = "Recomputing fee for chain ".to_string();
+        }
 
         debug!(
-            "{} EstimateNetworkFee({}) | ParentTotalSats({}) | ChildTotalSats({}) | BumpFeePercentage({}) | ParentAmountOutputs({}) | ParentVbytes({}) | TotalFee({})",
+            "{} {}EstimateNetworkFee({}) | ParentTotalSats({}) | ChildTotalSats({}) | BumpFeePercentage({}) | ParentAmountOutputs({}) | ParentVbytes({}) | TotalFee({}) | FeeChainDifference({}) | ChainVsize({})",
             style("Coordinator").green(),
-            style(estimate_fee).red(),
+            style(fee_chain_difference_str),
+            style(network_fee_rate).red(),
             style(parent_total_sats).red(),
             style(child_total_sats).red(),
             style(bump_fee_percentage).red(),
             style(parent_amount_outputs).red(),
             style(parent_vbytes).red(),
             style(total_fee_bumped).red(),
+            style(fee_chain_difference).red(),
+            style(chain_vsize).red(),
         );
 
         Ok(total_fee_bumped)
@@ -820,7 +1028,7 @@ impl BitcoinCoordinator {
         prev_bump_fee: f64,
     ) -> Result<f64, BitcoinCoordinatorError> {
         if prev_bump_fee <= 0.0 {
-            return Ok(1.0);
+            return Ok(self.settings.base_fee_multiplier);
         }
 
         // This method increases the previous bump fee by 50%.
@@ -834,9 +1042,9 @@ impl BitcoinCoordinator {
             "{} Bumping fee from {} to {}",
             style("Coordinator").green(),
             style(prev_bump_fee).blue(),
-            style(prev_bump_fee * 1.5).blue(),
+            style(prev_bump_fee * self.settings.bump_fee_percentage).blue(),
         );
-        let bumped_feerate = prev_bump_fee * 1.5;
+        let bumped_feerate = prev_bump_fee * self.settings.bump_fee_percentage;
         Ok(bumped_feerate)
     }
 
@@ -898,12 +1106,13 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         let is_ready = self.monitor.is_ready()?;
 
         let is_ready_str = if is_ready { "Ready" } else { "Not Ready" };
-        info!("{} {}", style("Coordinator").green(), is_ready_str);
+        debug!("{} {}", style("Coordinator").green(), is_ready_str);
 
         if !is_ready {
             return Ok(());
         }
 
+        self.process_failed_speedups()?;
         self.process_pending_txs_to_dispatch()?;
         self.process_in_progress_txs()?;
         self.process_in_progress_speedup_txs()?;
@@ -980,6 +1189,14 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
     }
 
     fn add_funding(&self, utxo: Utxo) -> Result<(), BitcoinCoordinatorError> {
+        info!(
+            "{} Funding added | Txid({}) | Vout({}) | Amount({}) | PublicKey({})",
+            style("Coordinator").green(),
+            style(utxo.txid).cyan(),
+            style(utxo.vout).cyan(),
+            style(utxo.amount).cyan(),
+            style(utxo.pub_key).cyan()
+        );
         // Each time a speedup transaction is generated, it consumes the previous funding UTXO and leaves any change as the new funding for subsequent speedups.
         // Therefore, every new funding UTXO should be recorded in the same format as a speedup transaction, ensuring the coordinator always tracks the latest available funding.
         self.store.add_funding(utxo)?;

@@ -71,16 +71,14 @@ pub struct TransactionNew {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum SpeedupState {
     Dispatched,
+    Error,
     Confirmed,
     Finalized,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct CoordinatedSpeedUpTransaction {
     pub tx_id: Txid,
-
-    // The child tx ids that are being sped up.
-    pub child_tx_ids: Vec<Txid>,
 
     // The previous funding utxo.
     pub prev_funding: Utxo,
@@ -99,19 +97,41 @@ pub struct CoordinatedSpeedUpTransaction {
     pub context: String,
 
     pub bump_fee_percentage_used: f64,
+
+    pub speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
+
+    pub network_fee_rate_used: u64,
+
+    pub retry_info: Option<RetryInfo>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct RetryInfo {
+    pub retries_count: u32,
+    pub last_retry_timestamp: u64,
+}
+
+impl RetryInfo {
+    pub fn new(count: u32, last_timestamp: u64) -> Self {
+        Self {
+            retries_count: count,
+            last_retry_timestamp: last_timestamp,
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 impl CoordinatedSpeedUpTransaction {
     pub fn new(
         tx_id: Txid,
-        child_tx_ids: Vec<Txid>,
         prev_funding: Utxo,
         next_funding: Utxo,
         is_rbf: bool,
         broadcast_block_height: BlockHeight,
         state: SpeedupState,
         bump_fee_percentage_used: f64,
+        speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
+        network_fee_rate_used: u64,
     ) -> Self {
         let mut context = if is_rbf {
             RBF_TRANSACTION_CONTEXT.to_string()
@@ -121,14 +141,13 @@ impl CoordinatedSpeedUpTransaction {
 
         if broadcast_block_height == 0
             && state == SpeedupState::Finalized
-            && child_tx_ids.is_empty()
+            && speedup_tx_data.is_empty()
         {
             context = FUNDING_TRANSACTION_CONTEXT.to_string();
         }
 
         Self {
             tx_id,
-            child_tx_ids,
             prev_funding,
             next_funding,
             is_rbf,
@@ -136,6 +155,9 @@ impl CoordinatedSpeedUpTransaction {
             state,
             context,
             bump_fee_percentage_used,
+            speedup_tx_data,
+            network_fee_rate_used,
+            retry_info: None,
         }
     }
 }
@@ -144,7 +166,7 @@ impl CoordinatedSpeedUpTransaction {
     pub fn is_funding(&self) -> bool {
         self.broadcast_block_height == 0
             && self.state == SpeedupState::Finalized
-            && self.child_tx_ids.is_empty()
+            && self.speedup_tx_data.is_empty()
     }
 
     pub fn is_rbf(&self) -> bool {
@@ -182,9 +204,9 @@ pub enum CoordinatorNews {
     DispatchTransactionError(Txid, String, String),
 
     /// Error when attempting to speed up a transaction
-    /// - Txid: The transaction ID that failed to speed up
-    /// - String: Context information about the transaction
-    /// - Txid: The funding transaction ID that was insufficient
+    /// - Vec<Txid>: The transaction IDs that failed to speed up
+    /// - Vec<String>: Context information about the transactions that failed to be sent
+    /// - Txid: The cpfp/rbf transaction ID that failed to be sent
     /// - String: Error message describing what went wrong
     DispatchSpeedUpError(Vec<Txid>, Vec<String>, Txid, String),
 

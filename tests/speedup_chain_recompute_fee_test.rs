@@ -1,10 +1,9 @@
 use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
 use bitcoin_coordinator::{
-    config::CoordinatorSettings,
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
     TypesToMonitor,
 };
-use bitcoind::bitcoind::Bitcoind;
+use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     rpc_config::RpcConfig,
@@ -28,7 +27,7 @@ fn config_trace_aux() {
         "libp2p=off",
         "bitvmx_transaction_monitor=off",
         "bitcoin_indexer=off",
-        "bitcoin_coordinator=info",
+        "bitcoin_coordinator=debug",
         "bitcoin_client=info",
         "p2p_protocol=off",
         "p2p_handler=off",
@@ -49,11 +48,9 @@ fn config_trace_aux() {
         .init();
 }
 
-// The idea of this test is to dispatch a lot of txs and check if the coordinator can handle it.
-// What we are testing is the batch dispatching of txs. So should be able to dispatch 200 txs in a single tick and create 3 CPFPs.
 #[test]
-#[ignore = "This test requires a running bitcoind in regtest mode"]
-fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
+#[ignore = "This test works, but it runs in regtest with a bitcoind running"]
+fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
@@ -74,10 +71,14 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         Rc::new(create_key_manager_from_config(&config, key_store, storage.clone()).unwrap());
     let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
 
-    let bitcoind = Bitcoind::new(
+    let bitcoind = Bitcoind::new_with_flags(
         "bitcoin-regtest",
         "ruimarinho/bitcoin-core",
         config_bitcoin_client.clone(),
+        BitcoindFlags {
+            block_min_tx_fee: 0.00004,
+            ..Default::default()
+        },
     );
 
     info!("{} Starting bitcoind", style("Test").green());
@@ -154,53 +155,54 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         &public_key,
     ))?;
 
-    // Create 60 txs with funding and dispatch them using the coordinator.
-    for _ in 0..60 {
-        coordinate_tx(
-            coordinator.clone(),
-            amount,
-            network,
-            key_manager.clone(),
-            bitcoin_client.clone(),
-        )?;
-    }
-
-    // Up to here we have 60 txs dispatched and they should be batched.
-    for _ in 0..60 {
-        coordinator.tick()?;
-    }
-
-    bitcoin_client.mine_blocks_to_address(1, &funding_wallet)?;
+    coordinate_tx(
+        coordinator.clone(),
+        amount,
+        network,
+        key_manager.clone(),
+        bitcoin_client.clone(),
+    )?;
 
     coordinator.tick()?;
 
-    // Only 24 transactions can remain unconfirmed at this point because the coordinator enforces a maximum limit of 24 unconfirmed parent transactions (MAX_LIMIT_UNCONFIRMED_PARENTS).
-    // The first batch of transactions is successfully dispatched, but when the coordinator attempts to dispatch the next batch, it hits the unconfirmed parent limit and does not dispatch further transactions.
-    // This test asserts that the coordinator correctly enforces this policy.
-    let news = coordinator.get_news()?;
-    assert_eq!(news.monitor_news.len(), 24);
-
-    for _ in 0..24 {
-        coordinator.tick()?;
-    }
-
-    bitcoin_client.mine_blocks_to_address(1, &funding_wallet)?;
+    info!("Mine and Tick");
+    // Mine a block to mined txs (tx1 and speedup tx)
+    bitcoin_client
+        .mine_blocks_to_address(1, &funding_wallet)
+        .unwrap();
 
     coordinator.tick()?;
 
     let news = coordinator.get_news()?;
-    assert_eq!(news.monitor_news.len(), 48);
+    assert_eq!(news.monitor_news.len(), 0);
 
-    for _ in 0..12 {
+    let mut old_fee_rate = bitcoin_client.estimate_smart_fee()?;
+
+    for _ in 0..16 {
+        bitcoin_client.fund_address(&funding_wallet, amount)?;
+
+        let fee_rate = bitcoin_client.estimate_smart_fee()?;
+
+        if old_fee_rate != fee_rate {
+            info!(
+                "Fee rate changed: Old: {} | New: {}",
+                old_fee_rate, fee_rate
+            );
+            old_fee_rate = fee_rate;
+        }
+        info!("Fee rate: {}", fee_rate);
+    }
+
+    for _ in 0..17 {
+        // Tick coordinator
         coordinator.tick()?;
     }
 
     bitcoin_client.mine_blocks_to_address(1, &funding_wallet)?;
-
     coordinator.tick()?;
 
     let news = coordinator.get_news()?;
-    assert_eq!(news.monitor_news.len(), 60);
+    assert_eq!(news.monitor_news.len(), 1);
 
     bitcoind.stop()?;
 
@@ -226,6 +228,8 @@ fn coordinate_tx(
 
     let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
 
+    coordinator.tick()?;
+
     let (tx1, tx1_speedup_utxo) = generate_tx(
         OutPoint::new(funding_tx.compute_txid(), funding_vout),
         amount.to_sat(),
@@ -233,17 +237,14 @@ fn coordinate_tx(
         key_manager.clone(),
     )?;
 
+    let speedup_data = SpeedupData::new(tx1_speedup_utxo);
+
     let tx_context = "My tx".to_string();
     let tx_to_monitor = TypesToMonitor::Transactions(vec![tx1.compute_txid()], tx_context.clone());
     coordinator.monitor(tx_to_monitor)?;
 
     // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.dispatch(
-        tx1.clone(),
-        Some(SpeedupData::new(tx1_speedup_utxo)),
-        tx_context.clone(),
-        None,
-    )?;
+    coordinator.dispatch(tx1.clone(), Some(speedup_data), tx_context.clone(), None)?;
 
     Ok(())
 }
