@@ -1,8 +1,9 @@
 use crate::errors::BitcoinCoordinatorStoreError;
 use crate::settings::{MAX_LIMIT_UNCONFIRMED_PARENTS, MIN_UNCONFIRMED_TXS_FOR_CPFP};
 use crate::storage::BitcoinCoordinatorStore;
-use crate::types::{CoordinatedSpeedUpTransaction, SpeedupState};
+use crate::types::{CoordinatedSpeedUpTransaction, RetryInfo, SpeedupState};
 use bitcoin::Txid;
+use chrono::Utc;
 use protocol_builder::types::Utxo;
 use storage_backend::storage::KeyValueStore;
 
@@ -58,12 +59,30 @@ pub trait SpeedupStore {
     fn has_reached_max_unconfirmed_speedups(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
 
     fn get_available_unconfirmed_txs(&self) -> Result<u32, BitcoinCoordinatorStoreError>;
+
+    fn get_speedups_for_retry(
+        &self,
+        max_retries: u32,
+        interval_seconds: u64,
+    ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
+
+    fn queue_speedup_for_retry(
+        &self,
+        speedup: CoordinatedSpeedUpTransaction,
+    ) -> Result<(), BitcoinCoordinatorStoreError>;
+
+    fn enqueue_speedup_for_retry(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
+
+    fn increment_speedup_retry_count(&self, txid: Txid)
+        -> Result<(), BitcoinCoordinatorStoreError>;
 }
 
 enum SpeedupStoreKey {
     PendingSpeedUpList,
     // SpeedupInfo,
     SpeedUpTransaction(Txid),
+
+    RetrySpeedUpTransactionList,
 }
 
 impl SpeedupStoreKey {
@@ -73,6 +92,9 @@ impl SpeedupStoreKey {
             SpeedupStoreKey::PendingSpeedUpList => format!("{prefix}/speedup/pending/list"),
             SpeedupStoreKey::SpeedUpTransaction(tx_id) => {
                 format!("{prefix}/speedup/{tx_id}")
+            }
+            SpeedupStoreKey::RetrySpeedUpTransactionList => {
+                format!("{prefix}/speedup/retry/list")
             }
         }
     }
@@ -417,5 +439,87 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         }
 
         Ok(None)
+    }
+
+    fn get_speedups_for_retry(
+        &self,
+        max_retries: u32,
+        interval_seconds: u64,
+    ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
+        let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
+        let speedups: Vec<CoordinatedSpeedUpTransaction> = self
+            .store
+            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
+            .unwrap_or_default();
+
+        let mut eligible_speedups = Vec::new();
+        let current_time = Utc::now().timestamp_millis() as u64;
+
+        for speedup in speedups.iter() {
+            if let Some(retry_info) = &speedup.retry_info {
+                if retry_info.retries_count < max_retries
+                    && current_time >= retry_info.last_retry_timestamp + interval_seconds * 1000
+                {
+                    eligible_speedups.push(speedup.clone());
+                }
+            }
+        }
+
+        Ok(eligible_speedups)
+    }
+
+    fn queue_speedup_for_retry(
+        &self,
+        mut speedup: CoordinatedSpeedUpTransaction,
+    ) -> Result<(), BitcoinCoordinatorStoreError> {
+        let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
+        let mut speedups = self
+            .store
+            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
+            .unwrap_or_default();
+
+        speedup.retry_info = Some(RetryInfo::new(0, Utc::now().timestamp_millis() as u64));
+
+        speedups.push(speedup);
+        self.store.set(&key, &speedups, None)?;
+
+        Ok(())
+    }
+
+    fn enqueue_speedup_for_retry(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
+        let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
+        let mut speedups = self
+            .store
+            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
+            .unwrap_or_default();
+        speedups.retain(|s| s.tx_id != txid);
+        self.store.set(&key, &speedups, None)?;
+
+        Ok(())
+    }
+
+    fn increment_speedup_retry_count(
+        &self,
+        txid: Txid,
+    ) -> Result<(), BitcoinCoordinatorStoreError> {
+        let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
+        let mut speedups = self
+            .store
+            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
+            .unwrap_or_default();
+
+        for speedup in speedups.iter_mut() {
+            if speedup.tx_id == txid {
+                speedup.retry_info = Some(RetryInfo::new(
+                    speedup.retry_info.clone().unwrap().retries_count + 1,
+                    Utc::now().timestamp_millis() as u64,
+                ));
+
+                self.store.set(&key, &speedups, None)?;
+                break;
+            }
+        }
+
+        Ok(())
     }
 }

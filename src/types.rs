@@ -71,6 +71,7 @@ pub struct TransactionNew {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum SpeedupState {
     Dispatched,
+    Error,
     Confirmed,
     Finalized,
 }
@@ -100,6 +101,23 @@ pub struct CoordinatedSpeedUpTransaction {
     pub speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
 
     pub network_fee_rate_used: u64,
+
+    pub retry_info: Option<RetryInfo>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct RetryInfo {
+    pub retries_count: u32,
+    pub last_retry_timestamp: u64,
+}
+
+impl RetryInfo {
+    pub fn new(count: u32, last_timestamp: u64) -> Self {
+        Self {
+            retries_count: count,
+            last_retry_timestamp: last_timestamp,
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -139,6 +157,7 @@ impl CoordinatedSpeedUpTransaction {
             bump_fee_percentage_used,
             speedup_tx_data,
             network_fee_rate_used,
+            retry_info: None,
         }
     }
 }

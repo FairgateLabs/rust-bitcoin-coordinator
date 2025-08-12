@@ -23,7 +23,7 @@ use protocol_builder::{
     builder::ProtocolBuilder,
     types::{output::SpeedupData, Utxo},
 };
-use std::{rc::Rc, thread::sleep, vec};
+use std::{rc::Rc, vec};
 use storage_backend::storage::Storage;
 use tracing::{debug, error, info, warn};
 
@@ -221,6 +221,7 @@ impl BitcoinCoordinator {
                     funding,
                     self.settings.base_fee_multiplier,
                     None,
+                    None,
                 )?;
             }
         }
@@ -251,7 +252,7 @@ impl BitcoinCoordinator {
                 style("Coordinator").green(),
                 style(speedup.tx_id).yellow()
             );
-            self.create_and_send_cpfp_tx(vec![], funding, bump_fee_percentage, None)?;
+            self.create_and_send_cpfp_tx(vec![], funding, bump_fee_percentage, None, None)?;
         }
 
         Ok(())
@@ -300,6 +301,7 @@ impl BitcoinCoordinator {
         &self,
         tx: Transaction,
         speedup_data: CoordinatedSpeedUpTransaction,
+        retry_txid: Option<Txid>,
     ) -> Result<(), BitcoinCoordinatorError> {
         let speedup_type = speedup_data.get_tx_name();
 
@@ -310,7 +312,7 @@ impl BitcoinCoordinator {
             style(speedup_data.tx_id).yellow(),
         );
 
-        let mut dispatch_result = self.client.send_transaction(&tx);
+        let dispatch_result = self.client.send_transaction(&tx);
 
         let txs_info: (Vec<Txid>, Vec<String>) = speedup_data
             .speedup_tx_data
@@ -327,37 +329,15 @@ impl BitcoinCoordinator {
                 tx.clone(),
                 dispatch_result.as_ref().err().as_ref().unwrap().to_string(),
             )?;
-        }
 
-        let mut retry_attempt = self.settings.retry_attempts_sending_tx;
-
-        while retry_attempt > 0 && dispatch_result.is_err() {
-            debug!(
-                "{} Sleeping({} Seconds) before retrying",
-                style("Coordinator").green(),
-                style(self.settings.retry_interval_seconds).yellow()
-            );
-
-            sleep(std::time::Duration::from_secs(
-                self.settings.retry_interval_seconds,
-            ));
-
-            dispatch_result = self.client.send_transaction(&tx);
-
-            if dispatch_result.is_ok() {
-                break;
+            if retry_txid.is_some() {
+                self.store
+                    .increment_speedup_retry_count(speedup_data.tx_id)?;
+            } else {
+                self.store.queue_speedup_for_retry(speedup_data)?;
             }
 
-            retry_attempt -= 1;
-
-            self.inform_dispatch_speedup_error(
-                txs_info.clone(),
-                speedup_type.clone(),
-                Some(retry_attempt),
-                speedup_data.tx_id,
-                tx.clone(),
-                dispatch_result.as_ref().err().as_ref().unwrap().to_string(),
-            )?;
+            return Ok(());
         }
 
         if dispatch_result.is_ok() {
@@ -374,6 +354,10 @@ impl BitcoinCoordinator {
             );
 
             self.store.save_speedup(speedup_data)?;
+
+            if retry_txid.is_some() {
+                self.store.enqueue_speedup_for_retry(retry_txid.unwrap())?;
+            }
         }
 
         Ok(())
@@ -491,6 +475,42 @@ impl BitcoinCoordinator {
         }
 
         Ok(batches)
+    }
+
+    fn process_failed_speedups(&self) -> Result<(), BitcoinCoordinatorError> {
+        let failed_speedups = self.store.get_speedups_for_retry(
+            self.settings.retry_attempts_sending_tx,
+            self.settings.retry_interval_seconds,
+        )?;
+
+        for speedup in failed_speedups {
+            // If a speedup fails in the pass means we have funding transaction, then we do not need to check if we have funding.
+            let funding = self.store.get_funding()?.unwrap();
+
+            let replace_cpfp_txid = if speedup.is_rbf {
+                Some(speedup.tx_id)
+            } else {
+                None
+            };
+
+            let txs_data: Vec<(SpeedupData, Transaction, String)> = speedup
+                .speedup_tx_data
+                .iter()
+                .map(|(speedup_data, tx, _)| {
+                    (speedup_data.clone(), tx.clone(), speedup.context.clone())
+                })
+                .collect();
+
+            self.create_and_send_cpfp_tx(
+                txs_data,
+                funding,
+                speedup.bump_fee_percentage_used,
+                replace_cpfp_txid,
+                Some(speedup.tx_id),
+            )?;
+        }
+
+        Ok(())
     }
 
     fn process_in_progress_speedup_txs(&self) -> Result<(), BitcoinCoordinatorError> {
@@ -623,7 +643,8 @@ impl BitcoinCoordinator {
         txs_data: Vec<(SpeedupData, Transaction, String)>,
         funding: Utxo,
         bump_fee: f64,
-        cpfp_id_to_replace: Option<Txid>,
+        replace_cpfp_txid: Option<Txid>,
+        retry_txid: Option<Txid>,
     ) -> Result<(), BitcoinCoordinatorError> {
         // Check if the funding amount is below the minimum required for a speedup.
         // If so, notify via CoordinatorNews and exit early.
@@ -634,10 +655,19 @@ impl BitcoinCoordinator {
                 self.settings.min_funding_amount_sats,
             );
             self.store.add_news(news)?;
+
+            warn!(
+                "{} Insufficient funds for speedup | FundingTx({}) | Amount({}) | MinRequired({})",
+                style("Coordinator").green(),
+                style(funding.txid).yellow(),
+                style(funding.amount).red(),
+                style(self.settings.min_funding_amount_sats).blue(),
+            );
+
             return Ok(());
         }
 
-        let is_rbf = cpfp_id_to_replace.is_some();
+        let is_rbf = replace_cpfp_txid.is_some();
 
         let txs_speedup_data = txs_data
             .iter()
@@ -676,7 +706,7 @@ impl BitcoinCoordinator {
         let mut cpfp_to_replace = String::new();
 
         if is_rbf {
-            cpfp_to_replace = format!("| CPFP_TO_REPLACE({})", cpfp_id_to_replace.unwrap());
+            cpfp_to_replace = format!("| CPFP_TO_REPLACE({})", replace_cpfp_txid.unwrap());
         }
 
         info!(
@@ -713,7 +743,7 @@ impl BitcoinCoordinator {
             new_network_fee_rate,
         );
 
-        self.dispatch_speedup(speedup_tx, speedup_data)?;
+        self.dispatch_speedup(speedup_tx, speedup_data, retry_txid)?;
 
         Ok(())
     }
@@ -877,6 +907,7 @@ impl BitcoinCoordinator {
             speedup.prev_funding,
             new_bump_fee,
             Some(speedup.tx_id),
+            None,
         )?;
 
         Ok(())
@@ -1080,6 +1111,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
             return Ok(());
         }
 
+        self.process_failed_speedups()?;
         self.process_pending_txs_to_dispatch()?;
         self.process_in_progress_txs()?;
         self.process_in_progress_speedup_txs()?;

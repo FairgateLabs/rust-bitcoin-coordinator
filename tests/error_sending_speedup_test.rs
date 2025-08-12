@@ -1,6 +1,6 @@
 use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
 use bitcoin_coordinator::{
-    config::{CoordinatorSettings, CoordinatorSettingsConfig},
+    config::CoordinatorSettingsConfig,
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
     TypesToMonitor,
 };
@@ -119,9 +119,10 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
     // Funding speed up tx mines 1 block
     blocks_mined = blocks_mined + 1;
 
+    const RETRY_INTERVAL_SECONDS: u64 = 1;
     let mut settings = CoordinatorSettingsConfig::default();
     settings.retry_attempts_sending_tx = Some(4);
-    settings.retry_interval_seconds = Some(1);
+    settings.retry_interval_seconds = Some(RETRY_INTERVAL_SECONDS);
 
     let coordinator = Rc::new(BitcoinCoordinator::new_with_paths(
         &config_bitcoin_client,
@@ -152,16 +153,32 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
         bitcoin_client.clone(),
     )?;
 
+    // First tick, will dispatch tx and get error
     coordinator.tick()?;
 
-    info!("Mine and Tick");
     // Mine a block to mined txs (tx1 and speedup tx)
     bitcoin_client
         .mine_blocks_to_address(1, &funding_wallet)
         .unwrap();
 
+    // Second tick, will retry tx 1 time
+    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
     coordinator.tick()?;
+
+    // Third tick, will retry tx 2 times
+    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
     coordinator.tick()?;
+
+    // Fourth tick, will retry tx 3 times
+    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
+    coordinator.tick()?;
+
+    // Fifth tick, will retry tx 4 times
+    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
+    coordinator.tick()?;
+
+    // Sixth tick, will NOT retry because max retries reached
+    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
     coordinator.tick()?;
 
     let news = coordinator.get_news()?;
