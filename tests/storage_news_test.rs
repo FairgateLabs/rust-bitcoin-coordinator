@@ -1,4 +1,4 @@
-use bitcoin::Txid;
+use bitcoin::{BlockHash, Txid};
 use bitcoin_coordinator::{
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::{AckCoordinatorNews, CoordinatorNews},
@@ -17,6 +17,10 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
 
     let storage_config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&storage_config)?);
+
+    let current_block_hash =
+        BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+            .unwrap();
 
     let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
@@ -44,27 +48,23 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     let transaction_error_news =
         CoordinatorNews::DispatchTransactionError(tx_id_3, "tx_3".to_string(), "error".to_string());
 
-    let speed_up_news = CoordinatorNews::NewSpeedUp(tx_id_2, "tx_2".to_string(), 1);
-
     let estimate_feerate_news = CoordinatorNews::EstimateFeerateTooHigh(12345, 10000);
 
     let funding_not_found_news = CoordinatorNews::FundingNotFound;
 
     // Add news
-    store.add_news(insufficient_funds_news.clone())?;
-    store.add_news(speed_up_error_news.clone())?;
-    store.add_news(transaction_error_news.clone())?;
-    store.add_news(speed_up_news.clone())?;
-    store.add_news(estimate_feerate_news.clone())?;
-    store.add_news(funding_not_found_news.clone())?;
+    store.update_news(insufficient_funds_news.clone(), current_block_hash)?;
+    store.update_news(speed_up_error_news.clone(), current_block_hash)?;
+    store.update_news(transaction_error_news.clone(), current_block_hash)?;
+    store.update_news(estimate_feerate_news.clone(), current_block_hash)?;
+    store.update_news(funding_not_found_news.clone(), current_block_hash)?;
 
     // Get all news and verify
     let all_news = store.get_news()?;
 
-    assert_eq!(all_news.len(), 6);
+    assert_eq!(all_news.len(), 5);
     assert!(all_news.contains(&insufficient_funds_news));
     assert!(all_news.contains(&transaction_error_news));
-    assert!(all_news.contains(&speed_up_news));
     assert!(all_news.contains(&speed_up_error_news));
     assert!(all_news.contains(&estimate_feerate_news));
     assert!(all_news.contains(&funding_not_found_news));
@@ -75,21 +75,20 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
 
     // Verify the news was removed
     let remaining_news = store.get_news()?;
-    assert_eq!(remaining_news.len(), 5);
+    assert_eq!(remaining_news.len(), 4);
     assert!(remaining_news.contains(&insufficient_funds_news));
     assert!(remaining_news.contains(&transaction_error_news));
-    assert!(remaining_news.contains(&speed_up_news));
     assert!(remaining_news.contains(&estimate_feerate_news));
     assert!(remaining_news.contains(&funding_not_found_news));
     assert!(!remaining_news.contains(&speed_up_error_news));
-    // Acknowledge another news
+
+    //Acknowledge another news
     let ack_news = AckCoordinatorNews::InsufficientFunds(tx_id_1);
     store.ack_news(ack_news)?;
     // Verify the news was removed
     let remaining_news = store.get_news()?;
-    assert_eq!(remaining_news.len(), 4);
+    assert_eq!(remaining_news.len(), 3);
     assert!(remaining_news.contains(&transaction_error_news));
-    assert!(remaining_news.contains(&speed_up_news));
     assert!(remaining_news.contains(&estimate_feerate_news));
     assert!(remaining_news.contains(&funding_not_found_news));
     assert!(!remaining_news.contains(&insufficient_funds_news));
@@ -99,18 +98,11 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
 
     // Verify all news are removed except speed_up_news, estimate_feerate_news, and funding_not_found_news
     let remaining_news = store.get_news()?;
-    assert_eq!(remaining_news.len(), 3);
-    assert!(remaining_news.contains(&speed_up_news));
-    assert!(remaining_news.contains(&estimate_feerate_news));
-    assert!(remaining_news.contains(&funding_not_found_news));
-    // Acknowledge the last news
-    let ack_news = AckCoordinatorNews::NewSpeedUp(tx_id_2);
-    store.ack_news(ack_news)?;
-    // Verify only estimate_feerate_news and funding_not_found_news remain
-    let remaining_news = store.get_news()?;
     assert_eq!(remaining_news.len(), 2);
     assert!(remaining_news.contains(&estimate_feerate_news));
     assert!(remaining_news.contains(&funding_not_found_news));
+    // Acknowledge the last news
+
     // Acknowledge the EstimateFeerateTooHigh news
     let ack_news = AckCoordinatorNews::EstimateFeerateTooHigh(12345, 10000);
     store.ack_news(ack_news)?;
@@ -153,9 +145,6 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
         "Test error 7".to_string(),
     );
 
-    let speed_up_news_1 = CoordinatorNews::NewSpeedUp(tx_id_6, "Test context 6".to_string(), 2);
-    let speed_up_news_2 = CoordinatorNews::NewSpeedUp(tx_id_7, "Test context 7".to_string(), 3);
-
     let speed_up_error_news_1 = CoordinatorNews::DispatchSpeedUpError(
         vec![tx_id_6],
         vec!["Test context 6".to_string()],
@@ -174,28 +163,28 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
 
     let funding_not_found_news = CoordinatorNews::FundingNotFound;
 
+    let next_block_hash =
+        BlockHash::from_str("1111111111111111111111111111111111111111111111111111111111111111")
+            .unwrap();
     // Add all news
-    store.add_news(insufficient_funds_news_1.clone())?;
-    store.add_news(insufficient_funds_news_2.clone())?;
-    store.add_news(transaction_error_news_1.clone())?;
-    store.add_news(transaction_error_news_2.clone())?;
-    store.add_news(speed_up_news_1.clone())?;
-    store.add_news(speed_up_news_2.clone())?;
-    store.add_news(speed_up_error_news_1.clone())?;
-    store.add_news(speed_up_error_news_2.clone())?;
-    store.add_news(estimate_feerate_news_1.clone())?;
-    store.add_news(estimate_feerate_news_2.clone())?;
-    store.add_news(funding_not_found_news.clone())?;
+    store.update_news(insufficient_funds_news_1.clone(), current_block_hash)?;
+    store.update_news(insufficient_funds_news_2.clone(), current_block_hash)?;
+    store.update_news(transaction_error_news_1.clone(), current_block_hash)?;
+    store.update_news(transaction_error_news_2.clone(), current_block_hash)?;
+    store.update_news(speed_up_error_news_1.clone(), current_block_hash)?;
+    store.update_news(speed_up_error_news_2.clone(), current_block_hash)?;
+    store.update_news(estimate_feerate_news_1.clone(), current_block_hash)?;
+    store.update_news(estimate_feerate_news_2.clone(), current_block_hash)?;
+    store.update_news(funding_not_found_news.clone(), current_block_hash)?;
+    store.update_news(funding_not_found_news.clone(), next_block_hash)?;
 
     // Verify all news were added
     let all_news = store.get_news()?;
-    assert_eq!(all_news.len(), 11);
+    assert_eq!(all_news.len(), 9);
     assert!(all_news.contains(&insufficient_funds_news_1));
     assert!(all_news.contains(&insufficient_funds_news_2));
     assert!(all_news.contains(&transaction_error_news_1));
     assert!(all_news.contains(&transaction_error_news_2));
-    assert!(all_news.contains(&speed_up_news_1));
-    assert!(all_news.contains(&speed_up_news_2));
     assert!(all_news.contains(&speed_up_error_news_1));
     assert!(all_news.contains(&speed_up_error_news_2));
     assert!(all_news.contains(&estimate_feerate_news_1));
@@ -207,8 +196,6 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     store.ack_news(AckCoordinatorNews::InsufficientFunds(tx_id_5))?;
     store.ack_news(AckCoordinatorNews::DispatchTransactionError(tx_id_6))?;
     store.ack_news(AckCoordinatorNews::DispatchTransactionError(tx_id_7))?;
-    store.ack_news(AckCoordinatorNews::NewSpeedUp(tx_id_6))?;
-    store.ack_news(AckCoordinatorNews::NewSpeedUp(tx_id_7))?;
     store.ack_news(AckCoordinatorNews::DispatchSpeedUpError(tx_id_6))?;
     store.ack_news(AckCoordinatorNews::DispatchSpeedUpError(tx_id_8))?;
     store.ack_news(AckCoordinatorNews::EstimateFeerateTooHigh(22222, 11111))?;

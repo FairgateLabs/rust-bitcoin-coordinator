@@ -3,11 +3,12 @@ use crate::{
     types::{AckCoordinatorNews, CoordinatedTransaction, CoordinatorNews, TransactionState},
 };
 
-use bitcoin::{Transaction, Txid};
+use bitcoin::{BlockHash, Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use protocol_builder::types::output::SpeedupData;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
+use tracing::info;
 pub struct BitcoinCoordinatorStore {
     pub store: Rc<Storage>,
     pub max_unconfirmed_speedups: u32,
@@ -19,7 +20,6 @@ enum StoreKey {
     DispatchTransactionErrorNewsList,
     DispatchSpeedUpErrorNewsList,
     InsufficientFundsNewsList,
-    NewSpeedUpNewsList,
     FundingNotFoundNews,
     EstimateFeerateTooHighNewsList,
 }
@@ -56,7 +56,11 @@ pub trait BitcoinCoordinatorStoreApi {
         deliver_block_height: u32,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
-    fn add_news(&self, news: CoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError>;
+    fn update_news(
+        &self,
+        news: CoordinatorNews,
+        current_block_hash: BlockHash,
+    ) -> Result<(), BitcoinCoordinatorStoreError>;
     fn ack_news(&self, news: AckCoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError>;
     fn get_news(&self) -> Result<Vec<CoordinatorNews>, BitcoinCoordinatorStoreError>;
 }
@@ -86,7 +90,6 @@ impl BitcoinCoordinatorStore {
             StoreKey::DispatchSpeedUpErrorNewsList => {
                 format!("{prefix}/news/dispatch_speed_up_error")
             }
-            StoreKey::NewSpeedUpNewsList => format!("{prefix}/news/new_speed_up"),
             StoreKey::FundingNotFoundNews => format!("{prefix}/news/funding_not_found"),
             StoreKey::EstimateFeerateTooHighNewsList => {
                 format!("{prefix}/news/estimate_feerate_too_high")
@@ -270,55 +273,136 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn add_news(&self, news: CoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError> {
+    fn update_news(
+        &self,
+        news: CoordinatorNews,
+        current_block_hash: BlockHash,
+    ) -> Result<(), BitcoinCoordinatorStoreError> {
         match news {
             CoordinatorNews::InsufficientFunds(tx_id, amount, required) => {
                 let key = self.get_key(StoreKey::InsufficientFundsNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, u64, u64)>>(&key)?
+                    .get::<&str, Vec<(Txid, u64, u64, (BlockHash, bool))>>(&key)?
                     .unwrap_or_default();
-                news_list.push((tx_id, amount, required));
-                self.store.set(&key, &news_list, None)?;
-            }
-            CoordinatorNews::NewSpeedUp(tx_id, context, counting) => {
-                let key = self.get_key(StoreKey::NewSpeedUpNewsList);
-                let mut news_list = self
-                    .store
-                    .get::<&str, Vec<(Txid, String, u32)>>(&key)?
-                    .unwrap_or_default();
-                news_list.push((tx_id, context, counting));
+
+                let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
+
+                if is_new_news.is_none() {
+                    // Insert news with current block hash and ack in false
+                    news_list.push((tx_id, amount.clone(), required, (current_block_hash, false)));
+                } else {
+                    let pos = is_new_news.unwrap();
+                    let (_, _, _, (existing_block_hash, _)) = &news_list[pos];
+
+                    if existing_block_hash == &current_block_hash {
+                        // We already have this news, do not update
+                        return Ok(());
+                    } else {
+                        // Replace the notification if the block hash is different
+                        news_list[pos] =
+                            (tx_id, amount.clone(), required, (current_block_hash, false));
+                    }
+                }
+
                 self.store.set(&key, &news_list, None)?;
             }
             CoordinatorNews::DispatchTransactionError(tx_id, context, error) => {
                 let key = self.get_key(StoreKey::DispatchTransactionErrorNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, String, String)>>(&key)?
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
                     .unwrap_or_default();
-                news_list.push((tx_id, context, error));
+
+                let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
+
+                if is_new_news.is_none() {
+                    // Insert news if it doesn't already exist
+                    news_list.push((tx_id, context, error, (current_block_hash, false)));
+                } else {
+                    let pos = is_new_news.unwrap();
+                    let (_, _, _, (last_block_hash, _)) = &news_list[pos];
+
+                    if last_block_hash != &current_block_hash {
+                        // Update the news if the block hash is different
+                        news_list[pos] = (tx_id, context, error, (current_block_hash, false));
+                    }
+                }
+
                 self.store.set(&key, &news_list, None)?;
             }
             CoordinatorNews::DispatchSpeedUpError(tx_ids, contexts, txid, error) => {
                 let key = self.get_key(StoreKey::DispatchSpeedUpErrorNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String)>>(&key)?
+                    .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String, (BlockHash, bool))>>(
+                        &key,
+                    )?
                     .unwrap_or_default();
-                news_list.push((tx_ids, contexts, txid, error));
+
+                let is_new_news = news_list
+                    .iter()
+                    .position(|(ids, _, id, _, _)| ids == &tx_ids && id == &txid);
+
+                if is_new_news.is_none() {
+                    // Insert news if it doesn't already exist
+                    news_list.push((tx_ids, contexts, txid, error, (current_block_hash, false)));
+                } else {
+                    let pos = is_new_news.unwrap();
+                    let (_, _, _, _, (last_block_hash, _)) = &news_list[pos];
+
+                    info!("last_block_hash: {:?} ", last_block_hash);
+                    info!("current_block_hash: {:?} ", current_block_hash);
+                    if last_block_hash != &current_block_hash {
+                        // Update the news if the block hash is different
+                        news_list[pos] =
+                            (tx_ids, contexts, txid, error, (current_block_hash, false));
+                    }
+                }
+
                 self.store.set(&key, &news_list, None)?;
             }
             CoordinatorNews::FundingNotFound => {
                 let key = self.get_key(StoreKey::FundingNotFoundNews);
-                self.store.set(&key, true, None)?;
+                let news = self.store.get::<&str, (BlockHash, bool)>(&key)?;
+
+                // Check if there is no existing news for "FundingNotFound"
+                if news.is_none() {
+                    // If no existing news, set the current block hash and mark it as not acknowledged
+                    self.store.set(&key, &(current_block_hash, false), None)?;
+                } else {
+                    // If there is existing news, unpack the block hash and acknowledgment status
+                    let (last_block_hash, _) = news.unwrap();
+                    // If the existing block hash is different from the current one, update the store
+                    if last_block_hash != current_block_hash {
+                        self.store.set(&key, &(current_block_hash, false), None)?;
+                    }
+                }
             }
             CoordinatorNews::EstimateFeerateTooHigh(estimate_fee, max_allowed) => {
                 let key = self.get_key(StoreKey::EstimateFeerateTooHighNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(u64, u64)>>(&key)?
+                    .get::<&str, Vec<(u64, u64, (BlockHash, bool))>>(&key)?
                     .unwrap_or_default();
-                news_list.push((estimate_fee, max_allowed));
+
+                let is_new_news = news_list
+                    .iter()
+                    .position(|(fee, max, _)| *fee == estimate_fee && *max == max_allowed);
+
+                if is_new_news.is_none() {
+                    // Insert news if it doesn't already exist
+                    news_list.push((estimate_fee, max_allowed, (current_block_hash, false)));
+                } else {
+                    let pos = is_new_news.unwrap();
+                    let (_, _, (last_block_hash, _)) = &news_list[pos];
+
+                    if last_block_hash != &current_block_hash {
+                        // Replace the notification if the block hash is different
+                        news_list[pos] = (estimate_fee, max_allowed, (current_block_hash, false));
+                    }
+                }
+
                 self.store.set(&key, &news_list, None)?;
             }
         }
@@ -331,50 +415,70 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::InsufficientFundsNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, u64, u64)>>(&key)?
+                    .get::<&str, Vec<(Txid, u64, u64, (BlockHash, bool))>>(&key)?
                     .unwrap_or_default();
-                news_list.retain(|(id, _, _)| *id != tx_id);
-                self.store.set(&key, &news_list, None)?;
-            }
-            AckCoordinatorNews::NewSpeedUp(tx_id) => {
-                let key = self.get_key(StoreKey::NewSpeedUpNewsList);
-                let mut news_list = self
-                    .store
-                    .get::<&str, Vec<(Txid, String, u32)>>(&key)?
-                    .unwrap_or_default();
-                news_list.retain(|(id, _, _)| *id != tx_id);
-                self.store.set(&key, &news_list, None)?;
+
+                if let Some(pos) = news_list.iter().position(|(id, _, _, _)| *id == tx_id) {
+                    let (_, _, _, (_, ack)) = &mut news_list[pos];
+                    *ack = true;
+                    self.store.set(&key, &news_list, None)?;
+                }
             }
             AckCoordinatorNews::DispatchTransactionError(tx_id) => {
                 let key = self.get_key(StoreKey::DispatchTransactionErrorNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, String, String)>>(&key)?
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
                     .unwrap_or_default();
-                news_list.retain(|(id, _, _)| *id != tx_id);
-                self.store.set(&key, &news_list, None)?;
+
+                if let Some(pos) = news_list.iter().position(|(id, _, _, _)| *id == tx_id) {
+                    let (_, _, _, (_, ack)) = &mut news_list[pos];
+                    *ack = true;
+                    self.store.set(&key, &news_list, None)?;
+                }
             }
             AckCoordinatorNews::DispatchSpeedUpError(speedup_txid) => {
                 let key = self.get_key(StoreKey::DispatchSpeedUpErrorNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String)>>(&key)?
+                    .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String, (BlockHash, bool))>>(
+                        &key,
+                    )?
                     .unwrap_or_default();
-                news_list.retain(|(_, _, txid, _)| *txid != speedup_txid);
-                self.store.set(&key, &news_list, None)?;
+
+                if let Some(pos) = news_list
+                    .iter()
+                    .position(|(_, _, txid, _, _)| *txid == speedup_txid)
+                {
+                    let (_, _, _, _, (_, ack)) = &mut news_list[pos];
+                    *ack = true;
+                    self.store.set(&key, &news_list, None)?;
+                }
             }
             AckCoordinatorNews::EstimateFeerateTooHigh(estimate_fee, max_allowed) => {
                 let key = self.get_key(StoreKey::EstimateFeerateTooHighNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(u64, u64)>>(&key)?
+                    .get::<&str, Vec<(u64, u64, (BlockHash, bool))>>(&key)?
                     .unwrap_or_default();
-                news_list.retain(|(fee, max)| *fee != estimate_fee || *max != max_allowed);
-                self.store.set(&key, &news_list, None)?;
+
+                if let Some(pos) = news_list
+                    .iter()
+                    .position(|(fee, max, _)| *fee == estimate_fee && *max == max_allowed)
+                {
+                    let (_, _, (_, ack)) = &mut news_list[pos];
+                    *ack = true;
+                    self.store.set(&key, &news_list, None)?;
+                }
             }
             AckCoordinatorNews::FundingNotFound => {
                 let key = self.get_key(StoreKey::FundingNotFoundNews);
-                self.store.set(&key, false, None)?;
+                let mut news = self.store.get::<&str, (BlockHash, bool)>(&key)?;
+
+                if let Some((block_hash, _)) = news {
+                    news = Some((block_hash, true));
+                    self.store.set(&key, &news, None)?;
+                }
             }
         }
         Ok(())
@@ -387,21 +491,12 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let insufficient_funds_key = self.get_key(StoreKey::InsufficientFundsNewsList);
         if let Some(news_list) = self
             .store
-            .get::<&str, Vec<(Txid, u64, u64)>>(&insufficient_funds_key)?
+            .get::<&str, Vec<(Txid, u64, u64, (BlockHash, bool))>>(&insufficient_funds_key)?
         {
-            for (txid, amount, required) in news_list {
-                all_news.push(CoordinatorNews::InsufficientFunds(txid, amount, required));
-            }
-        }
-
-        // Get speed up news
-        let speed_up_key = self.get_key(StoreKey::NewSpeedUpNewsList);
-        if let Some(news_list) = self
-            .store
-            .get::<&str, Vec<(Txid, String, u32)>>(&speed_up_key)?
-        {
-            for (tx_id, context, counting) in news_list {
-                all_news.push(CoordinatorNews::NewSpeedUp(tx_id, context, counting));
+            for (txid, amount, required, (_, acked)) in news_list {
+                if !acked {
+                    all_news.push(CoordinatorNews::InsufficientFunds(txid, amount, required));
+                }
             }
         }
 
@@ -409,32 +504,41 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let dispatch_error_key = self.get_key(StoreKey::DispatchTransactionErrorNewsList);
         if let Some(news_list) = self
             .store
-            .get::<&str, Vec<(Txid, String, String)>>(&dispatch_error_key)?
+            .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&dispatch_error_key)?
         {
-            for (tx_id, context, error) in news_list {
-                all_news.push(CoordinatorNews::DispatchTransactionError(
-                    tx_id, context, error,
-                ));
+            for (tx_id, context, error, (_, acked)) in news_list {
+                if !acked {
+                    all_news.push(CoordinatorNews::DispatchTransactionError(
+                        tx_id, context, error,
+                    ));
+                }
             }
         }
 
         // Get speed up error news
         let speed_up_error_key = self.get_key(StoreKey::DispatchSpeedUpErrorNewsList);
-        if let Some(news_list) = self
-            .store
-            .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String)>>(&speed_up_error_key)?
+        if let Some(news_list) =
+            self.store
+                .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String, (BlockHash, bool))>>(
+                    &speed_up_error_key,
+                )?
         {
-            for (tx_ids, contexts, txid, error) in news_list {
-                all_news.push(CoordinatorNews::DispatchSpeedUpError(
-                    tx_ids, contexts, txid, error,
-                ));
+            for (tx_ids, contexts, txid, error, (_, acked)) in news_list {
+                if !acked {
+                    all_news.push(CoordinatorNews::DispatchSpeedUpError(
+                        tx_ids, contexts, txid, error,
+                    ));
+                }
             }
         }
 
         // Get funding not found news
         let funding_not_found_key = self.get_key(StoreKey::FundingNotFoundNews);
-        if let Some(not_found) = self.store.get::<&str, bool>(&funding_not_found_key)? {
-            if not_found {
+        if let Some((_, acked)) = self
+            .store
+            .get::<&str, (BlockHash, bool)>(&funding_not_found_key)?
+        {
+            if !acked {
                 all_news.push(CoordinatorNews::FundingNotFound);
             }
         }
@@ -443,13 +547,15 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let estimate_feerate_too_high_key = self.get_key(StoreKey::EstimateFeerateTooHighNewsList);
         if let Some(news_list) = self
             .store
-            .get::<&str, Vec<(u64, u64)>>(&estimate_feerate_too_high_key)?
+            .get::<&str, Vec<(u64, u64, (BlockHash, bool))>>(&estimate_feerate_too_high_key)?
         {
-            for (estimate_fee, max_allowed) in news_list {
-                all_news.push(CoordinatorNews::EstimateFeerateTooHigh(
-                    estimate_fee,
-                    max_allowed,
-                ));
+            for (estimate_fee, max_allowed, (_, acked)) in news_list {
+                if !acked {
+                    all_news.push(CoordinatorNews::EstimateFeerateTooHigh(
+                        estimate_fee,
+                        max_allowed,
+                    ));
+                }
             }
         }
 
