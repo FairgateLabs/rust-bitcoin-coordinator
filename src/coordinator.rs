@@ -232,7 +232,17 @@ impl BitcoinCoordinator {
 
     fn notify_funding_not_found(&self) -> Result<(), BitcoinCoordinatorError> {
         let news = CoordinatorNews::FundingNotFound;
-        self.store.add_news(news)?;
+        self.update_news(news)?;
+        Ok(())
+    }
+
+    fn update_news(&self, news: CoordinatorNews) -> Result<(), BitcoinCoordinatorError> {
+        let current_block = self.monitor.get_current_block()?;
+
+        if let Some(current_block) = current_block {
+            self.store.update_news(news, current_block.hash)?;
+        }
+
         Ok(())
     }
 
@@ -269,7 +279,7 @@ impl BitcoinCoordinator {
         dispatch_error: String,
     ) -> Result<(), BitcoinCoordinatorError> {
         if retry_attempts_count.is_some() {
-            error!(
+            warn!(
                 "{} Error Resending {} Transaction({}) | RetryAttempt({})",
                 style("Coordinator").green(),
                 speedup_type,
@@ -293,7 +303,7 @@ impl BitcoinCoordinator {
             dispatch_error,
         );
 
-        self.store.add_news(news)?;
+        self.update_news(news)?;
 
         Ok(())
     }
@@ -416,7 +426,7 @@ impl BitcoinCoordinator {
                         error_msg,
                     );
 
-                    self.store.add_news(news)?;
+                    self.update_news(news)?;
 
                     self.store
                         .update_tx_state(tx.tx_id, TransactionState::Failed)?;
@@ -655,7 +665,7 @@ impl BitcoinCoordinator {
                 funding.amount,
                 self.settings.min_funding_amount_sats,
             );
-            self.store.add_news(news)?;
+            self.update_news(news)?;
 
             warn!(
                 "{} Insufficient funds for speedup | FundingTx({}) | Amount({}) | MinRequired({})",
@@ -693,7 +703,7 @@ impl BitcoinCoordinator {
         if speedup_fee > funding.amount {
             let news =
                 CoordinatorNews::InsufficientFunds(funding.txid, funding.amount, speedup_fee);
-            self.store.add_news(news)?;
+            self.update_news(news)?;
             return Ok(());
         }
 
@@ -806,7 +816,7 @@ impl BitcoinCoordinator {
                 self.settings.max_feerate_sat_vb,
             );
 
-            self.store.add_news(news)?;
+            self.update_news(news)?;
 
             // Set the estimate feerate to the max allowed
             network_fee_rate = self.settings.max_feerate_sat_vb;

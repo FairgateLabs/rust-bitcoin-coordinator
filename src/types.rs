@@ -219,12 +219,6 @@ pub enum CoordinatorNews {
     /// Indicates that there are no funding utxo loaded
     FundingNotFound,
 
-    /// Notification of a new speed-up transaction
-    /// - Txid: The transaction ID that was sped up
-    /// - String: Context information about the transaction
-    /// - u32: Counter indicating how many times this transaction has been sped up
-    NewSpeedUp(Txid, String, u32),
-
     /// Indicates that the estimate feerate is too high
     /// - u64: The estimate feerate from the node
     /// - u64: The max allowed feerate from settings
@@ -242,7 +236,6 @@ impl News {
 
 pub enum AckCoordinatorNews {
     InsufficientFunds(Txid),
-    NewSpeedUp(Txid),
     DispatchTransactionError(Txid),
     DispatchSpeedUpError(Txid),
     EstimateFeerateTooHigh(u64, u64),

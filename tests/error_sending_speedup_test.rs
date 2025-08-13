@@ -169,6 +169,11 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
     std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
     coordinator.tick()?;
 
+    bitcoin_client
+        .mine_blocks_to_address(1, &funding_wallet)
+        .unwrap();
+    coordinator.tick()?;
+
     // Third tick: Retry sending the transaction again, expecting a third error
     info!("Should print error 3");
     std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
@@ -221,8 +226,9 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
     }
 
     let news = coordinator.get_news()?;
-    // Verify that there are 3 error reports (initial send + 2 retries) and 2 confirmed transactions
-    assert_eq!(news.coordinator_news.len(), 3);
+    // Verify that there is one error notification due to retrying, and two confirmed transactions.
+    // Note that although there were three retry attempts, only one error notification is present.
+    assert_eq!(news.coordinator_news.len(), 1);
     assert_eq!(news.monitor_news.len(), 2);
 
     bitcoind.stop()?;
