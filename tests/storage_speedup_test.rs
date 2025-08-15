@@ -3,9 +3,8 @@ use bitcoin_coordinator::{
     errors::BitcoinCoordinatorStoreError,
     settings::MAX_LIMIT_UNCONFIRMED_PARENTS,
     speedup::SpeedupStore,
-    types::{CoordinatedSpeedUpTransaction, RetryInfo, SpeedupState},
+    types::{CoordinatedSpeedUpTransaction, SpeedupState},
 };
-use chrono::Utc;
 use protocol_builder::types::{output::SpeedupData, Utxo};
 use rand::Rng;
 use std::str::FromStr;

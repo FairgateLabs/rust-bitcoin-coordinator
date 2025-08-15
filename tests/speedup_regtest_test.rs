@@ -20,8 +20,9 @@ use std::rc::Rc;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
-use utils::{generate_random_string, generate_tx};
+use utils::generate_tx;
+
+use crate::utils::{config_trace_aux, generate_random_string};
 mod utils;
 /*
     Test Summary: send_tx_regtest
@@ -44,32 +45,6 @@ mod utils;
     4. Cleanup:
        - Stops the regtest node and completes the test.
 */
-
-fn config_trace_aux() {
-    let default_modules = [
-        "info",
-        "libp2p=off",
-        "bitvmx_transaction_monitor=off",
-        "bitcoin_indexer=off",
-        "bitcoin_coordinator=info",
-        "p2p_protocol=off",
-        "p2p_handler=off",
-        "tarpc=off",
-        "key_manager=off",
-        "memory=off",
-    ];
-
-    let filter = EnvFilter::builder()
-        .parse(default_modules.join(","))
-        .expect("Invalid filter");
-
-    tracing_subscriber::fmt()
-        //.without_time()
-        //.with_ansi(false)
-        .with_target(true)
-        .with_env_filter(filter)
-        .init();
-}
 
 // This test creates and dispatches two transactions in sequence, where each transaction is accelerated using a speedup (CPFP) mechanism.
 // The funding for the second transaction comes from the change output of the first transaction.

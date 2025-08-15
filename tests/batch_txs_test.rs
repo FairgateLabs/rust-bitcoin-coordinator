@@ -1,53 +1,23 @@
-use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
-use bitcoin_coordinator::{
-    config::CoordinatorSettings,
-    coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
-    TypesToMonitor,
-};
+use bitcoin::{Address, Amount, CompressedPublicKey, Network};
+use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
 use bitcoind::bitcoind::Bitcoind;
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     rpc_config::RpcConfig,
 };
 use console::style;
+use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_store::KeyStore;
-use key_manager::{config::KeyManagerConfig, key_manager::KeyManager};
-use protocol_builder::types::{output::SpeedupData, Utxo};
+use protocol_builder::types::Utxo;
 use std::rc::Rc;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
-use utils::{generate_random_string, generate_tx};
+use utils::generate_random_string;
+
+use crate::utils::{config_trace_aux, coordinate_tx};
 mod utils;
-
-fn config_trace_aux() {
-    let default_modules = [
-        "info",
-        "libp2p=off",
-        "bitvmx_transaction_monitor=off",
-        "bitcoin_indexer=off",
-        "bitcoin_coordinator=info",
-        "bitcoin_client=info",
-        "p2p_protocol=off",
-        "p2p_handler=off",
-        "tarpc=off",
-        "key_manager=off",
-        "memory=off",
-    ];
-
-    let filter = EnvFilter::builder()
-        .parse(default_modules.join(","))
-        .expect("Invalid filter");
-
-    tracing_subscriber::fmt()
-        //.without_time()
-        //.with_ansi(false)
-        .with_target(true)
-        .with_env_filter(filter)
-        .init();
-}
 
 // The idea of this test is to dispatch a lot of txs and check if the coordinator can handle it.
 // What we are testing is the batch dispatching of txs. So should be able to dispatch 200 txs in a single tick and create 3 CPFPs.
@@ -203,47 +173,6 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     assert_eq!(news.monitor_news.len(), 60);
 
     bitcoind.stop()?;
-
-    Ok(())
-}
-
-fn coordinate_tx(
-    coordinator: Rc<BitcoinCoordinator>,
-    amount: Amount,
-    network: Network,
-    key_manager: Rc<KeyManager>,
-    bitcoin_client: Rc<BitcoinClient>,
-) -> Result<(), anyhow::Error> {
-    // Create a funding wallet
-    // Fund the funding wallet
-    // Create a tx1 and a speedup utxo for tx1
-    // Monitor tx1
-    // Dispatch tx1
-    // First tick dispatch the tx and create and dispatch a speedup tx
-    let public_key = key_manager.derive_keypair(0).unwrap();
-    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
-    let funding_wallet = Address::p2wpkh(&compressed, network);
-
-    let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
-
-    let (tx1, tx1_speedup_utxo) = generate_tx(
-        OutPoint::new(funding_tx.compute_txid(), funding_vout),
-        amount.to_sat(),
-        public_key,
-        key_manager.clone(),
-    )?;
-
-    let tx_context = "My tx".to_string();
-    let tx_to_monitor = TypesToMonitor::Transactions(vec![tx1.compute_txid()], tx_context.clone());
-    coordinator.monitor(tx_to_monitor)?;
-
-    // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.dispatch(
-        tx1.clone(),
-        Some(SpeedupData::new(tx1_speedup_utxo)),
-        tx_context.clone(),
-        None,
-    )?;
 
     Ok(())
 }

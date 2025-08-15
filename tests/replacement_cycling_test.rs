@@ -16,35 +16,10 @@ use std::{rc::Rc, vec};
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 use utils::{generate_random_string, generate_tx};
+
+use crate::utils::config_trace_aux;
 mod utils;
-
-fn config_trace_aux() {
-    let default_modules = [
-        "info",
-        "libp2p=off",
-        "bitvmx_transaction_monitor=off",
-        "bitcoin_indexer=off",
-        "bitcoin_coordinator=info",
-        "p2p_protocol=off",
-        "p2p_handler=off",
-        "tarpc=off",
-        "key_manager=off",
-        "memory=off",
-    ];
-
-    let filter = EnvFilter::builder()
-        .parse(default_modules.join(","))
-        .expect("Invalid filter");
-
-    tracing_subscriber::fmt()
-        //.without_time()
-        //.with_ansi(false)
-        .with_target(true)
-        .with_env_filter(filter)
-        .init();
-}
 
 #[test]
 #[ignore = "This test works, but it runs in regtest with a bitcoind running"]
