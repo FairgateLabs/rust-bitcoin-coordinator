@@ -1,9 +1,10 @@
-use bitcoin::{absolute, transaction, OutPoint, Transaction};
+use bitcoin::{absolute, transaction, Address, Amount, CompressedPublicKey, OutPoint, Transaction};
 use bitcoin::{Network, PublicKey, Txid};
+use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
 use bitcoin_coordinator::errors::TxBuilderHelperError;
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::TypesToMonitor;
-use bitvmx_bitcoin_rpc::bitcoin_client::MockBitcoinClient;
+use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi, MockBitcoinClient};
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
@@ -12,11 +13,13 @@ use key_manager::key_store::KeyStore;
 use protocol_builder::builder::Protocol;
 use protocol_builder::types::connection::InputSpec;
 use protocol_builder::types::input::{SighashType, SpendMode};
+use protocol_builder::types::output::SpeedupData;
 use protocol_builder::types::{InputArgs, OutputType, Utxo};
 use std::rc::Rc;
 use std::str::FromStr;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
+use tracing_subscriber::EnvFilter;
 
 pub fn clear_output() {
     let _ = std::fs::remove_dir("test_output/");
@@ -184,4 +187,69 @@ pub fn create_store() -> BitcoinCoordinatorStore {
     let storage_config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&storage_config).unwrap());
     BitcoinCoordinatorStore::new(storage, 10).unwrap()
+}
+
+pub fn config_trace_aux() {
+    let default_modules = [
+        "info",
+        "libp2p=off",
+        "bitvmx_transaction_monitor=off",
+        "bitcoin_indexer=off",
+        "bitcoin_coordinator=info",
+        "bitcoin_client=info",
+        "p2p_protocol=off",
+        "p2p_handler=off",
+        "tarpc=off",
+        "key_manager=off",
+        "memory=off",
+    ];
+
+    let filter = EnvFilter::builder()
+        .parse(default_modules.join(","))
+        .expect("Invalid filter");
+
+    tracing_subscriber::fmt()
+        //.without_time()
+        //.with_ansi(false)
+        .with_target(true)
+        .with_env_filter(filter)
+        .init();
+}
+
+pub fn coordinate_tx(
+    coordinator: Rc<BitcoinCoordinator>,
+    amount: Amount,
+    network: Network,
+    key_manager: Rc<KeyManager>,
+    bitcoin_client: Rc<BitcoinClient>,
+) -> Result<(), anyhow::Error> {
+    // Create a funding wallet
+    // Fund the funding wallet
+    // Create a tx1 and a speedup utxo for tx1
+    // Monitor tx1
+    // Dispatch tx1
+    // First tick dispatch the tx and create and dispatch a speedup tx
+    let public_key = key_manager.derive_keypair(0).unwrap();
+    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
+    let funding_wallet = Address::p2wpkh(&compressed, network);
+
+    let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
+
+    let (tx1, tx1_speedup_utxo) = generate_tx(
+        OutPoint::new(funding_tx.compute_txid(), funding_vout),
+        amount.to_sat(),
+        public_key,
+        key_manager.clone(),
+    )?;
+
+    let speedup_data = SpeedupData::new(tx1_speedup_utxo);
+
+    let tx_context = "My tx".to_string();
+    let tx_to_monitor = TypesToMonitor::Transactions(vec![tx1.compute_txid()], tx_context.clone());
+    coordinator.monitor(tx_to_monitor)?;
+
+    // Dispatch the transaction through the bitcoin coordinator.
+    coordinator.dispatch(tx1.clone(), Some(speedup_data), tx_context.clone(), None)?;
+
+    Ok(())
 }
