@@ -720,11 +720,14 @@ impl BitcoinCoordinator {
             cpfp_to_replace = format!("| CPFP_TO_REPLACE({})", replace_cpfp_txid.unwrap());
         }
 
+        let previous_txid = speedup_tx.input[0].previous_output.txid;
+
         info!(
-            "{} New {} Transaction({}) | Fee({}) | Transactions#({}) | FundingTx({}) | Vout({}) {} | BumpFee({})",
+            "{} New {} Transaction({}) | Tx2Speedup({:#?}) | Fee({}) | Transactions#({}) | FundingTx({}) | Vout({}) {} | BumpFee({})",
             style("Coordinator").green(),
             speedup_type,
             style(speedup_tx_id).yellow(),
+            style(previous_txid).yellow(),
             style(speedup_fee).blue(),
             style(txs_info.len()).blue(),
             style(funding.txid).blue(),
