@@ -1,6 +1,8 @@
-use crate::utils::{config_trace_aux, coordinate_tx};
 use bitcoin::{Address, Amount, CompressedPublicKey, Network};
-use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
+use bitcoin_coordinator::{
+    coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
+    MonitorNews,
+};
 use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
@@ -16,12 +18,20 @@ use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 use tracing::info;
 use utils::generate_random_string;
+
+use crate::utils::{config_trace_aux, coordinate_tx};
 mod utils;
 
 #[test]
 #[ignore = "This test works, but it runs in regtest with a bitcoind running"]
 fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
+
+    // This test simulates a blockchain reorganization scenario. It starts by setting up a Bitcoin
+    // regtest environment, dispatching a transaction with a Child-Pays-For-Parent (CPFP) speedup,
+    // and then invalidates the blockchain to orphan the transaction. After confirming the orphan
+    // status, it dispatches two more transactions to observe the effects of the reorganization.
+    // Finally, it ensures that all three transactions are confirmed in the network.
 
     let mut blocks_mined = 102;
     let network = Network::Regtest;
@@ -73,29 +83,14 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         .mine_blocks_to_address(blocks_mined, &regtest_wallet)
         .unwrap();
 
-    let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
-
     // Fund address mines 1 block
-    blocks_mined = blocks_mined + 1;
-
-    info!(
-        "{} Funding tx address {:?}",
-        style("Test").green(),
-        funding_wallet
-    );
-
-    info!(
-        "{} Funding tx: {:?} | vout: {:?}",
-        style("Test").green(),
-        funding_tx.compute_txid(),
-        funding_vout
-    );
+    blocks_mined += 1;
 
     let (funding_speedup, funding_speedup_vout) =
         bitcoin_client.fund_address(&funding_wallet, amount)?;
 
     // Funding speed up tx mines 1 block
-    blocks_mined = blocks_mined + 1;
+    blocks_mined += 1;
 
     info!(
         "{} Funding speed up tx: {:?} | vout: {:?}",
@@ -111,13 +106,12 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         None,
     )?);
 
-    // Since we've already mined 102 blocks, we need to advance the coordinator by 102 ticks
-    // so the indexer can catch up with the current blockchain height.
+    // Advance the coordinator by the number of blocks mined to sync with the blockchain height.
     for _ in 0..blocks_mined {
         coordinator.tick()?;
     }
 
-    // Add funding for speed up transaction
+    // Add funding for the speedup transaction
     coordinator.add_funding(Utxo::new(
         funding_speedup.compute_txid(),
         funding_speedup_vout,
@@ -135,97 +129,81 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     coordinator.tick()?;
 
-    info!("Mine and Tick");
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-
-    let news = coordinator.get_news()?;
-    assert_eq!(news.monitor_news.len(), 0);
-
-    coordinator.tick()?;
-
-    info!("Mine and Tick");
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-
-    info!("Mine and Tick");
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-
-    info!("Mine and Tick");
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-
-    info!("Mine and Tick");
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-
-    info!("Mine and Tick");
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-
-    info!("Mine and Tick");
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-    info!("Mine and Tick");
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-    info!("Mine and Tick");
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-    info!("Mine and Tick");
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
-    info!("Mine and Tick");
-    // Mine a block to mined txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
-        .unwrap();
-
-    coordinator.tick()?;
+    for _ in 0..4 {
+        info!("{} Mine and Tick", style("Test").green());
+        // Mine a block to confirm tx1 and its speedup transaction
+        bitcoin_client
+            .mine_blocks_to_address(1, &funding_wallet)
+            .unwrap();
+        coordinator.tick()?;
+    }
 
     let news = coordinator.get_news()?;
     assert_eq!(news.monitor_news.len(), 1);
+
+    let best_block = bitcoin_client.get_best_block()?;
+    let block_hash = bitcoin_client.get_block_id_by_height(&best_block).unwrap();
+    bitcoin_client.invalidate_block(&block_hash).unwrap();
+    info!("{} Invalidated block", style("Test").green());
+
+    coordinator.tick()?;
+
+    let news = coordinator.get_news()?;
+
+    assert!(
+        news.monitor_news.iter().all(|n| match n {
+            MonitorNews::Transaction(_, tx_status, _) => tx_status.is_orphan(),
+            _ => false,
+        }),
+        "Not all news are in Orphan status"
+    );
+
+    coordinator.tick()?;
+
+    // Dispatch two more transactions to observe the reorganization effects
+    coordinate_tx(
+        coordinator.clone(),
+        amount,
+        network,
+        key_manager.clone(),
+        bitcoin_client.clone(),
+    )?;
+
+    coordinate_tx(
+        coordinator.clone(),
+        amount,
+        network,
+        key_manager.clone(),
+        bitcoin_client.clone(),
+    )?;
+
+    let public_key = key_manager.derive_keypair(1).unwrap();
+    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
+    let funding_wallet = Address::p2wpkh(&compressed, network);
+
+    for _ in 0..10 {
+        coordinator.tick()?;
+
+        bitcoin_client
+            .mine_blocks_to_address(1, &funding_wallet)
+            .unwrap();
+
+        coordinator.tick()?;
+    }
+
+    coordinator.tick()?;
+
+    let news = coordinator.get_news()?;
+
+    assert!(
+        news.monitor_news.iter().all(|n| match n {
+            MonitorNews::Transaction(_, tx_status, _) => tx_status.is_confirmed(),
+            _ => false,
+        }),
+        "Not all news are in Confirmed status"
+    );
+
+    assert_eq!(news.monitor_news.len(), 3);
 
     bitcoind.stop()?;
 
