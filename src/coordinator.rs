@@ -288,12 +288,12 @@ impl BitcoinCoordinator {
             );
         } else {
             error!(
-                "{} Error Sending  {} Transaction({}): {:?}",
+                "{} Error Sending  {} Transaction({})",
                 style("Coordinator").green(),
                 speedup_type,
                 style(speedup_tx_id).yellow(),
-                style(&tx).magenta(),
             );
+            debug!("Transaction Details: {:?}", style(&tx).magenta());
         }
 
         let news = CoordinatorNews::DispatchSpeedUpError(
