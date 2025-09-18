@@ -17,17 +17,18 @@ serde = "1.0.204"
 serde_json = "1.0.96"
 thiserror = "2.0.12"
 tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 ctrlc = "3.4"
 hex = "0.4.3"
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
 
-rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
-bitvmx-transaction-monitor = { path = "../rust-bitvmx-transaction-monitor" }
-bitvmx-key-manager = { path = "../rust-bitvmx-key-manager" }
-bitvmx-settings = { path = "../rust-bitvmx-settings" }
-bitvmx-bitcoin-rpc = { path = "../rust-bitvmx-bitcoin-rpc" }
-bitvmx-protocol-builder = { path = "../rust-bitvmx-protocol-builder" }
+rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", branch = "v.0.0.1" }
+bitvmx-transaction-monitor = { git = "https://github.com/FairgateLabs/rust-bitvmx-transaction-monitor.git", branch = "v.0.0.1" }
+bitvmx-key-manager = { git = "https://github.com/FairgateLabs/rust-bitvmx-key-manager.git", branch = "v.0.0.1" }
+bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.git", branch = "v.0.0.1" }
+bitvmx-bitcoin-rpc = { git = "https://github.com/FairgateLabs/rust-bitvmx-bitcoin-rpc.git", branch = "v.0.0.1" }
+bitvmx-protocol-builder = { git = "https://github.com/FairgateLabs/rust-bitvmx-protocol-builder.git", branch = "v.0.0.1" }
+
 
 [dependencies.bitcoin]
 version = "0.32.2"
@@ -43,5 +44,4 @@ features = ["std", "std_rng"]
 
 
 [dev-dependencies]
-bitcoind = { path = "../rust-bitcoind" }
-bitvmx-wallet = { path = "../rust-bitvmx-wallet" }
+bitcoind = { git = "https://github.com/FairgateLabs/rust-bitcoind.git", branch = "v.0.0.1" }
