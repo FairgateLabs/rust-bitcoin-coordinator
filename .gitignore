@@ -5,4 +5,11 @@
 data
 test_output
 
+# macos
+.DS_Store
+
+# vscode
+.vscode
+
+# cargo
 Cargo.lock
