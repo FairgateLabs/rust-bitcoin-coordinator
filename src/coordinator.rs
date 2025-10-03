@@ -428,8 +428,12 @@ impl BitcoinCoordinator {
 
                     self.update_news(news)?;
 
-                    self.store
-                        .update_tx_state(tx.tx_id, TransactionState::Failed)?;
+                    // Queue tx for retry if this is the first error, otherwise increment retries
+                    if tx.retry_info.is_some() {
+                        self.store.increment_tx_retry_count(tx.tx_id)?;
+                    } else {
+                        self.store.queue_tx_for_retry(tx.clone())?;
+                    }
                 }
             }
         }
@@ -519,6 +523,45 @@ impl BitcoinCoordinator {
                 replace_cpfp_txid,
                 Some(speedup.tx_id),
             )?;
+        }
+
+        Ok(())
+    }
+
+    fn process_failed_txs(&self) -> Result<(), BitcoinCoordinatorError> {
+        let failed_txs = self.store.get_txs_for_retry(
+            self.settings.retry_attempts_sending_tx,
+            self.settings.retry_interval_seconds,
+        )?;
+
+        for tx in failed_txs {
+            info!(
+                "{} Retrying Transaction({})",
+                style("Coordinator").green(),
+                style(tx.tx_id).yellow(),
+            );
+
+            let dispatch_result = self.client.send_transaction(&tx.tx);
+
+            if dispatch_result.is_err() {
+                // Increment retry meta and keep it in queue
+                self.store.increment_tx_retry_count(tx.tx_id)?;
+
+                let error_msg = dispatch_result.err().unwrap().to_string();
+                let news = CoordinatorNews::DispatchTransactionError(
+                    tx.tx_id,
+                    tx.context.clone(),
+                    error_msg,
+                );
+                self.update_news(news)?;
+                continue;
+            }
+
+            // Success: mark dispatched and remove from retry queue
+            let deliver_block_height = self.monitor.get_monitor_height()?;
+            self.store
+                .update_tx_to_dispatched(tx.tx_id, deliver_block_height)?;
+            self.store.enqueue_tx_for_retry(tx.tx_id)?;
         }
 
         Ok(())
@@ -1126,6 +1169,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         }
 
         self.process_failed_speedups()?;
+        self.process_failed_txs()?;
         self.process_pending_txs_to_dispatch()?;
         self.process_in_progress_txs()?;
         self.process_in_progress_speedup_txs()?;

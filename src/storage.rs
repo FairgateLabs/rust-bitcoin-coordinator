@@ -1,14 +1,17 @@
 use crate::{
     errors::BitcoinCoordinatorStoreError,
-    types::{AckCoordinatorNews, CoordinatedTransaction, CoordinatorNews, TransactionState},
+    types::{
+        AckCoordinatorNews, CoordinatedTransaction, CoordinatorNews, RetryInfo, TransactionState,
+    },
 };
 
 use bitcoin::{BlockHash, Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
+use chrono::Utc;
 use protocol_builder::types::output::SpeedupData;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
-use tracing::info;
+use tracing::{debug, info};
 pub struct BitcoinCoordinatorStore {
     pub store: Rc<Storage>,
     pub max_unconfirmed_speedups: u32,
@@ -16,6 +19,8 @@ pub struct BitcoinCoordinatorStore {
 enum StoreKey {
     PendingTransactionList,
     Transaction(Txid),
+
+    RetryTransactionList,
 
     DispatchTransactionErrorNewsList,
     DispatchSpeedUpErrorNewsList,
@@ -63,6 +68,22 @@ pub trait BitcoinCoordinatorStoreApi {
     ) -> Result<(), BitcoinCoordinatorStoreError>;
     fn ack_news(&self, news: AckCoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError>;
     fn get_news(&self) -> Result<Vec<CoordinatorNews>, BitcoinCoordinatorStoreError>;
+
+    // Retry support for normal transactions
+    fn get_txs_for_retry(
+        &self,
+        max_retries: u32,
+        interval_seconds: u64,
+    ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError>;
+
+    fn queue_tx_for_retry(
+        &self,
+        tx: CoordinatedTransaction,
+    ) -> Result<(), BitcoinCoordinatorStoreError>;
+
+    fn enqueue_tx_for_retry(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
+
+    fn increment_tx_retry_count(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
 }
 
 impl BitcoinCoordinatorStore {
@@ -81,6 +102,9 @@ impl BitcoinCoordinatorStore {
         match key {
             StoreKey::PendingTransactionList => format!("{prefix}/tx/list"),
             StoreKey::Transaction(tx_id) => format!("{prefix}/tx/{tx_id}"),
+
+            // RETRY TXs
+            StoreKey::RetryTransactionList => format!("{prefix}/tx/retry/list"),
 
             //NEWS
             StoreKey::InsufficientFundsNewsList => format!("{prefix}/news/insufficient_funds"),
@@ -560,5 +584,94 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         }
 
         Ok(all_news)
+    }
+
+    fn get_txs_for_retry(
+        &self,
+        max_retries: u32,
+        interval_seconds: u64,
+    ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError> {
+        let key = self.get_key(StoreKey::RetryTransactionList);
+        let txs: Vec<CoordinatedTransaction> = self
+            .store
+            .get::<&str, Vec<CoordinatedTransaction>>(&key)?
+            .unwrap_or_default();
+
+        let mut eligible_txs = Vec::new();
+        let current_time = Utc::now().timestamp_millis() as u64;
+
+        for tx in txs.iter() {
+            if let Some(retry_info) = &tx.retry_info {
+                if retry_info.retries_count < max_retries {
+                    if current_time >= retry_info.last_retry_timestamp + interval_seconds * 1000 {
+                        eligible_txs.push(tx.clone());
+                    } else {
+                        debug!(
+                            "Skipping RetryTx({}) because the retry interval has not passed | CurrentTime({}) | LastRetryTimestamp({}) | IntervalSeconds({})",
+                            tx.tx_id, current_time, retry_info.last_retry_timestamp, interval_seconds
+                        );
+                    }
+                } else {
+                    debug!(
+                        "Skipping RetryTx({}) because it has reached the max retries | RetriesCount({}) | MaxRetries({})",
+                        tx.tx_id, retry_info.retries_count, max_retries
+                    );
+                }
+            }
+        }
+
+        Ok(eligible_txs)
+    }
+
+    fn queue_tx_for_retry(
+        &self,
+        mut tx: CoordinatedTransaction,
+    ) -> Result<(), BitcoinCoordinatorStoreError> {
+        let key = self.get_key(StoreKey::RetryTransactionList);
+        let mut txs = self
+            .store
+            .get::<&str, Vec<CoordinatedTransaction>>(&key)?
+            .unwrap_or_default();
+
+        tx.retry_info = Some(RetryInfo::new(0, Utc::now().timestamp_millis() as u64));
+
+        txs.push(tx);
+        self.store.set(&key, &txs, None)?;
+
+        Ok(())
+    }
+
+    fn enqueue_tx_for_retry(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
+        let key = self.get_key(StoreKey::RetryTransactionList);
+        let mut txs = self
+            .store
+            .get::<&str, Vec<CoordinatedTransaction>>(&key)?
+            .unwrap_or_default();
+        txs.retain(|t| t.tx_id != txid);
+        self.store.set(&key, &txs, None)?;
+
+        Ok(())
+    }
+
+    fn increment_tx_retry_count(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
+        let key = self.get_key(StoreKey::RetryTransactionList);
+        let mut txs = self
+            .store
+            .get::<&str, Vec<CoordinatedTransaction>>(&key)?
+            .unwrap_or_default();
+
+        for tx in txs.iter_mut() {
+            if tx.tx_id == txid {
+                tx.retry_info = Some(RetryInfo::new(
+                    tx.retry_info.clone().unwrap().retries_count + 1,
+                    Utc::now().timestamp_millis() as u64,
+                ));
+
+                self.store.set(&key, &txs, None)?;
+                break;
+            }
+        }
+
+        Ok(())
     }
 }
