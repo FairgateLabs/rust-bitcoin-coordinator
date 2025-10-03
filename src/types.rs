@@ -37,6 +37,7 @@ pub struct CoordinatedTransaction {
     pub target_block_height: Option<BlockHeight>,
     pub state: TransactionState,
     pub context: String,
+    pub retry_info: Option<RetryInfo>,
 }
 
 impl CoordinatedTransaction {
@@ -55,6 +56,7 @@ impl CoordinatedTransaction {
             state,
             target_block_height,
             context,
+            retry_info: None,
         }
     }
 }

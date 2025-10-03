@@ -182,3 +182,55 @@ fn test_cancel_monitor() -> Result<(), anyhow::Error> {
 
     Ok(())
 }
+
+#[test]
+fn test_retry_queue_for_transactions() -> Result<(), anyhow::Error> {
+    let storage_config = StorageConfig::new(
+        format!("test_output/test/{}/retry", generate_random_string()),
+        None,
+    );
+    let storage = Rc::new(Storage::new(&storage_config)?);
+    let store = BitcoinCoordinatorStore::new(storage, 1)?;
+
+    let tx = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id = tx.compute_txid();
+
+    // Save and then get the CoordinatedTransaction instance
+    store.save_tx(tx.clone(), None, None, "context_tx".to_string())?;
+    let mut to_dispatch = store.get_txs_to_dispatch()?;
+    assert_eq!(to_dispatch.len(), 1);
+
+    // Queue for retry
+    store.queue_tx_for_retry(to_dispatch.pop().unwrap())?;
+
+    // Not eligible yet (interval 2s)
+    let retry_ready = store.get_txs_for_retry(3, 2)?;
+    assert_eq!(retry_ready.len(), 0);
+
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
+    // Eligible now
+    let retry_ready = store.get_txs_for_retry(3, 2)?;
+    assert_eq!(retry_ready.len(), 1);
+    assert_eq!(retry_ready[0].tx_id, tx_id);
+
+    // Increment retries and keep eligible
+    store.increment_tx_retry_count(tx_id)?;
+    let retry_ready = store.get_txs_for_retry(3, 0)?;
+    assert_eq!(retry_ready.len(), 1);
+    assert_eq!(retry_ready[0].retry_info.clone().unwrap().retries_count, 1);
+
+    // Enqueue (remove) from retry list
+    store.enqueue_tx_for_retry(tx_id)?;
+    let retry_ready = store.get_txs_for_retry(3, 0)?;
+    assert_eq!(retry_ready.len(), 0);
+
+    clear_output();
+    Ok(())
+}
