@@ -107,7 +107,7 @@ pub struct CoordinatedSpeedUpTransaction {
     pub retry_info: Option<RetryInfo>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct RetryInfo {
     pub retries_count: u32,
     pub last_retry_timestamp: u64,

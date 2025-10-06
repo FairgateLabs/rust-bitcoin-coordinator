@@ -146,6 +146,7 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         amount.to_sat(),
         public_key,
         key_manager.clone(),
+        172,
     )?;
 
     let speedup_data = SpeedupData::new(tx1_speedup_utxo);
@@ -207,6 +208,7 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         amount.to_sat(),
         public_key,
         key_manager.clone(),
+        172,
     )?;
 
     let speedup_data = SpeedupData::new(tx2_speedup_utxo);

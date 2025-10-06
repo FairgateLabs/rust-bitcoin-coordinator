@@ -93,21 +93,17 @@ pub fn generate_tx(
     origin_amount: u64,
     origin_pubkey: PublicKey,
     key_manager: Rc<KeyManager>,
+    fee: u64,
 ) -> Result<(Transaction, Utxo), TxBuilderHelperError> {
-    let amount = 10000;
-    let fee: u64 = 172; // Tx has 172 vbytes. We are using the minimal vsize 1sat/vB.
-
-    let (tx, speedup_utxo) = create_tx_to_speedup(
+    Ok(create_tx_to_speedup(
         funding_outpoint,
         origin_amount,
         origin_pubkey,
         origin_pubkey,
-        amount,
+        10000,
         fee,
         key_manager,
-    );
-
-    Ok((tx, speedup_utxo))
+    ))
 }
 
 fn create_tx_to_speedup(
@@ -196,7 +192,7 @@ pub fn config_trace_aux() {
         "bitvmx_transaction_monitor=off",
         "bitcoin_indexer=off",
         "bitcoin_coordinator=info",
-        "bitcoin_client=info",
+        "bitcoin_client=off",
         "p2p_protocol=off",
         "p2p_handler=off",
         "tarpc=off",
@@ -222,7 +218,10 @@ pub fn coordinate_tx(
     network: Network,
     key_manager: Rc<KeyManager>,
     bitcoin_client: Rc<BitcoinClient>,
+    fee: Option<u64>,
 ) -> Result<(), anyhow::Error> {
+    let fee = fee.unwrap_or(172);
+
     // Create a funding wallet
     // Fund the funding wallet
     // Create a tx1 and a speedup utxo for tx1
@@ -240,6 +239,7 @@ pub fn coordinate_tx(
         amount.to_sat(),
         public_key,
         key_manager.clone(),
+        fee,
     )?;
 
     let speedup_data = SpeedupData::new(tx1_speedup_utxo);

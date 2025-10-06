@@ -131,6 +131,7 @@ fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
         network,
         key_manager.clone(),
         bitcoin_client.clone(),
+        None,
     )?;
 
     coordinator.tick()?;

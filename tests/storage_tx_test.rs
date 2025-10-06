@@ -184,7 +184,10 @@ fn test_cancel_monitor() -> Result<(), anyhow::Error> {
 }
 
 #[test]
-fn test_retry_queue_for_transactions() -> Result<(), anyhow::Error> {
+fn test_increment_tx_retry_count_and_get_txs_to_dispatch() -> Result<(), anyhow::Error> {
+    const RETRY_INTERVAL: u64 = 2;
+    const MAX_RETRIES: u32 = 3;
+
     let storage_config = StorageConfig::new(
         format!("test_output/test/{}/retry", generate_random_string()),
         None,
@@ -201,36 +204,33 @@ fn test_retry_queue_for_transactions() -> Result<(), anyhow::Error> {
 
     let tx_id = tx.compute_txid();
 
-    // Save and then get the CoordinatedTransaction instance
+    // Save the transaction
     store.save_tx(tx.clone(), None, None, "context_tx".to_string())?;
-    let mut to_dispatch = store.get_txs_to_dispatch()?;
+
+    // Test get_txs_to_dispatch
+    let to_dispatch = store.get_txs_to_dispatch(MAX_RETRIES, RETRY_INTERVAL)?;
     assert_eq!(to_dispatch.len(), 1);
+    assert_eq!(to_dispatch[0].tx.compute_txid(), tx_id);
 
-    // Queue for retry
-    store.queue_tx_for_retry(to_dispatch.pop().unwrap())?;
-
-    // Not eligible yet (interval 2s)
-    let retry_ready = store.get_txs_for_retry(3, 2)?;
-    assert_eq!(retry_ready.len(), 0);
-
-    std::thread::sleep(std::time::Duration::from_secs(2));
-
-    // Eligible now
-    let retry_ready = store.get_txs_for_retry(3, 2)?;
-    assert_eq!(retry_ready.len(), 1);
-    assert_eq!(retry_ready[0].tx_id, tx_id);
-
-    // Increment retries and keep eligible
+    // Test increment_tx_retry_count
     store.increment_tx_retry_count(tx_id)?;
-    let retry_ready = store.get_txs_for_retry(3, 0)?;
-    assert_eq!(retry_ready.len(), 1);
-    assert_eq!(retry_ready[0].retry_info.clone().unwrap().retries_count, 1);
+    let tx_after_retry = store.get_tx(&tx_id)?;
+    assert_eq!(tx_after_retry.retry_info.unwrap().retries_count, 1);
 
-    // Enqueue (remove) from retry list
-    store.enqueue_tx_for_retry(tx_id)?;
-    let retry_ready = store.get_txs_for_retry(3, 0)?;
-    assert_eq!(retry_ready.len(), 0);
+    // Test get_txs_to_dispatch again after incrementing the retry count, should be empty because the retry interval is not reached
+    let to_dispatch = store.get_txs_to_dispatch(MAX_RETRIES, RETRY_INTERVAL)?;
+    assert_eq!(to_dispatch.len(), 0);
 
+    // Test increment_tx_retry_count again
+    store.increment_tx_retry_count(tx_id)?;
+    let tx_after_retry = store.get_tx(&tx_id)?;
+    assert_eq!(tx_after_retry.retry_info.unwrap().retries_count, 2);
+
+    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL));
+
+    // Test get_txs_to_dispatch again after incrementing the retry count, should be empty because the retry interval is not reached
+    let to_dispatch = store.get_txs_to_dispatch(MAX_RETRIES, RETRY_INTERVAL)?;
+    assert_eq!(to_dispatch.len(), 1);
     clear_output();
     Ok(())
 }
