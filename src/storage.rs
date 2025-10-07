@@ -166,9 +166,9 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 if tx.retry_info.is_none() {
                     txs_filter.push(tx);
                 } else {
-                    if tx.retry_info.clone().unwrap().retries_count < self.retry_attempts_sending_tx
-                        && Utc::now().timestamp_millis() as u64
-                            - tx.retry_info.clone().unwrap().last_retry_timestamp
+                    let retry_info = tx.retry_info.clone().unwrap();
+                    if retry_info.retries_count < self.retry_attempts_sending_tx
+                        && Utc::now().timestamp_millis() as u64 - retry_info.last_retry_timestamp
                             > self.retry_interval_seconds
                     {
                         txs_filter.push(tx);
@@ -310,7 +310,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
                 if is_new_news.is_none() {
                     // Insert news with current block hash and ack in false
-                    news_list.push((tx_id, amount.clone(), required, (current_block_hash, false)));
+                    news_list.push((tx_id, amount, required, (current_block_hash, false)));
                 } else {
                     let pos = is_new_news.unwrap();
                     let (_, _, _, (existing_block_hash, _)) = &news_list[pos];
@@ -320,8 +320,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                         return Ok(());
                     } else {
                         // Replace the notification if the block hash is different
-                        news_list[pos] =
-                            (tx_id, amount.clone(), required, (current_block_hash, false));
+                        news_list[pos] = (tx_id, amount, required, (current_block_hash, false));
                     }
                 }
 
@@ -389,13 +388,13 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 // Check if there is no existing news for "FundingNotFound"
                 if news.is_none() {
                     // If no existing news, set the current block hash and mark it as not acknowledged
-                    self.store.set(&key, &(current_block_hash, false), None)?;
+                    self.store.set(&key, (current_block_hash, false), None)?;
                 } else {
                     // If there is existing news, unpack the block hash and acknowledgment status
                     let (last_block_hash, _) = news.unwrap();
                     // If the existing block hash is different from the current one, update the store
                     if last_block_hash != current_block_hash {
-                        self.store.set(&key, &(current_block_hash, false), None)?;
+                        self.store.set(&key, (current_block_hash, false), None)?;
                     }
                 }
             }
@@ -497,7 +496,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
                 if let Some((block_hash, _)) = news {
                     news = Some((block_hash, true));
-                    self.store.set(&key, &news, None)?;
+                    self.store.set(&key, news, None)?;
                 }
             }
         }
@@ -596,7 +595,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         }
 
         self.store
-            .set(&self.get_key(StoreKey::Transaction(txid)), &tx, None)?;
+            .set(self.get_key(StoreKey::Transaction(txid)), &tx, None)?;
 
         Ok(())
     }
