@@ -124,6 +124,7 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
         network,
         key_manager.clone(),
         bitcoin_client.clone(),
+        None,
     )?;
 
     // Mine a block to confirm the initial transactions (tx1 and speedup tx)
@@ -171,6 +172,7 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
         network,
         key_manager.clone(),
         bitcoin_client.clone(),
+        None,
     )?;
 
     // Mine 5 blocks to confirm transaction tx2 and its speedup transaction

@@ -139,6 +139,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
             network,
             key_manager.clone(),
             bitcoin_client.clone(),
+            None,
         )?;
 
         coordinator.tick()?;

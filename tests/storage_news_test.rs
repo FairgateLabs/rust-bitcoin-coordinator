@@ -10,6 +10,8 @@ mod utils;
 
 #[test]
 fn coordinator_news_test() -> Result<(), anyhow::Error> {
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_INTERVAL: u64 = 2;
     let path = format!(
         "test_output/coordinator_news_test/{}",
         generate_random_string()
@@ -22,7 +24,7 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
             .unwrap();
 
-    let store = BitcoinCoordinatorStore::new(storage, 1)?;
+    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
 
     // Initially, there should be no news
     let news_list = store.get_news()?;

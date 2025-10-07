@@ -132,6 +132,7 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
             network,
             key_manager.clone(),
             bitcoin_client.clone(),
+            None,
         )?;
     }
 
