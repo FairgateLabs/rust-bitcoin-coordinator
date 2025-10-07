@@ -109,8 +109,12 @@ impl BitcoinCoordinator {
         let coordinator_settings: CoordinatorSettings =
             CoordinatorSettings::from(settings.unwrap_or_default());
 
-        let store =
-            BitcoinCoordinatorStore::new(storage, coordinator_settings.max_unconfirmed_speedups)?;
+        let store = BitcoinCoordinatorStore::new(
+            storage,
+            coordinator_settings.max_unconfirmed_speedups,
+            coordinator_settings.retry_attempts_sending_tx,
+            coordinator_settings.retry_interval_seconds,
+        )?;
         let client = BitcoinClient::new_from_config(rpc_config)?;
         let network = rpc_config.network;
 
@@ -126,10 +130,7 @@ impl BitcoinCoordinator {
 
     fn process_pending_txs_to_dispatch(&self) -> Result<(), BitcoinCoordinatorError> {
         // Get pending transactions to be send to the blockchain
-        let pending_txs = self.store.get_txs_to_dispatch(
-            self.settings.retry_attempts_sending_tx,
-            self.settings.retry_interval_seconds,
-        )?;
+        let pending_txs = self.store.get_txs_to_dispatch()?;
 
         if pending_txs.is_empty() {
             return Ok(());

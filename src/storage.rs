@@ -15,6 +15,8 @@ use tracing::info;
 pub struct BitcoinCoordinatorStore {
     pub store: Rc<Storage>,
     pub max_unconfirmed_speedups: u32,
+    pub retry_attempts_sending_tx: u32,
+    pub retry_interval_seconds: u64,
 }
 enum StoreKey {
     PendingTransactionList,
@@ -42,8 +44,6 @@ pub trait BitcoinCoordinatorStoreApi {
 
     fn get_txs_to_dispatch(
         &self,
-        retry_attempts_sending_tx: u32,
-        retry_interval_seconds: u64,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError>;
 
     fn get_tx(&self, tx_id: &Txid) -> Result<CoordinatedTransaction, BitcoinCoordinatorStoreError>;
@@ -75,10 +75,14 @@ impl BitcoinCoordinatorStore {
     pub fn new(
         store: Rc<Storage>,
         max_unconfirmed_speedups: u32,
+        retry_attempts_sending_tx: u32,
+        retry_interval_seconds: u64,
     ) -> Result<Self, BitcoinCoordinatorStoreError> {
         Ok(Self {
             store,
             max_unconfirmed_speedups,
+            retry_attempts_sending_tx,
+            retry_interval_seconds,
         })
     }
 
@@ -151,8 +155,6 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn get_txs_to_dispatch(
         &self,
-        retry_attempts_sending_tx: u32,
-        retry_interval_seconds: u64,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError> {
         let txs = self.get_txs()?;
         let mut txs_filter = Vec::new();
@@ -164,10 +166,10 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 if tx.retry_info.is_none() {
                     txs_filter.push(tx);
                 } else {
-                    if tx.retry_info.clone().unwrap().retries_count < retry_attempts_sending_tx
+                    if tx.retry_info.clone().unwrap().retries_count < self.retry_attempts_sending_tx
                         && Utc::now().timestamp_millis() as u64
                             - tx.retry_info.clone().unwrap().last_retry_timestamp
-                            > retry_interval_seconds
+                            > self.retry_interval_seconds
                     {
                         txs_filter.push(tx);
                     }
@@ -582,10 +584,16 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn increment_tx_retry_count(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
         let mut tx = self.get_tx(&txid)?;
-        tx.retry_info = Some(RetryInfo::new(
-            tx.retry_info.clone().unwrap_or_default().retries_count + 1,
-            Utc::now().timestamp_millis() as u64,
-        ));
+        let new_count = tx.retry_info.clone().unwrap_or_default().retries_count + 1;
+
+        if new_count >= self.retry_attempts_sending_tx {
+            tx.state = TransactionState::Failed;
+        } else {
+            tx.retry_info = Some(RetryInfo::new(
+                new_count,
+                Utc::now().timestamp_millis() as u64,
+            ));
+        }
 
         self.store
             .set(&self.get_key(StoreKey::Transaction(txid)), &tx, None)?;
