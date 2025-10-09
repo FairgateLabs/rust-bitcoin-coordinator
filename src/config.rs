@@ -2,7 +2,8 @@ use crate::settings::{
     DEFAULT_BASE_FEE_MULTIPLIER, DEFAULT_BUMP_FEE_PERCENTAGE, DEFAULT_MAX_FEERATE_SAT_VB,
     DEFAULT_MAX_RBF_ATTEMPTS, DEFAULT_MAX_TX_WEIGHT, DEFAULT_MAX_UNCONFIRMED_SPEEDUPS,
     DEFAULT_MIN_BLOCKS_BEFORE_RESEND_SPEEDUP, DEFAULT_MIN_FUNDING_AMOUNT_SATS,
-    DEFAULT_RBF_FEE_PERCENTAGE, DEFAULT_RETRY_ATTEMPTS_SENDING_TX, DEFAULT_RETRY_INTERVAL_SECONDS,
+    DEFAULT_MIN_NETWORK_FEE_RATE, DEFAULT_RBF_FEE_PERCENTAGE, DEFAULT_RETRY_ATTEMPTS_SENDING_TX,
+    DEFAULT_RETRY_INTERVAL_SECONDS,
 };
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_transaction_monitor::config::{MonitorSettings, MonitorSettingsConfig};
@@ -35,6 +36,7 @@ pub struct CoordinatorSettings {
     pub bump_fee_percentage: f64,
     pub retry_interval_seconds: u64,
     pub retry_attempts_sending_tx: u32,
+    pub min_network_fee_rate: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -51,6 +53,7 @@ pub struct CoordinatorSettingsConfig {
     pub bump_fee_percentage: Option<f64>,
     pub retry_interval_seconds: Option<u64>,
     pub retry_attempts_sending_tx: Option<u32>,
+    pub min_network_fee_rate: Option<u64>,
 }
 
 impl Default for CoordinatorSettingsConfig {
@@ -68,6 +71,7 @@ impl Default for CoordinatorSettingsConfig {
             bump_fee_percentage: Some(DEFAULT_BUMP_FEE_PERCENTAGE),
             retry_interval_seconds: Some(DEFAULT_RETRY_INTERVAL_SECONDS),
             retry_attempts_sending_tx: Some(DEFAULT_RETRY_ATTEMPTS_SENDING_TX),
+            min_network_fee_rate: Some(DEFAULT_MIN_NETWORK_FEE_RATE),
         }
     }
 }
@@ -118,6 +122,10 @@ impl From<CoordinatorSettingsConfig> for CoordinatorSettings {
             retry_attempts_sending_tx: settings
                 .retry_attempts_sending_tx
                 .unwrap_or(DEFAULT_RETRY_ATTEMPTS_SENDING_TX),
+
+            min_network_fee_rate: settings
+                .min_network_fee_rate
+                .unwrap_or(DEFAULT_MIN_NETWORK_FEE_RATE),
         }
     }
 }

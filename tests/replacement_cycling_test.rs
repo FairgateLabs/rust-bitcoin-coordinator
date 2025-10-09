@@ -45,7 +45,7 @@ fn replacement_cycling_test() -> Result<(), anyhow::Error> {
 
     let bitcoind = Bitcoind::new_with_flags(
         "bitcoin-regtest",
-        "ruimarinho/bitcoin-core",
+        "bitcoin/bitcoin:29.1",
         config_bitcoin_client.clone(),
         BitcoindFlags {
             block_min_tx_fee: 0.00002,
