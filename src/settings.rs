@@ -50,3 +50,6 @@ pub const DEFAULT_RETRY_INTERVAL_SECONDS: u64 = 5;
 
 // Retry attempts sending tx after an error
 pub const DEFAULT_RETRY_ATTEMPTS_SENDING_TX: u32 = 3;
+
+// Minimum network fee rate
+pub const DEFAULT_MIN_NETWORK_FEE_RATE: u64 = 1;
