@@ -31,6 +31,7 @@ settings:
     bump_fee_percentage: 1.5
     retry_interval_seconds: 5
     retry_attempts_sending_tx: 3
+    min_network_fee_rate: 1
     monitor_settings:
         confirmation_threshold: 6
         max_monitoring_confirmations: 6

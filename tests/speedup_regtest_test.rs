@@ -73,7 +73,7 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
 
     let bitcoind = Bitcoind::new(
         "bitcoin-regtest",
-        "ruimarinho/bitcoin-core",
+        "bitcoin/bitcoin:29.1",
         config_bitcoin_client.clone(),
     );
 
