@@ -805,7 +805,10 @@ impl BitcoinCoordinator {
     }
 
     fn get_network_fee_rate(&self) -> Result<u64, BitcoinCoordinatorError> {
-        let mut network_fee_rate: u64 = self.client.estimate_smart_fee()?;
+        let mut network_fee_rate = match self.monitor.get_estimated_fee_rate() {
+            Ok(rate) => rate,
+            Err(_) => self.settings.min_network_fee_rate,
+        };
 
         if network_fee_rate > self.settings.max_feerate_sat_vb {
             warn!(
