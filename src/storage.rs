@@ -583,7 +583,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn increment_tx_retry_count(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
         let mut tx = self.get_tx(&txid)?;
-        let new_count = tx.retry_info.clone().unwrap_or_default().retries_count + 1;
+        let new_count = tx.retry_info.as_ref().map_or(0, |info| info.retries_count) + 1;
 
         if new_count >= self.retry_attempts_sending_tx {
             tx.state = TransactionState::Failed;
