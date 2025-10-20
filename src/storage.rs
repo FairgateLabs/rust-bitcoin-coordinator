@@ -166,7 +166,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 if tx.retry_info.is_none() {
                     txs_filter.push(tx);
                 } else {
-                    let retry_info = tx.retry_info.clone().unwrap();
+                    let retry_info = tx.retry_info.as_ref().unwrap();
                     if retry_info.retries_count < self.retry_attempts_sending_tx
                         && Utc::now().timestamp_millis() as u64 - retry_info.last_retry_timestamp
                             > self.retry_interval_seconds * 1000
