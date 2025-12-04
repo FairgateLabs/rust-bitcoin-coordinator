@@ -1,7 +1,7 @@
 use bitcoin::{Address, Amount, CompressedPublicKey, Network};
 use bitcoin_coordinator::{
+    config::CoordinatorSettingsConfig,
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
-    MonitorNews,
 };
 use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
 use bitvmx_bitcoin_rpc::{
@@ -22,16 +22,16 @@ use utils::generate_random_string;
 use crate::utils::{config_trace_aux, coordinate_tx};
 mod utils;
 
+// This test verifies the behavior of the BitcoinCoordinator when an error occurs while sending a transaction.
+//
+// The test procedure includes:
+// - Dispatching a transaction that requires funding.
+// - Asserting that the coordinator performs exactly the configured number of retries.
+// - Validating that the retry count matches the retry_attempts_sending_tx setting.
 #[test]
 #[ignore = "This test works, but it runs in regtest with a bitcoind running"]
-fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
+fn error_sending_tx_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
-
-    // This test simulates a blockchain reorganization scenario. It starts by setting up a Bitcoin
-    // regtest environment, dispatching a transaction with a Child-Pays-For-Parent (CPFP) speedup,
-    // and then invalidates the blockchain to orphan the transaction. After confirming the orphan
-    // status, it dispatches two more transactions to observe the effects of the reorganization.
-    // Finally, it ensures that all three transactions are confirmed in the network.
 
     let mut blocks_mined = 102;
     let network = Network::Regtest;
@@ -53,10 +53,10 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     let bitcoind = Bitcoind::new_with_flags(
         "bitcoin-regtest",
-        "bitcoin/bitcoin:29.1",
+        "ruimarinho/bitcoin-core",
         config_bitcoin_client.clone(),
         BitcoindFlags {
-            block_min_tx_fee: 0.00004,
+            block_min_tx_fee: 0.00002,
             ..Default::default()
         },
     );
@@ -83,35 +83,30 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         .mine_blocks_to_address(blocks_mined, &regtest_wallet)
         .unwrap();
 
-    // Fund address mines 1 block
-    blocks_mined += 1;
-
     let (funding_speedup, funding_speedup_vout) =
         bitcoin_client.fund_address(&funding_wallet, amount)?;
 
-    // Funding speed up tx mines 1 block
+    // Increment the block count after mining 1 block to fund the address
     blocks_mined += 1;
 
-    info!(
-        "{} Funding speed up tx: {:?} | vout: {:?}",
-        style("Test").green(),
-        funding_speedup.compute_txid(),
-        funding_speedup_vout
-    );
+    const RETRY_INTERVAL_SECONDS: u64 = 1;
+    const EXPECTED_RETRIES: u32 = 3;
+    let mut settings = CoordinatorSettingsConfig::default();
+    settings.retry_attempts_sending_tx = Some(EXPECTED_RETRIES);
+    settings.retry_interval_seconds = Some(RETRY_INTERVAL_SECONDS);
 
     let coordinator = Rc::new(BitcoinCoordinator::new_with_paths(
         &config_bitcoin_client,
         storage.clone(),
         key_manager.clone(),
-        None,
+        Some(settings),
     )?);
 
-    // Advance the coordinator by the number of blocks mined to sync with the blockchain height.
+    // Advance the coordinator by the number of blocks mined to synchronize with the current blockchain height
     for _ in 0..blocks_mined {
         coordinator.tick()?;
     }
 
-    // Add funding for the speedup transaction
     coordinator.add_funding(Utxo::new(
         funding_speedup.compute_txid(),
         funding_speedup_vout,
@@ -119,94 +114,68 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         &public_key,
     ))?;
 
+    coordinator.tick()?;
+
+    // Dispatch the first transaction that will fail due to invalid UTXO
     coordinate_tx(
         coordinator.clone(),
         amount,
         network,
         key_manager.clone(),
         bitcoin_client.clone(),
-        None,
+        Some(0),
     )?;
 
+    // Mine a block to confirm the initial funding transaction
+    bitcoin_client
+        .mine_blocks_to_address(1, &funding_wallet)
+        .unwrap();
     coordinator.tick()?;
 
-    for _ in 0..4 {
-        info!("{} Mine and Tick", style("Test").green());
-        // Mine a block to confirm tx1 and its speedup transaction
-        bitcoin_client
-            .mine_blocks_to_address(1, &funding_wallet)
-            .unwrap();
+    // Track the number of error notifications we receive
+    let mut error_count = 0;
+
+    // Process retries: we expect 1 initial attempt + EXPECTED_RETRIES retries
+    // The coordinator will:
+    // 1. Try to send the transaction initially (fails due to invalid UTXO)
+    // 2. Queue it for retry and increment retry count on each failure
+    // 3. Stop retrying after reaching the configured retry_attempts_sending_tx limit
+    for attempt in 0..=EXPECTED_RETRIES {
+        // Wait for retry interval (except for first attempt)
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
+        }
+
         coordinator.tick()?;
+
+        // Check for error notifications
+        let news = coordinator.get_news()?;
+        for news_item in &news.coordinator_news {
+            if let bitcoin_coordinator::types::CoordinatorNews::DispatchTransactionError(_, _, _) =
+                news_item
+            {
+                error_count += 1;
+                info!("Error notification {} received", error_count);
+            }
+        }
+
+        // Mine a block every few attempts to keep the chain moving
+        if attempt % 2 == 0 {
+            bitcoin_client
+                .mine_blocks_to_address(1, &funding_wallet)
+                .unwrap();
+            coordinator.tick()?;
+        }
     }
 
-    let news = coordinator.get_news()?;
-    assert_eq!(news.monitor_news.len(), 1);
-
-    let best_block = bitcoin_client.get_best_block()?;
-    let block_hash = bitcoin_client.get_block_id_by_height(&best_block).unwrap();
-    bitcoin_client.invalidate_block(&block_hash).unwrap();
-    info!("{} Invalidated block", style("Test").green());
-
-    coordinator.tick()?;
-
-    let news = coordinator.get_news()?;
-
-    assert!(
-        news.monitor_news.iter().all(|n| match n {
-            MonitorNews::Transaction(_, tx_status, _) => tx_status.is_orphan(),
-            _ => false,
-        }),
-        "Not all news are in Orphan status"
+    // Verify that we received exactly the expected number of error notifications
+    // We should get 1 error for the initial attempt + EXPECTED_RETRIES errors for retries
+    let expected_errors = 1 + EXPECTED_RETRIES;
+    assert_eq!(
+        error_count, expected_errors as usize,
+        "Expected {} error notifications (1 initial + {} retries), but got {}",
+        expected_errors, EXPECTED_RETRIES, error_count
     );
-
-    coordinator.tick()?;
-
-    // Dispatch two more transactions to observe the reorganization effects
-    coordinate_tx(
-        coordinator.clone(),
-        amount,
-        network,
-        key_manager.clone(),
-        bitcoin_client.clone(),
-        None,
-    )?;
-
-    coordinate_tx(
-        coordinator.clone(),
-        amount,
-        network,
-        key_manager.clone(),
-        bitcoin_client.clone(),
-        None,
-    )?;
-
-    let public_key = key_manager.derive_keypair(1).unwrap();
-    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
-    let funding_wallet = Address::p2wpkh(&compressed, network);
-
-    for _ in 0..10 {
-        coordinator.tick()?;
-
-        bitcoin_client
-            .mine_blocks_to_address(1, &funding_wallet)
-            .unwrap();
-
-        coordinator.tick()?;
-    }
-
-    coordinator.tick()?;
-
-    let news = coordinator.get_news()?;
-
-    assert!(
-        news.monitor_news.iter().all(|n| match n {
-            MonitorNews::Transaction(_, tx_status, _) => tx_status.is_confirmed(),
-            _ => false,
-        }),
-        "Not all news are in Confirmed status"
-    );
-
-    assert_eq!(news.monitor_news.len(), 3);
 
     bitcoind.stop()?;
 

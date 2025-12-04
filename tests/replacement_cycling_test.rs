@@ -108,6 +108,7 @@ fn replacement_cycling_test() -> Result<(), anyhow::Error> {
         amount.to_sat(),
         public_key,
         key_manager.clone(),
+        172,
     )?;
 
     let speedup_data = SpeedupData::new(tx1_speedup_utxo);

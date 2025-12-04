@@ -1,10 +1,13 @@
 use crate::{
     errors::BitcoinCoordinatorStoreError,
-    types::{AckCoordinatorNews, CoordinatedTransaction, CoordinatorNews, TransactionState},
+    types::{
+        AckCoordinatorNews, CoordinatedTransaction, CoordinatorNews, RetryInfo, TransactionState,
+    },
 };
 
 use bitcoin::{BlockHash, Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
+use chrono::Utc;
 use protocol_builder::types::output::SpeedupData;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
@@ -12,11 +15,12 @@ use tracing::info;
 pub struct BitcoinCoordinatorStore {
     pub store: Rc<Storage>,
     pub max_unconfirmed_speedups: u32,
+    pub retry_attempts_sending_tx: u32,
+    pub retry_interval_seconds: u64,
 }
 enum StoreKey {
     PendingTransactionList,
     Transaction(Txid),
-
     DispatchTransactionErrorNewsList,
     DispatchSpeedUpErrorNewsList,
     InsufficientFundsNewsList,
@@ -63,16 +67,22 @@ pub trait BitcoinCoordinatorStoreApi {
     ) -> Result<(), BitcoinCoordinatorStoreError>;
     fn ack_news(&self, news: AckCoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError>;
     fn get_news(&self) -> Result<Vec<CoordinatorNews>, BitcoinCoordinatorStoreError>;
+
+    fn increment_tx_retry_count(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
 }
 
 impl BitcoinCoordinatorStore {
     pub fn new(
         store: Rc<Storage>,
         max_unconfirmed_speedups: u32,
+        retry_attempts_sending_tx: u32,
+        retry_interval_seconds: u64,
     ) -> Result<Self, BitcoinCoordinatorStoreError> {
         Ok(Self {
             store,
             max_unconfirmed_speedups,
+            retry_attempts_sending_tx,
+            retry_interval_seconds,
         })
     }
 
@@ -153,7 +163,17 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             let tx = self.get_tx(&tx_id)?;
 
             if tx.state == TransactionState::ToDispatch {
-                txs_filter.push(tx);
+                if tx.retry_info.is_none() {
+                    txs_filter.push(tx);
+                } else {
+                    let retry_info = tx.retry_info.as_ref().unwrap();
+                    if retry_info.retries_count < self.retry_attempts_sending_tx
+                        && Utc::now().timestamp_millis() as u64 - retry_info.last_retry_timestamp
+                            > self.retry_interval_seconds * 1000
+                    {
+                        txs_filter.push(tx);
+                    }
+                }
             }
         }
 
@@ -290,7 +310,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
                 if is_new_news.is_none() {
                     // Insert news with current block hash and ack in false
-                    news_list.push((tx_id, amount.clone(), required, (current_block_hash, false)));
+                    news_list.push((tx_id, amount, required, (current_block_hash, false)));
                 } else {
                     let pos = is_new_news.unwrap();
                     let (_, _, _, (existing_block_hash, _)) = &news_list[pos];
@@ -300,8 +320,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                         return Ok(());
                     } else {
                         // Replace the notification if the block hash is different
-                        news_list[pos] =
-                            (tx_id, amount.clone(), required, (current_block_hash, false));
+                        news_list[pos] = (tx_id, amount, required, (current_block_hash, false));
                     }
                 }
 
@@ -369,13 +388,13 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 // Check if there is no existing news for "FundingNotFound"
                 if news.is_none() {
                     // If no existing news, set the current block hash and mark it as not acknowledged
-                    self.store.set(&key, &(current_block_hash, false), None)?;
+                    self.store.set(&key, (current_block_hash, false), None)?;
                 } else {
                     // If there is existing news, unpack the block hash and acknowledgment status
                     let (last_block_hash, _) = news.unwrap();
                     // If the existing block hash is different from the current one, update the store
                     if last_block_hash != current_block_hash {
-                        self.store.set(&key, &(current_block_hash, false), None)?;
+                        self.store.set(&key, (current_block_hash, false), None)?;
                     }
                 }
             }
@@ -477,7 +496,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
                 if let Some((block_hash, _)) = news {
                     news = Some((block_hash, true));
-                    self.store.set(&key, &news, None)?;
+                    self.store.set(&key, news, None)?;
                 }
             }
         }
@@ -560,5 +579,24 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         }
 
         Ok(all_news)
+    }
+
+    fn increment_tx_retry_count(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
+        let mut tx = self.get_tx(&txid)?;
+        let new_count = tx.retry_info.as_ref().map_or(0, |info| info.retries_count) + 1;
+
+        if new_count >= self.retry_attempts_sending_tx {
+            tx.state = TransactionState::Failed;
+        } else {
+            tx.retry_info = Some(RetryInfo::new(
+                new_count,
+                Utc::now().timestamp_millis() as u64,
+            ));
+        }
+
+        self.store
+            .set(self.get_key(StoreKey::Transaction(txid)), &tx, None)?;
+
+        Ok(())
     }
 }

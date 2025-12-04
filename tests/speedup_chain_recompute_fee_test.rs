@@ -1,3 +1,4 @@
+use crate::utils::{config_trace_aux, coordinate_tx};
 use bitcoin::{Address, Amount, CompressedPublicKey, Network};
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
 use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
@@ -15,18 +16,11 @@ use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 use tracing::info;
 use utils::generate_random_string;
-
-use crate::utils::{config_trace_aux, coordinate_tx};
 mod utils;
 
-// Almost every transaction sent in the protocol uses a CPFP (Child Pays For Parent) transaction for broadcasting.
-// The purpose of this test is to pay for tx1.
-// Tx1 will not be mined initially because its fee is too low. Therefore, we need to replace the CPFP transaction with a
-// new one that has a higher fee, repeating this process two more times (for a total of 3 RBF transactions).
-// When RBF pays the sufficient fee, the tx1 will be mined. And the last RBF also will be mined.
 #[test]
 #[ignore = "This test works, but it runs in regtest with a bitcoind running"]
-fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
+fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
@@ -49,7 +43,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     let bitcoind = Bitcoind::new_with_flags(
         "bitcoin-regtest",
-        "bitcoin/bitcoin:29.1",
+        "ruimarinho/bitcoin-core",
         config_bitcoin_client.clone(),
         BitcoindFlags {
             block_min_tx_fee: 0.00004,
@@ -131,40 +125,55 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         &public_key,
     ))?;
 
-    // Create 10 txs and dispatch them
-    for _ in 0..10 {
-        coordinate_tx(
-            coordinator.clone(),
-            amount,
-            network,
-            key_manager.clone(),
-            bitcoin_client.clone(),
-            None,
-        )?;
+    coordinate_tx(
+        coordinator.clone(),
+        amount,
+        network,
+        key_manager.clone(),
+        bitcoin_client.clone(),
+        None,
+    )?;
 
-        coordinator.tick()?;
-    }
-
-    // Up to here we have 10 txs dispatched and 10 CPFP dispatched.
-    // In this tick coordinator should RBF the last CPFP.
     coordinator.tick()?;
 
-    for _ in 0..19 {
-        info!("Mine and Tick");
-        // Mine a block to mined txs (tx1 and speedup tx)
-        bitcoin_client
-            .mine_blocks_to_address(1, &funding_wallet)
-            .unwrap();
+    info!("Mine and Tick");
+    // Mine a block to mined txs (tx1 and speedup tx)
+    bitcoin_client
+        .mine_blocks_to_address(1, &funding_wallet)
+        .unwrap();
 
+    coordinator.tick()?;
+
+    let news = coordinator.get_news()?;
+    assert_eq!(news.monitor_news.len(), 0);
+
+    let mut old_fee_rate = bitcoin_client.estimate_smart_fee()?;
+
+    for _ in 0..16 {
+        bitcoin_client.fund_address(&funding_wallet, amount)?;
+
+        let fee_rate = bitcoin_client.estimate_smart_fee()?;
+
+        if old_fee_rate != fee_rate {
+            info!(
+                "Fee rate changed: Old: {} | New: {}",
+                old_fee_rate, fee_rate
+            );
+            old_fee_rate = fee_rate;
+        }
+        info!("Fee rate: {}", fee_rate);
+    }
+
+    for _ in 0..17 {
+        // Tick coordinator
         coordinator.tick()?;
     }
 
-    let news = coordinator.get_news()?;
-    assert_eq!(news.monitor_news.len(), 10);
+    bitcoin_client.mine_blocks_to_address(1, &funding_wallet)?;
+    coordinator.tick()?;
 
     let news = coordinator.get_news()?;
-
-    assert_eq!(news.monitor_news.len(), 10);
+    assert_eq!(news.monitor_news.len(), 1);
 
     bitcoind.stop()?;
 

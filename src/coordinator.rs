@@ -109,8 +109,12 @@ impl BitcoinCoordinator {
         let coordinator_settings: CoordinatorSettings =
             CoordinatorSettings::from(settings.unwrap_or_default());
 
-        let store =
-            BitcoinCoordinatorStore::new(storage, coordinator_settings.max_unconfirmed_speedups)?;
+        let store = BitcoinCoordinatorStore::new(
+            storage,
+            coordinator_settings.max_unconfirmed_speedups,
+            coordinator_settings.retry_attempts_sending_tx,
+            coordinator_settings.retry_interval_seconds,
+        )?;
         let client = BitcoinClient::new_from_config(rpc_config)?;
         let network = rpc_config.network;
 
@@ -427,9 +431,7 @@ impl BitcoinCoordinator {
                     );
 
                     self.update_news(news)?;
-
-                    self.store
-                        .update_tx_state(tx.tx_id, TransactionState::Failed)?;
+                    self.store.increment_tx_retry_count(tx.tx_id)?;
                 }
             }
         }

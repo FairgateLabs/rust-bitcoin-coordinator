@@ -129,6 +129,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         network,
         key_manager.clone(),
         bitcoin_client.clone(),
+        None,
     )?;
 
     coordinator.tick()?;
@@ -171,6 +172,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         network,
         key_manager.clone(),
         bitcoin_client.clone(),
+        None,
     )?;
 
     coordinate_tx(
@@ -179,6 +181,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         network,
         key_manager.clone(),
         bitcoin_client.clone(),
+        None,
     )?;
 
     let public_key = key_manager.derive_keypair(1).unwrap();
