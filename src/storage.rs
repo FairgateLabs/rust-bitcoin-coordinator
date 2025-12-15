@@ -271,6 +271,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             return Err(BitcoinCoordinatorStoreError::InvalidStateTransition(
                 tx.state.clone(),
                 new_state.clone(),
+                tx_id,
             ));
         }
 

@@ -1,4 +1,5 @@
 use crate::types::TransactionState;
+use bitcoin::Txid;
 use bitvmx_bitcoin_rpc::errors::BitcoinClientError;
 use config as settings;
 use protocol_builder::errors::ProtocolBuilderError;
@@ -53,8 +54,8 @@ pub enum BitcoinCoordinatorStoreError {
     #[error("Insufficient funding: required {0} sats, available {1} sats")]
     InsufficientFunding(u64, u64),
 
-    #[error("Transaction state transition invalid: from {0:?} to {1:?}")]
-    InvalidStateTransition(TransactionState, TransactionState),
+    #[error("Transaction state transition invalid: from {0:?} to {1:?}. Txid: {2}")]
+    InvalidStateTransition(TransactionState, TransactionState, Txid),
 }
 
 #[derive(Error, Debug)]
