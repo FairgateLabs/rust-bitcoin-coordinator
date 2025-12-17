@@ -504,17 +504,17 @@ fn test_get_speedups_for_retry() -> Result<(), anyhow::Error> {
     // Add a speedup with retries less than max_retries
     let tx1 = generate_random_tx();
     let s1 = dummy_speedup_tx(&tx1.compute_txid(), SpeedupState::Dispatched, false, 0);
-    store.queue_speedup_for_retry(s1.clone())?;
+    store.enqueue_speedup_for_retry(s1.clone())?;
 
     // Add a speedup with retries equal to max_retries
     let tx2 = generate_random_tx();
     let s2 = dummy_speedup_tx(&tx2.compute_txid(), SpeedupState::Dispatched, false, 0);
-    store.queue_speedup_for_retry(s2.clone())?;
+    store.enqueue_speedup_for_retry(s2.clone())?;
 
     // Add a speedup with 0 retries
     let tx3 = generate_random_tx();
     let s3 = dummy_speedup_tx(&tx3.compute_txid(), SpeedupState::Dispatched, false, 0);
-    store.queue_speedup_for_retry(s3.clone())?;
+    store.enqueue_speedup_for_retry(s3.clone())?;
 
     std::thread::sleep(std::time::Duration::from_secs(1));
     // After 1 seconds, no speedups should be eligible for retry
@@ -530,12 +530,12 @@ fn test_get_speedups_for_retry() -> Result<(), anyhow::Error> {
     // Add a speedup with 1 retry
     let tx4 = generate_random_tx();
     let s4 = dummy_speedup_tx(&tx4.compute_txid(), SpeedupState::Dispatched, false, 0);
-    store.queue_speedup_for_retry(s4.clone())?;
+    store.enqueue_speedup_for_retry(s4.clone())?;
 
     // Add another speedup with retries equal to max_retries
     let tx5 = generate_random_tx();
     let s5 = dummy_speedup_tx(&tx5.compute_txid(), SpeedupState::Dispatched, false, 0);
-    store.queue_speedup_for_retry(s5.clone())?;
+    store.enqueue_speedup_for_retry(s5.clone())?;
 
     // After a total of 2 seconds, the speedups with retries less than max_retries should be returned
     let speedups = store.get_speedups_for_retry(max_retries, interval_seconds)?;
@@ -578,15 +578,15 @@ fn test_queue_and_enqueue_speedup_for_retry() -> Result<(), anyhow::Error> {
     // Add three speedups to the retry queue
     let tx1 = generate_random_tx();
     let s1 = dummy_speedup_tx(&tx1.compute_txid(), SpeedupState::Dispatched, false, 0);
-    store.queue_speedup_for_retry(s1.clone())?;
+    store.enqueue_speedup_for_retry(s1.clone())?;
 
     let tx2 = generate_random_tx();
     let s2 = dummy_speedup_tx(&tx2.compute_txid(), SpeedupState::Dispatched, false, 0);
-    store.queue_speedup_for_retry(s2.clone())?;
+    store.enqueue_speedup_for_retry(s2.clone())?;
 
     let tx3 = generate_random_tx();
     let s3 = dummy_speedup_tx(&tx3.compute_txid(), SpeedupState::Dispatched, false, 0);
-    store.queue_speedup_for_retry(s3.clone())?;
+    store.enqueue_speedup_for_retry(s3.clone())?;
 
     // Wait for interval_seconds seconds to ensure the speedups are in the queue
     std::thread::sleep(std::time::Duration::from_secs(interval_seconds));
@@ -607,7 +607,7 @@ fn test_queue_and_enqueue_speedup_for_retry() -> Result<(), anyhow::Error> {
     );
 
     // Enqueue (remove) the first speedup from the retry queue
-    store.enqueue_speedup_for_retry(s1.tx_id)?;
+    store.dequeue_speedup_for_retry(s1.tx_id)?;
 
     std::thread::sleep(std::time::Duration::from_secs(interval_seconds));
     // Verify the first speedup is no longer in the queue
@@ -623,7 +623,7 @@ fn test_queue_and_enqueue_speedup_for_retry() -> Result<(), anyhow::Error> {
     );
 
     // Enqueue (remove) the second speedup from the retry queue
-    store.enqueue_speedup_for_retry(s2.tx_id)?;
+    store.dequeue_speedup_for_retry(s2.tx_id)?;
 
     // Verify the second speedup is no longer in the queue
     let speedups = store.get_speedups_for_retry(10, interval_seconds)?;
@@ -638,7 +638,7 @@ fn test_queue_and_enqueue_speedup_for_retry() -> Result<(), anyhow::Error> {
     );
 
     // Enqueue (remove) the third speedup from the retry queue
-    store.enqueue_speedup_for_retry(s3.tx_id)?;
+    store.dequeue_speedup_for_retry(s3.tx_id)?;
 
     // Verify the queue is empty
     let speedups = store.get_speedups_for_retry(10, interval_seconds)?;
@@ -659,7 +659,7 @@ fn test_increment_speedup_retry_count() -> Result<(), anyhow::Error> {
     // Add a speedup to the retry queue
     let tx1 = generate_random_tx();
     let s1 = dummy_speedup_tx(&tx1.compute_txid(), SpeedupState::Dispatched, false, 0);
-    store.queue_speedup_for_retry(s1.clone())?;
+    store.enqueue_speedup_for_retry(s1.clone())?;
 
     // Increment the retry count
     store.increment_speedup_retry_count(s1.tx_id)?;

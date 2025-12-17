@@ -67,12 +67,12 @@ pub trait SpeedupStore {
         interval_seconds: u64,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
 
-    fn queue_speedup_for_retry(
+    fn enqueue_speedup_for_retry(
         &self,
         speedup: CoordinatedSpeedUpTransaction,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
-    fn enqueue_speedup_for_retry(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
+    fn dequeue_speedup_for_retry(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn increment_speedup_retry_count(&self, txid: Txid)
         -> Result<(), BitcoinCoordinatorStoreError>;
@@ -479,7 +479,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         Ok(eligible_speedups)
     }
 
-    fn queue_speedup_for_retry(
+    fn enqueue_speedup_for_retry(
         &self,
         mut speedup: CoordinatedSpeedUpTransaction,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
@@ -497,7 +497,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         Ok(())
     }
 
-    fn enqueue_speedup_for_retry(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
+    fn dequeue_speedup_for_retry(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
         let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
         let mut speedups = self
             .store
