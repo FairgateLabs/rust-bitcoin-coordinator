@@ -349,7 +349,7 @@ impl BitcoinCoordinator {
                 self.store
                     .increment_speedup_retry_count(speedup_data.tx_id)?;
             } else {
-                self.store.queue_speedup_for_retry(speedup_data)?;
+                self.store.enqueue_speedup_for_retry(speedup_data)?;
             }
 
             return Ok(());
@@ -371,7 +371,7 @@ impl BitcoinCoordinator {
             self.store.save_speedup(speedup_data)?;
 
             if retry_txid.is_some() {
-                self.store.enqueue_speedup_for_retry(retry_txid.unwrap())?;
+                self.store.dequeue_speedup_for_retry(retry_txid.unwrap())?;
             }
         }
 
