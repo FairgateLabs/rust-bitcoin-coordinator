@@ -46,7 +46,6 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
         "test_wallet".to_string(),
     );
     let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
-    let key_store = KeyStore::new(storage.clone());
     let key_manager =
         Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
     let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);

@@ -8,7 +8,6 @@ use bitvmx_bitcoin_rpc::{
 };
 use console::style;
 use key_manager::create_key_manager_from_config;
-use key_manager::key_store::KeyStore;
 use key_manager::{config::KeyManagerConfig, key_type::BitcoinKeyType};
 use protocol_builder::types::Utxo;
 use std::rc::Rc;
