@@ -10,6 +10,7 @@ use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_manager::KeyManager;
 use key_manager::key_store::KeyStore;
+use key_manager::key_type::BitcoinKeyType;
 use protocol_builder::builder::Protocol;
 use protocol_builder::types::connection::InputSpec;
 use protocol_builder::types::input::{SighashType, SpendMode};
@@ -45,15 +46,14 @@ pub fn get_mocks() -> (
     const RETRY_INTERVAL: u64 = 2;
     let mock_monitor = MockMonitorApi::new();
     let path = format!("test_output/test/{}", generate_random_string());
-    let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config).unwrap());
+    let storage_config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&storage_config).unwrap());
     let store =
         BitcoinCoordinatorStore::new(storage.clone(), 1, MAX_RETRIES, RETRY_INTERVAL).unwrap();
     let bitcoin_client = MockBitcoinClient::new();
-    let config = KeyManagerConfig::new(Network::Regtest.to_string(), None, None, None);
-    let key_store = KeyStore::new(storage.clone());
+    let key_manager_config = KeyManagerConfig::new(Network::Regtest.to_string(), None, None);
     let key_manager =
-        Rc::new(create_key_manager_from_config(&config, key_store, storage.clone()).unwrap());
+        Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
 
     (mock_monitor, store, bitcoin_client, key_manager)
 }
@@ -61,7 +61,7 @@ pub fn get_mocks() -> (
 pub fn get_mock_data(
     key_manager: Rc<KeyManager>,
 ) -> (TypesToMonitor, Transaction, Utxo, Txid, String, Utxo) {
-    let public_key = key_manager.derive_keypair(0).unwrap();
+    let public_key = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0).unwrap();
 
     let new_funding_tx_id =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
@@ -233,7 +233,7 @@ pub fn coordinate_tx(
     // Monitor tx1
     // Dispatch tx1
     // First tick dispatch the tx and create and dispatch a speedup tx
-    let public_key = key_manager.derive_keypair(0).unwrap();
+    let public_key = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0).unwrap();
     let compressed = CompressedPublicKey::try_from(public_key).unwrap();
     let funding_wallet = Address::p2wpkh(&compressed, network);
 
