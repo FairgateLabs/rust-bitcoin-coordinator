@@ -497,7 +497,12 @@ impl BitcoinCoordinator {
         )?;
 
         for speedup in failed_speedups {
-            // If a speedup fails in the pass means we have funding transaction, then we do not need to check if we have funding.
+            let can_speedup = self.store.can_speedup()?;
+
+            if !can_speedup {
+                return Ok(());
+            }
+
             let funding = self.store.get_funding()?.unwrap();
 
             let replace_cpfp_txid = if speedup.is_rbf {
