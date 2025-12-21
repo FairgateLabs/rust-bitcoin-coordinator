@@ -12,9 +12,8 @@ use bitvmx_bitcoin_rpc::{
 };
 use bitvmx_settings::settings::load_config_file;
 use console::style;
-use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
-use key_manager::key_store::KeyStore;
+use key_manager::{config::KeyManagerConfig, key_type::BitcoinKeyType};
 use protocol_builder::types::{output::SpeedupData, Utxo};
 use std::rc::Rc;
 use storage_backend::storage::Storage;
@@ -56,8 +55,8 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
 
     let network = Network::Regtest;
     let path = format!("test_output/test/{}", generate_random_string());
-    let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config).unwrap());
+    let storage_config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&storage_config).unwrap());
     let config_bitcoin_client = RpcConfig::new(
         network,
         "http://127.0.0.1:18443".to_string(),
@@ -65,10 +64,9 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         "rpcpassword".to_string(),
         "test_wallet".to_string(),
     );
-    let config = KeyManagerConfig::new(network.to_string(), None, None, None);
-    let key_store = KeyStore::new(storage.clone());
+    let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
     let key_manager =
-        Rc::new(create_key_manager_from_config(&config, key_store, storage.clone()).unwrap());
+        Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
     let bitcoin_client = BitcoinClient::new_from_config(&config_bitcoin_client)?;
 
     let bitcoind = Bitcoind::new(
@@ -81,7 +79,7 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     bitcoind.start()?;
 
     info!("{} Creating keypair in key manager", style("Test").green());
-    let public_key = key_manager.derive_keypair(0).unwrap();
+    let public_key = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0).unwrap();
     let compressed = CompressedPublicKey::try_from(public_key).unwrap();
     let funding_wallet = Address::p2wpkh(&compressed, network);
     let regtest_wallet = bitcoin_client.init_wallet("test_wallet").unwrap();
