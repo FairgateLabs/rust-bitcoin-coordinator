@@ -106,8 +106,10 @@ impl BitcoinCoordinator {
         let monitor_settings = settings.clone().unwrap_or_default().monitor_settings;
         let monitor = Monitor::new_with_paths(rpc_config, storage.clone(), monitor_settings)?;
 
-        let coordinator_settings: CoordinatorSettings =
-            CoordinatorSettings::from(settings.unwrap_or_default());
+        let settings_config = settings.unwrap_or_default();
+        settings_config.validate()?;
+
+        let coordinator_settings: CoordinatorSettings = CoordinatorSettings::from(settings_config);
 
         let store = BitcoinCoordinatorStore::new(
             storage,
