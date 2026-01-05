@@ -41,11 +41,17 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     let key_manager =
         Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
     let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
+    
+    let bitcoind_config = BitcoindConfig::new(
+        "bitcoin-regtest".to_string(),
+        "bitcoin/bitcoin:29.1".to_string(),
+        None,
+        config_bitcoin_client.clone()
+    );
 
     let bitcoind = Bitcoind::new(
-        "bitcoin-regtest",
-        "bitcoin/bitcoin:29.1",
-        config_bitcoin_client.clone(),
+        bitcoind_config,
+        None
     );
 
     info!("{} Starting bitcoind", style("Test").green());
