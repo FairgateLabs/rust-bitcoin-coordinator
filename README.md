@@ -23,7 +23,7 @@ The following is a list of all public methods available in the `BitcoinCoordinat
 
 3. **monitor**: Registers a type of data to be monitored by the coordinator. The data will be tracked for confirmations and status changes.
 
-4. **dispatch**: Dispatches a transaction to the Bitcoin network. Includes options for speedup and additional context.
+4. **dispatch**: Dispatches a transaction to the Bitcoin network. Includes options for speedup, additional context, and a confirmation trigger threshold.
 
 5. **cancel**: Cancels the monitor and the dispatch of a type of data, removing it from the coordinator's store.
 
@@ -56,13 +56,15 @@ coordinator.tick();
 let is_ready = coordinator.is_ready();
 
 // Define context and register transactions to be monitored
+// number_confirmation_trigger: None means trigger news for all confirmations, Some(n) means only trigger when transaction has exactly n confirmations
 let tx_context = "My tx".to_string();
-let tx_to_monitor = TypesToMonitor::Transactions(vec![txid1], tx_context.clone());
+let tx_to_monitor = TypesToMonitor::Transactions(vec![txid1], tx_context.clone(), None);
 coordinator.monitor(tx_to_monitor);
 
-// Dispatch a transaction with optional CPFP speedup data and a context string
+// Dispatch a transaction with optional CPFP speedup data, a context string, and confirmation trigger
+// number_confirmation_trigger: None means trigger news for all confirmations, Some(n) means only trigger when transaction has exactly n confirmations
 let speedup_data = Some(SpeedupData::new(speedup_utxo));
-coordinator.dispatch(transaction, speedup_data, tx_context.clone(), None);
+coordinator.dispatch(transaction, speedup_data, tx_context.clone(), None, None);
 
 // Provide funding UTXO for future speedup transactions (e.g., CPFP)
 let utxo = Utxo::new(txid, vout_index, amount.to_sat(), &public_key);
