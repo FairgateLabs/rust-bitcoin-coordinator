@@ -49,14 +49,12 @@ mod utils;
 // The funding for the second transaction comes from the change output of the first transaction.
 // The test verifies that both transactions are successfully mined and confirmed, and asserts that the coordinator reports the expected news events.
 #[test]
-#[ignore = "This test works, but it runs in regtest with a bitcoind running"]
 fn speedup_tx() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let network = Network::Regtest;
-    let path = format!("test_output/test/{}", generate_random_string());
-    let storage_config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&storage_config).unwrap());
+    let path_key_manager = format!("test_output/test/key_manager/{}", generate_random_string());
+    let key_manager_storage_config = StorageConfig::new(path_key_manager, None);
     let config_bitcoin_client = RpcConfig::new(
         network,
         "http://127.0.0.1:18443".to_string(),
@@ -65,8 +63,12 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         "test_wallet".to_string(),
     );
     let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
-    let key_manager =
-        Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
+    let key_manager = Rc::new(
+        create_key_manager_from_config(&key_manager_config, &key_manager_storage_config).unwrap(),
+    );
+    let path_storage = format!("test_output/test/storage/{}", generate_random_string());
+    let storage_config = StorageConfig::new(path_storage, None);
+    let storage = Rc::new(Storage::new(&storage_config).unwrap());
     let bitcoin_client = BitcoinClient::new_from_config(&config_bitcoin_client)?;
 
     let bitcoind = Bitcoind::new(
@@ -150,11 +152,12 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     let speedup_data = SpeedupData::new(tx1_speedup_utxo);
 
     let tx_context = "My tx".to_string();
-    let tx_to_monitor = TypesToMonitor::Transactions(vec![tx1.compute_txid()], tx_context.clone());
+    let tx_to_monitor =
+        TypesToMonitor::Transactions(vec![tx1.compute_txid()], tx_context.clone(), None);
     coordinator.monitor(tx_to_monitor)?;
 
     // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.dispatch(tx1, Some(speedup_data), tx_context.clone(), None)?;
+    coordinator.dispatch(tx1, Some(speedup_data), tx_context.clone(), None, None)?;
 
     // Add funding for speed up transaction
     coordinator.add_funding(Utxo::new(
@@ -212,10 +215,10 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     let speedup_data = SpeedupData::new(tx2_speedup_utxo);
 
     let tx_to_monitor_2 =
-        TypesToMonitor::Transactions(vec![tx2.compute_txid()], tx_context.clone());
+        TypesToMonitor::Transactions(vec![tx2.compute_txid()], tx_context.clone(), None);
     coordinator.monitor(tx_to_monitor_2)?;
 
-    coordinator.dispatch(tx2, Some(speedup_data), tx_context.clone(), None)?;
+    coordinator.dispatch(tx2, Some(speedup_data), tx_context.clone(), None, None)?;
 
     // First tick dispatch the tx2 and create a speedup tx to be send
     coordinator.tick()?;

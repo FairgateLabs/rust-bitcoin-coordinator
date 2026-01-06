@@ -1,6 +1,9 @@
 use crate::utils::{config_trace_aux, coordinate_tx};
 use bitcoin::{Address, Amount, CompressedPublicKey, Network};
-use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
+use bitcoin_coordinator::{
+    coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
+    MonitorNews,
+};
 use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
@@ -18,15 +21,14 @@ use utils::generate_random_string;
 mod utils;
 
 #[test]
-#[ignore = "This test works, but it runs in regtest with a bitcoind running"]
+#[ignore]
 fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
     let network = Network::Regtest;
-    let path = format!("test_output/test/{}", generate_random_string());
-    let storage_config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&storage_config).unwrap());
+    let path_key_manager = format!("test_output/test/key_manager/{}", generate_random_string());
+    let key_manager_storage_config = StorageConfig::new(path_key_manager, None);
     let config_bitcoin_client = RpcConfig::new(
         network,
         "http://127.0.0.1:18443".to_string(),
@@ -35,8 +37,12 @@ fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
         "test_wallet".to_string(),
     );
     let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
-    let key_manager =
-        Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
+    let key_manager = Rc::new(
+        create_key_manager_from_config(&key_manager_config, &key_manager_storage_config).unwrap(),
+    );
+    let path_storage = format!("test_output/test/storage/{}", generate_random_string());
+    let storage_config = StorageConfig::new(path_storage, None);
+    let storage = Rc::new(Storage::new(&storage_config).unwrap());
     let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
 
     let bitcoind = Bitcoind::new_with_flags(
@@ -44,7 +50,7 @@ fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
         "ruimarinho/bitcoin-core",
         config_bitcoin_client.clone(),
         BitcoindFlags {
-            block_min_tx_fee: 0.00004,
+            block_min_tx_fee: 0.00003,
             ..Default::default()
         },
     );
@@ -123,7 +129,7 @@ fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
         &public_key,
     ))?;
 
-    coordinate_tx(
+    let tx1 = coordinate_tx(
         coordinator.clone(),
         amount,
         network,
@@ -172,7 +178,13 @@ fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
 
     let news = coordinator.get_news()?;
     assert_eq!(news.monitor_news.len(), 1);
-
+    // Check that the txid in the news.monitor_news[0] matches tx1.compute_txid()
+    match &news.monitor_news[0] {
+        MonitorNews::Transaction(txid, _, _) => {
+            assert_eq!(*txid, tx1.compute_txid());
+        }
+        other => panic!("Expected MonitorNews::Transaction, got {:?}", other),
+    }
     bitcoind.stop()?;
 
     Ok(())

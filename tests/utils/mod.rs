@@ -9,7 +9,6 @@ use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_manager::KeyManager;
-use key_manager::key_store::KeyStore;
 use key_manager::key_type::BitcoinKeyType;
 use protocol_builder::builder::Protocol;
 use protocol_builder::types::connection::InputSpec;
@@ -32,8 +31,8 @@ pub fn clear_db(path: &str) {
 
 pub fn generate_random_string() -> String {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
-    (0..10).map(|_| rng.gen_range('a'..='z')).collect()
+    let mut rng = rand::rng();
+    (0..10).map(|_| rng.random_range('a'..='z')).collect()
 }
 
 pub fn get_mocks() -> (
@@ -45,15 +44,18 @@ pub fn get_mocks() -> (
     const MAX_RETRIES: u32 = 3;
     const RETRY_INTERVAL: u64 = 2;
     let mock_monitor = MockMonitorApi::new();
-    let path = format!("test_output/test/{}", generate_random_string());
-    let storage_config = StorageConfig::new(path, None);
+    let path_key_manager = format!("test_output/test/key_manager/{}", generate_random_string());
+    let key_manager_storage_config = StorageConfig::new(path_key_manager, None);
+    let key_manager_config = KeyManagerConfig::new(Network::Regtest.to_string(), None, None);
+    let key_manager = Rc::new(
+        create_key_manager_from_config(&key_manager_config, &key_manager_storage_config).unwrap(),
+    );
+    let path_storage = format!("test_output/test/storage/{}", generate_random_string());
+    let storage_config = StorageConfig::new(path_storage, None);
     let storage = Rc::new(Storage::new(&storage_config).unwrap());
     let store =
         BitcoinCoordinatorStore::new(storage.clone(), 1, MAX_RETRIES, RETRY_INTERVAL).unwrap();
     let bitcoin_client = MockBitcoinClient::new();
-    let key_manager_config = KeyManagerConfig::new(Network::Regtest.to_string(), None, None);
-    let key_manager =
-        Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
 
     (mock_monitor, store, bitcoin_client, key_manager)
 }
@@ -77,7 +79,7 @@ pub fn get_mock_data(
 
     let tx_id = tx.compute_txid();
     let context_data = "My context monitor".to_string();
-    let to_monitor = TypesToMonitor::Transactions(vec![tx_id], context_data.clone());
+    let to_monitor = TypesToMonitor::Transactions(vec![tx_id], context_data.clone(), None);
 
     let speedup_utxo = Utxo::new(tx_id, 0, 10000000, &public_key);
 
@@ -224,7 +226,7 @@ pub fn coordinate_tx(
     key_manager: Rc<KeyManager>,
     bitcoin_client: Rc<BitcoinClient>,
     fee: Option<u64>,
-) -> Result<(), anyhow::Error> {
+) -> Result<Transaction, anyhow::Error> {
     let fee = fee.unwrap_or(172);
 
     // Create a funding wallet
@@ -250,11 +252,18 @@ pub fn coordinate_tx(
     let speedup_data = SpeedupData::new(tx1_speedup_utxo);
 
     let tx_context = "My tx".to_string();
-    let tx_to_monitor = TypesToMonitor::Transactions(vec![tx1.compute_txid()], tx_context.clone());
+    let tx_to_monitor =
+        TypesToMonitor::Transactions(vec![tx1.compute_txid()], tx_context.clone(), None);
     coordinator.monitor(tx_to_monitor)?;
 
     // Dispatch the transaction through the bitcoin coordinator.
-    coordinator.dispatch(tx1.clone(), Some(speedup_data), tx_context.clone(), None)?;
+    coordinator.dispatch(
+        tx1.clone(),
+        Some(speedup_data),
+        tx_context.clone(),
+        None,
+        None,
+    )?;
 
-    Ok(())
+    Ok(tx1)
 }

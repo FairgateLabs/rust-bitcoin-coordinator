@@ -11,7 +11,6 @@ use bitvmx_bitcoin_rpc::{
 };
 use console::style;
 use key_manager::create_key_manager_from_config;
-use key_manager::key_store::KeyStore;
 use key_manager::{config::KeyManagerConfig, key_type::BitcoinKeyType};
 use protocol_builder::types::Utxo;
 use std::rc::Rc;
@@ -24,7 +23,6 @@ use crate::utils::{config_trace_aux, coordinate_tx};
 mod utils;
 
 #[test]
-#[ignore = "This test works, but it runs in regtest with a bitcoind running"]
 fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
     // This test simulates a blockchain reorganization scenario. It begins by setting up a Bitcoin
@@ -35,9 +33,8 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     let mut blocks_mined = 102;
     let network = Network::Regtest;
-    let path = format!("test_output/test/{}", generate_random_string());
-    let storage_config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&storage_config).unwrap());
+    let path_key_manager = format!("test_output/test/key_manager/{}", generate_random_string());
+    let key_manager_storage_config = StorageConfig::new(path_key_manager, None);
     let config_bitcoin_client = RpcConfig::new(
         network,
         "http://127.0.0.1:18443".to_string(),
@@ -46,8 +43,12 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         "test_wallet".to_string(),
     );
     let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
-    let key_manager =
-        Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
+    let key_manager = Rc::new(
+        create_key_manager_from_config(&key_manager_config, &key_manager_storage_config).unwrap(),
+    );
+    let path_storage = format!("test_output/test/storage/{}", generate_random_string());
+    let storage_config = StorageConfig::new(path_storage, None);
+    let storage = Rc::new(Storage::new(&storage_config).unwrap());
     let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
 
     let bitcoind = Bitcoind::new_with_flags(

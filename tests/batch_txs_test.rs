@@ -18,18 +18,17 @@ use utils::generate_random_string;
 use crate::utils::{config_trace_aux, coordinate_tx};
 mod utils;
 
+// This is a integration test.
 // The idea of this test is to dispatch a lot of txs and check if the coordinator can handle it.
 // What we are testing is the batch dispatching of txs. So should be able to dispatch 200 txs in a single tick and create 3 CPFPs.
 #[test]
-#[ignore = "This test requires a running bitcoind in regtest mode"]
 fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
     let network = Network::Regtest;
-    let path = format!("test_output/test/{}", generate_random_string());
-    let storage_config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&storage_config).unwrap());
+    let path_key_manager = format!("test_output/test/key_manager/{}", generate_random_string());
+    let key_manager_storage_config = StorageConfig::new(path_key_manager, None);
     let config_bitcoin_client = RpcConfig::new(
         network,
         "http://127.0.0.1:18443".to_string(),
@@ -38,8 +37,12 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         "test_wallet".to_string(),
     );
     let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
-    let key_manager =
-        Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
+    let key_manager = Rc::new(
+        create_key_manager_from_config(&key_manager_config, &key_manager_storage_config).unwrap(),
+    );
+    let path_storage = format!("test_output/test/storage/{}", generate_random_string());
+    let storage_config = StorageConfig::new(path_storage, None);
+    let storage = Rc::new(Storage::new(&storage_config).unwrap());
     let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
 
     let bitcoind = Bitcoind::new(

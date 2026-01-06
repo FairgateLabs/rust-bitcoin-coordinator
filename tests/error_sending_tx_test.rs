@@ -28,15 +28,14 @@ mod utils;
 // - Asserting that the coordinator performs exactly the configured number of retries.
 // - Validating that the retry count matches the retry_attempts_sending_tx setting.
 #[test]
-#[ignore = "This test works, but it runs in regtest with a bitcoind running"]
 fn error_sending_tx_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
     let network = Network::Regtest;
-    let path = format!("test_output/test/{}", generate_random_string());
-    let storage_config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&storage_config).unwrap());
+    let path_key_manager = format!("test_output/test/key_manager/{}", generate_random_string());
+    let key_manager_storage_config = StorageConfig::new(path_key_manager, None);
+
     let config_bitcoin_client = RpcConfig::new(
         network,
         "http://127.0.0.1:18443".to_string(),
@@ -45,9 +44,11 @@ fn error_sending_tx_test() -> Result<(), anyhow::Error> {
         "test_wallet".to_string(),
     );
     let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
-    let key_manager =
-        Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
-    let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
+    let key_manager = Rc::new(
+        create_key_manager_from_config(&key_manager_config, &key_manager_storage_config).unwrap(),
+    );
+    let bitcoin_client: Rc<BitcoinClient> =
+        Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
 
     let bitcoind = Bitcoind::new_with_flags(
         "bitcoin-regtest",
@@ -93,6 +94,9 @@ fn error_sending_tx_test() -> Result<(), anyhow::Error> {
     settings.retry_attempts_sending_tx = Some(EXPECTED_RETRIES);
     settings.retry_interval_seconds = Some(RETRY_INTERVAL_SECONDS);
 
+    let path_storage = format!("test_output/test/storage/{}", generate_random_string());
+    let storage_config = StorageConfig::new(path_storage, None);
+    let storage = Rc::new(Storage::new(&storage_config)?);
     let coordinator = Rc::new(BitcoinCoordinator::new_with_paths(
         &config_bitcoin_client,
         storage.clone(),
