@@ -1,27 +1,18 @@
-use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
+use bitcoin::{Amount, OutPoint};
 use bitcoin_coordinator::{
     config::CoordinatorConfig,
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
     types::AckNews,
     AckMonitorNews, MonitorNews, TypesToMonitor,
 };
-use bitcoind::bitcoind::Bitcoind;
-use bitvmx_bitcoin_rpc::{
-    bitcoin_client::{BitcoinClient, BitcoinClientApi},
-    rpc_config::RpcConfig,
-};
+use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClientApi;
 use bitvmx_settings::settings::load_config_file;
 use console::style;
-use key_manager::create_key_manager_from_config;
-use key_manager::{config::KeyManagerConfig, key_type::BitcoinKeyType};
 use protocol_builder::types::{output::SpeedupData, Utxo};
-use std::rc::Rc;
-use storage_backend::storage::Storage;
-use storage_backend::storage_config::StorageConfig;
 use tracing::info;
 use utils::generate_tx;
 
-use crate::utils::{config_trace_aux, generate_random_string};
+use crate::utils::{config_trace_aux, create_test_setup, TestSetupConfig};
 mod utils;
 /*
     Test Summary: send_tx_regtest
@@ -52,67 +43,32 @@ mod utils;
 fn speedup_tx() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
-    let network = Network::Regtest;
-    let path_key_manager = format!("test_output/test/key_manager/{}", generate_random_string());
-    let key_manager_storage_config = StorageConfig::new(path_key_manager, None);
-    let config_bitcoin_client = RpcConfig::new(
-        network,
-        "http://127.0.0.1:18443".to_string(),
-        "foo".to_string(),
-        "rpcpassword".to_string(),
-        "test_wallet".to_string(),
-    );
-    let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
-    let key_manager = Rc::new(
-        create_key_manager_from_config(&key_manager_config, &key_manager_storage_config).unwrap(),
-    );
-    let path_storage = format!("test_output/test/storage/{}", generate_random_string());
-    let storage_config = StorageConfig::new(path_storage, None);
-    let storage = Rc::new(Storage::new(&storage_config).unwrap());
-    let bitcoin_client = BitcoinClient::new_from_config(&config_bitcoin_client)?;
-
-    let bitcoind = Bitcoind::new(
-        "bitcoin-regtest",
-        "bitcoin/bitcoin:29.1",
-        config_bitcoin_client.clone(),
-    );
-
-    info!("{} Starting bitcoind", style("Test").green());
-    bitcoind.start()?;
-
-    info!("{} Creating keypair in key manager", style("Test").green());
-    let public_key = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0).unwrap();
-    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
-    let funding_wallet = Address::p2wpkh(&compressed, network);
-    let regtest_wallet = bitcoin_client.init_wallet("test_wallet").unwrap();
-
-    info!(
-        "{} Mine 101 blocks to address {:?}",
-        style("Test").green(),
-        regtest_wallet
-    );
-    bitcoin_client
-        .mine_blocks_to_address(101, &regtest_wallet)
-        .unwrap();
+    let setup = create_test_setup(TestSetupConfig {
+        blocks_mined: 101,
+        bitcoind_flags: None,
+    })?;
 
     let amount = Amount::from_sat(23450000);
 
     info!(
         "{} Funding address {:?}",
         style("Test").green(),
-        funding_wallet
+        setup.funding_wallet
     );
 
-    let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
+    let (funding_tx, funding_vout) = setup
+        .bitcoin_client
+        .fund_address(&setup.funding_wallet, amount)?;
 
     info!(
         "{} Funding tx address {:?}",
         style("Test").green(),
-        funding_wallet
+        setup.funding_wallet
     );
 
-    let (funding_speedup, funding_speedup_vout) =
-        bitcoin_client.fund_address(&funding_wallet, amount)?;
+    let (funding_speedup, funding_speedup_vout) = setup
+        .bitcoin_client
+        .fund_address(&setup.funding_wallet, amount)?;
 
     info!(
         "{} Funding tx: {:?} | vout: {:?}",
@@ -129,9 +85,9 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     );
 
     let coordinator = BitcoinCoordinator::new_with_paths(
-        &config_bitcoin_client,
-        storage.clone(),
-        key_manager.clone(),
+        &setup.config_bitcoin_client,
+        setup.storage.clone(),
+        setup.key_manager.clone(),
         None,
     )?;
 
@@ -144,8 +100,8 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     let (tx1, tx1_speedup_utxo) = generate_tx(
         OutPoint::new(funding_tx.compute_txid(), funding_vout),
         amount.to_sat(),
-        public_key,
-        key_manager.clone(),
+        setup.public_key,
+        setup.key_manager.clone(),
         172,
     )?;
 
@@ -164,15 +120,16 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         funding_speedup.compute_txid(),
         funding_speedup_vout,
         amount.to_sat(),
-        &public_key,
+        &setup.public_key,
     ))?;
 
     // First tick dispatch the tx and CPFP speedup tx.
     coordinator.tick()?;
 
     // Mine a block to mine txs (tx1 and speedup tx)
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
+    setup
+        .bitcoin_client
+        .mine_blocks_to_address(1, &setup.funding_wallet)
         .unwrap();
 
     // Detect txs (tx1 and speedup tx)
@@ -201,14 +158,15 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         assert!(false);
     }
 
-    let (funding_speedup_2, funding_speedup_vout_2) =
-        bitcoin_client.fund_address(&funding_wallet, amount)?;
+    let (funding_speedup_2, funding_speedup_vout_2) = setup
+        .bitcoin_client
+        .fund_address(&setup.funding_wallet, amount)?;
 
     let (tx2, tx2_speedup_utxo) = generate_tx(
         OutPoint::new(funding_speedup_2.compute_txid(), funding_speedup_vout_2),
         amount.to_sat(),
-        public_key,
-        key_manager.clone(),
+        setup.public_key,
+        setup.key_manager.clone(),
         172,
     )?;
 
@@ -226,8 +184,9 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     // Second tick dispatch the speedup tx
     coordinator.tick()?;
 
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
+    setup
+        .bitcoin_client
+        .mine_blocks_to_address(1, &setup.funding_wallet)
         .unwrap();
 
     // Third tick detect the speedup tx2 + tx2 mined
@@ -247,7 +206,7 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         assert!(false);
     }
 
-    bitcoind.stop()?;
+    setup.bitcoind.stop()?;
 
     Ok(())
 }

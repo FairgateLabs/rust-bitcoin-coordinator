@@ -1,70 +1,36 @@
 use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
-use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
-use bitvmx_bitcoin_rpc::{
-    bitcoin_client::{BitcoinClient, BitcoinClientApi},
-    rpc_config::RpcConfig,
-};
+use bitcoind::bitcoind::BitcoindFlags;
+use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClientApi;
 use console::style;
-use key_manager::create_key_manager_from_config;
-use key_manager::{config::KeyManagerConfig, key_type::BitcoinKeyType};
 use protocol_builder::{
     builder::ProtocolBuilder,
     types::{output::SpeedupData, Utxo},
 };
 use std::{rc::Rc, vec};
-use storage_backend::storage_config::StorageConfig;
 use tracing::info;
-use utils::{generate_random_string, generate_tx};
+use utils::generate_tx;
 
-use crate::utils::config_trace_aux;
+use crate::utils::{config_trace_aux, create_test_setup, TestSetupConfig};
 mod utils;
 
 #[test]
 fn replacement_cycling_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
-    let network = Network::Regtest;
-    let path = format!("test_output/test/{}", generate_random_string());
-    let storage_config = StorageConfig::new(path, None);
-    let config_bitcoin_client = RpcConfig::new(
-        network,
-        "http://127.0.0.1:18443".to_string(),
-        "foo".to_string(),
-        "rpcpassword".to_string(),
-        "test_wallet".to_string(),
-    );
-    let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
-    let key_manager =
-        Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
-    let bitcoin_client = BitcoinClient::new_from_config(&config_bitcoin_client)?;
-
-    let bitcoind = Bitcoind::new_with_flags(
-        "bitcoin-regtest",
-        "bitcoin/bitcoin:29.1",
-        config_bitcoin_client.clone(),
-        BitcoindFlags {
+    let setup = create_test_setup(TestSetupConfig {
+        blocks_mined: 101,
+        bitcoind_flags: Some(BitcoindFlags {
             block_min_tx_fee: 0.00002,
             ..Default::default()
-        },
-    );
+        }),
+    })?;
 
-    info!("{} Starting bitcoind", style("Test").green());
-    bitcoind.start()?;
-
-    info!("{} Creating keypair in key manager", style("Test").green());
-    let public_key = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0).unwrap();
-    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
-    let funding_wallet = Address::p2wpkh(&compressed, network);
-    let regtest_wallet = bitcoin_client.init_wallet("test_wallet").unwrap();
-
-    info!(
-        "{} Mine 101 blocks to address {:?}",
-        style("Test").green(),
-        regtest_wallet
-    );
-    bitcoin_client
-        .mine_blocks_to_address(101, &regtest_wallet)
-        .unwrap();
+    // This test uses BitcoinClient directly (not Rc), so we need to extract it
+    let bitcoin_client = Rc::try_unwrap(setup.bitcoin_client)
+        .unwrap_or_else(|_| panic!("Expected single owner of BitcoinClient"));
+    let public_key = setup.public_key;
+    let funding_wallet = setup.funding_wallet;
+    let key_manager = setup.key_manager;
 
     let amount = Amount::from_sat(23450000);
     info!(
@@ -177,7 +143,7 @@ fn replacement_cycling_test() -> Result<(), anyhow::Error> {
     assert_eq!(mallory_tx_status.is_some(), true);
     assert_eq!(info.confirmations, Some(10));
 
-    bitcoind.stop()?;
+    setup.bitcoind.stop()?;
 
     Ok(())
 }

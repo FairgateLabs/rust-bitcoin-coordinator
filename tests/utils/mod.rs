@@ -4,8 +4,11 @@ use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi
 use bitcoin_coordinator::errors::TxBuilderHelperError;
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::TypesToMonitor;
+use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi, MockBitcoinClient};
+use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
+use console::style;
 use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
 use key_manager::key_manager::KeyManager;
@@ -19,6 +22,7 @@ use std::rc::Rc;
 use std::str::FromStr;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 pub fn clear_output() {
@@ -266,4 +270,145 @@ pub fn coordinate_tx(
     )?;
 
     Ok(tx1)
+}
+
+/// Test setup components that are commonly used across tests
+pub struct TestSetup {
+    pub network: Network,
+    pub config_bitcoin_client: RpcConfig,
+    pub key_manager: Rc<KeyManager>,
+    pub storage: Rc<Storage>,
+    pub bitcoin_client: Rc<BitcoinClient>,
+    pub bitcoind: Bitcoind,
+    pub public_key: PublicKey,
+    pub funding_wallet: Address,
+    pub regtest_wallet: Address,
+}
+
+/// Configuration for creating a test setup
+pub struct TestSetupConfig {
+    pub blocks_mined: u32,
+    pub bitcoind_flags: Option<BitcoindFlags>,
+}
+
+impl Default for TestSetupConfig {
+    fn default() -> Self {
+        Self {
+            blocks_mined: 102,
+            bitcoind_flags: None,
+        }
+    }
+}
+
+/// Creates the basic test infrastructure (network, key manager, storage, bitcoin client config)
+pub fn create_test_infrastructure(
+    network: Network,
+) -> Result<(RpcConfig, Rc<KeyManager>, Rc<Storage>, Rc<BitcoinClient>), anyhow::Error> {
+    let path_key_manager = format!("test_output/test/key_manager/{}", generate_random_string());
+    let key_manager_storage_config = StorageConfig::new(path_key_manager, None);
+    let config_bitcoin_client = RpcConfig::new(
+        network,
+        "http://127.0.0.1:18443".to_string(),
+        "foo".to_string(),
+        "rpcpassword".to_string(),
+        "test_wallet".to_string(),
+    );
+    let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
+    let key_manager = Rc::new(
+        create_key_manager_from_config(&key_manager_config, &key_manager_storage_config)
+            .map_err(|e| anyhow::anyhow!("Failed to create key manager: {:?}", e))?,
+    );
+    let path_storage = format!("test_output/test/storage/{}", generate_random_string());
+    let storage_config = StorageConfig::new(path_storage, None);
+    let storage = Rc::new(
+        Storage::new(&storage_config)
+            .map_err(|e| anyhow::anyhow!("Failed to create storage: {:?}", e))?,
+    );
+    let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
+
+    Ok((config_bitcoin_client, key_manager, storage, bitcoin_client))
+}
+
+/// Creates and starts bitcoind with optional flags
+pub fn create_and_start_bitcoind(
+    config_bitcoin_client: &RpcConfig,
+    flags: Option<BitcoindFlags>,
+) -> Result<Bitcoind, anyhow::Error> {
+    const BITCOIND_IMAGE: &str = "bitcoin/bitcoin:29.1";
+
+    let bitcoind = if let Some(flags) = flags {
+        Bitcoind::new_with_flags(
+            "bitcoin-regtest",
+            BITCOIND_IMAGE,
+            config_bitcoin_client.clone(),
+            flags,
+        )
+    } else {
+        Bitcoind::new(
+            "bitcoin-regtest",
+            BITCOIND_IMAGE,
+            config_bitcoin_client.clone(),
+        )
+    };
+
+    info!("{} Starting bitcoind", style("Test").green());
+    bitcoind.start()?;
+
+    Ok(bitcoind)
+}
+
+/// Sets up wallet and mines initial blocks
+pub fn setup_wallet_and_mine_blocks(
+    key_manager: &Rc<KeyManager>,
+    bitcoin_client: &Rc<BitcoinClient>,
+    network: Network,
+    blocks_mined: u32,
+) -> Result<(PublicKey, Address, Address), anyhow::Error> {
+    info!("{} Creating keypair in key manager", style("Test").green());
+    let public_key = key_manager
+        .derive_keypair(BitcoinKeyType::P2tr, 0)
+        .map_err(|e| anyhow::anyhow!("Failed to derive keypair: {:?}", e))?;
+    let compressed = CompressedPublicKey::try_from(public_key)
+        .map_err(|e| anyhow::anyhow!("Failed to compress public key: {:?}", e))?;
+    let funding_wallet = Address::p2wpkh(&compressed, network);
+    let regtest_wallet = bitcoin_client
+        .init_wallet("test_wallet")
+        .map_err(|e| anyhow::anyhow!("Failed to init wallet: {:?}", e))?;
+
+    info!(
+        "{} Mine {} blocks to address {:?}",
+        style("Test").green(),
+        blocks_mined,
+        regtest_wallet
+    );
+
+    bitcoin_client
+        .mine_blocks_to_address(blocks_mined as u64, &regtest_wallet)
+        .map_err(|e| anyhow::anyhow!("Failed to mine blocks: {:?}", e))?;
+
+    Ok((public_key, funding_wallet, regtest_wallet))
+}
+
+/// Creates a complete test setup with all common components
+pub fn create_test_setup(config: TestSetupConfig) -> Result<TestSetup, anyhow::Error> {
+    let network = Network::Regtest;
+    let (config_bitcoin_client, key_manager, storage, bitcoin_client) =
+        create_test_infrastructure(network)?;
+
+    let bitcoind = create_and_start_bitcoind(&config_bitcoin_client, config.bitcoind_flags)?;
+
+    let (public_key, funding_wallet, regtest_wallet) =
+        setup_wallet_and_mine_blocks(&key_manager, &bitcoin_client, network, config.blocks_mined)?;
+
+    Ok(TestSetup {
+        network,
+        config_bitcoin_client,
+        key_manager,
+        storage,
+        bitcoin_client,
+        bitcoind,
+        public_key,
+        funding_wallet,
+        regtest_wallet,
+    })
 }
