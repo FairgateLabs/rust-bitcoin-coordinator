@@ -103,11 +103,14 @@ fn error_sending_tx_test() -> Result<(), anyhow::Error> {
         // Check for error notifications
         let news = coordinator.get_news()?;
         for news_item in &news.coordinator_news {
-            if let bitcoin_coordinator::types::CoordinatorNews::DispatchTransactionError(_, _, _) =
-                news_item
-            {
-                error_count += 1;
-                info!("Error notification {} received", error_count);
+            match news_item {
+                bitcoin_coordinator::types::CoordinatorNews::DispatchTransactionError(_, _, _)
+                | bitcoin_coordinator::types::CoordinatorNews::MempoolRejection(_, _, _)
+                | bitcoin_coordinator::types::CoordinatorNews::NetworkError(_, _, _) => {
+                    error_count += 1;
+                    info!("Error notification {} received", error_count);
+                }
+                _ => {}
             }
         }
 

@@ -1,7 +1,7 @@
-use bitcoin::{BlockHash, Txid};
+use bitcoin::{absolute::LockTime, transaction::Version, BlockHash, Transaction, Txid};
 use bitcoin_coordinator::{
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
-    types::{AckCoordinatorNews, CoordinatorNews},
+    types::{AckCoordinatorNews, CoordinatorNews, TransactionState},
 };
 use std::{rc::Rc, str::FromStr};
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
@@ -207,6 +207,341 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
     // Verify all news were removed
     let remaining_news = store.get_news()?;
     assert_eq!(remaining_news.len(), 0);
+
+    clear_output();
+    Ok(())
+}
+
+#[test]
+fn test_transaction_already_in_mempool_news() -> Result<(), anyhow::Error> {
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_INTERVAL: u64 = 2;
+    let path = format!("test_output/storage_news_test/{}", generate_random_string());
+
+    let storage_config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&storage_config)?);
+
+    let current_block_hash =
+        BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+            .unwrap();
+
+    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+
+    let tx_id =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
+    let context = "test_context".to_string();
+
+    // Initially, there should be no news
+    let news_list = store.get_news()?;
+    assert_eq!(news_list.len(), 0);
+
+    // Add TransactionAlreadyInMempool news
+    let news = CoordinatorNews::TransactionAlreadyInMempool(tx_id, context.clone());
+    store.update_news(news, current_block_hash)?;
+
+    // Verify the news is stored
+    let news_list = store.get_news()?;
+    assert_eq!(news_list.len(), 1);
+    match &news_list[0] {
+        CoordinatorNews::TransactionAlreadyInMempool(id, ctx) => {
+            assert_eq!(*id, tx_id);
+            assert_eq!(ctx, &context);
+        }
+        _ => panic!("Expected TransactionAlreadyInMempool news"),
+    }
+
+    // Acknowledge the news
+    store.ack_news(AckCoordinatorNews::TransactionAlreadyInMempool(tx_id))?;
+
+    // Verify the news is acknowledged and no longer returned
+    let news_list = store.get_news()?;
+    assert_eq!(news_list.len(), 0);
+
+    clear_output();
+    Ok(())
+}
+
+#[test]
+fn test_mempool_rejection_news() -> Result<(), anyhow::Error> {
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_INTERVAL: u64 = 2;
+    let path = format!("test_output/storage_news_test/{}", generate_random_string());
+
+    let storage_config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&storage_config)?);
+
+    let current_block_hash =
+        BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+            .unwrap();
+
+    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+
+    let tx_id =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
+    let context = "test_context".to_string();
+    let error_msg = "mempool full".to_string();
+
+    // Add MempoolRejection news
+    let news = CoordinatorNews::MempoolRejection(tx_id, context.clone(), error_msg.clone());
+    store.update_news(news, current_block_hash)?;
+
+    // Verify the news is stored
+    let news_list = store.get_news()?;
+    assert_eq!(news_list.len(), 1);
+    match &news_list[0] {
+        CoordinatorNews::MempoolRejection(id, ctx, err) => {
+            assert_eq!(*id, tx_id);
+            assert_eq!(ctx, &context);
+            assert_eq!(err, &error_msg);
+        }
+        _ => panic!("Expected MempoolRejection news"),
+    }
+
+    // Acknowledge the news
+    store.ack_news(AckCoordinatorNews::MempoolRejection(tx_id))?;
+
+    // Verify the news is acknowledged
+    let news_list = store.get_news()?;
+    assert_eq!(news_list.len(), 0);
+
+    clear_output();
+    Ok(())
+}
+
+#[test]
+fn test_network_error_news() -> Result<(), anyhow::Error> {
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_INTERVAL: u64 = 2;
+    let path = format!("test_output/storage_news_test/{}", generate_random_string());
+
+    let storage_config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&storage_config)?);
+
+    let current_block_hash =
+        BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+            .unwrap();
+
+    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+
+    let tx_id =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
+    let context = "test_context".to_string();
+    let error_msg = "network connection timeout".to_string();
+
+    // Add NetworkError news
+    let news = CoordinatorNews::NetworkError(tx_id, context.clone(), error_msg.clone());
+    store.update_news(news, current_block_hash)?;
+
+    // Verify the news is stored
+    let news_list = store.get_news()?;
+    assert_eq!(news_list.len(), 1);
+    match &news_list[0] {
+        CoordinatorNews::NetworkError(id, ctx, err) => {
+            assert_eq!(*id, tx_id);
+            assert_eq!(ctx, &context);
+            assert_eq!(err, &error_msg);
+        }
+        _ => panic!("Expected NetworkError news"),
+    }
+
+    // Acknowledge the news
+    store.ack_news(AckCoordinatorNews::NetworkError(tx_id))?;
+
+    // Verify the news is acknowledged
+    let news_list = store.get_news()?;
+    assert_eq!(news_list.len(), 0);
+
+    clear_output();
+    Ok(())
+}
+
+#[test]
+fn test_dispatch_transaction_error_news() -> Result<(), anyhow::Error> {
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_INTERVAL: u64 = 2;
+    let path = format!("test_output/storage_news_test/{}", generate_random_string());
+
+    let storage_config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&storage_config)?);
+
+    let current_block_hash =
+        BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+            .unwrap();
+
+    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+
+    let tx_id =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
+    let context = "test_context".to_string();
+    let error_msg = "invalid transaction format".to_string();
+
+    // Add DispatchTransactionError news
+    let news = CoordinatorNews::DispatchTransactionError(tx_id, context.clone(), error_msg.clone());
+    store.update_news(news, current_block_hash)?;
+
+    // Verify the news is stored
+    let news_list = store.get_news()?;
+    assert_eq!(news_list.len(), 1);
+    match &news_list[0] {
+        CoordinatorNews::DispatchTransactionError(id, ctx, err) => {
+            assert_eq!(*id, tx_id);
+            assert_eq!(ctx, &context);
+            assert_eq!(err, &error_msg);
+        }
+        _ => panic!("Expected DispatchTransactionError news"),
+    }
+
+    // Acknowledge the news
+    store.ack_news(AckCoordinatorNews::DispatchTransactionError(tx_id))?;
+
+    // Verify the news is acknowledged
+    let news_list = store.get_news()?;
+    assert_eq!(news_list.len(), 0);
+
+    clear_output();
+    Ok(())
+}
+
+#[test]
+fn test_all_error_types_together() -> Result<(), anyhow::Error> {
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_INTERVAL: u64 = 2;
+    let path = format!("test_output/storage_news_test/{}", generate_random_string());
+
+    let storage_config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&storage_config)?);
+
+    let current_block_hash =
+        BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+            .unwrap();
+
+    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+
+    let tx_id_1 =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
+    let tx_id_2 =
+        Txid::from_str("f9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b").unwrap();
+    let tx_id_3 =
+        Txid::from_str("09b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200c").unwrap();
+    let tx_id_4 =
+        Txid::from_str("19b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200d").unwrap();
+
+    // Add all different types of error news
+    store.update_news(
+        CoordinatorNews::TransactionAlreadyInMempool(tx_id_1, "context1".to_string()),
+        current_block_hash,
+    )?;
+    store.update_news(
+        CoordinatorNews::MempoolRejection(
+            tx_id_2,
+            "context2".to_string(),
+            "mempool full".to_string(),
+        ),
+        current_block_hash,
+    )?;
+    store.update_news(
+        CoordinatorNews::NetworkError(
+            tx_id_3,
+            "context3".to_string(),
+            "network timeout".to_string(),
+        ),
+        current_block_hash,
+    )?;
+    store.update_news(
+        CoordinatorNews::DispatchTransactionError(
+            tx_id_4,
+            "context4".to_string(),
+            "invalid tx".to_string(),
+        ),
+        current_block_hash,
+    )?;
+
+    // Verify all news are stored
+    let news_list = store.get_news()?;
+    assert_eq!(news_list.len(), 4);
+
+    // Verify each type is present
+    let mut found_already_in_mempool = false;
+    let mut found_mempool_rejection = false;
+    let mut found_network_error = false;
+    let mut found_dispatch_error = false;
+
+    for news in &news_list {
+        match news {
+            CoordinatorNews::TransactionAlreadyInMempool(id, _) => {
+                assert_eq!(*id, tx_id_1);
+                found_already_in_mempool = true;
+            }
+            CoordinatorNews::MempoolRejection(id, _, _) => {
+                assert_eq!(*id, tx_id_2);
+                found_mempool_rejection = true;
+            }
+            CoordinatorNews::NetworkError(id, _, _) => {
+                assert_eq!(*id, tx_id_3);
+                found_network_error = true;
+            }
+            CoordinatorNews::DispatchTransactionError(id, _, _) => {
+                assert_eq!(*id, tx_id_4);
+                found_dispatch_error = true;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(
+        found_already_in_mempool,
+        "TransactionAlreadyInMempool news not found"
+    );
+    assert!(found_mempool_rejection, "MempoolRejection news not found");
+    assert!(found_network_error, "NetworkError news not found");
+    assert!(
+        found_dispatch_error,
+        "DispatchTransactionError news not found"
+    );
+
+    // Acknowledge all news
+    store.ack_news(AckCoordinatorNews::TransactionAlreadyInMempool(tx_id_1))?;
+    store.ack_news(AckCoordinatorNews::MempoolRejection(tx_id_2))?;
+    store.ack_news(AckCoordinatorNews::NetworkError(tx_id_3))?;
+    store.ack_news(AckCoordinatorNews::DispatchTransactionError(tx_id_4))?;
+
+    // Verify all news are acknowledged
+    let news_list = store.get_news()?;
+    assert_eq!(news_list.len(), 0);
+
+    clear_output();
+    Ok(())
+}
+
+#[test]
+fn test_transaction_state_failed_on_fatal_error() -> Result<(), anyhow::Error> {
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_INTERVAL: u64 = 2;
+    let path = format!("test_output/storage_news_test/{}", generate_random_string());
+
+    let storage_config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&storage_config)?);
+
+    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+
+    let tx = Transaction {
+        version: Version::TWO,
+        lock_time: LockTime::ZERO,
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id = tx.compute_txid();
+
+    // Save the transaction
+    store.save_tx(tx.clone(), None, None, "test_context".to_string())?;
+
+    // Mark transaction as failed (simulating fatal error handling)
+    store.update_tx_state(tx_id, TransactionState::Failed)?;
+
+    // Verify the transaction is marked as failed
+    let saved_tx = store.get_tx(&tx_id)?;
+    assert_eq!(saved_tx.state, TransactionState::Failed);
 
     clear_output();
     Ok(())

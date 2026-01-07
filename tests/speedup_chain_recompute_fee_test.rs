@@ -13,7 +13,6 @@ use tracing::info;
 mod utils;
 
 #[test]
-#[ignore]
 fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 

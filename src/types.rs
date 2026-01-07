@@ -225,6 +225,23 @@ pub enum CoordinatorNews {
     /// - u64: The estimate feerate from the node
     /// - u64: The max allowed feerate from settings
     EstimateFeerateTooHigh(u64, u64),
+
+    /// Transaction is already in mempool (treated as success)
+    /// - Txid: The transaction ID that is already in mempool
+    /// - String: Context information about the transaction
+    TransactionAlreadyInMempool(Txid, String),
+
+    /// Mempool rejection (retryable error)
+    /// - Txid: The transaction ID that was rejected
+    /// - String: Context information about the transaction
+    /// - String: Error message describing the rejection
+    MempoolRejection(Txid, String, String),
+
+    /// Network or connection error (retryable error)
+    /// - Txid: The transaction ID that failed due to network issues
+    /// - String: Context information about the transaction
+    /// - String: Error message describing the network error
+    NetworkError(Txid, String, String),
 }
 
 impl News {
@@ -242,6 +259,9 @@ pub enum AckCoordinatorNews {
     DispatchSpeedUpError(Txid),
     EstimateFeerateTooHigh(u64, u64),
     FundingNotFound,
+    TransactionAlreadyInMempool(Txid),
+    MempoolRejection(Txid),
+    NetworkError(Txid),
 }
 
 pub enum AckNews {

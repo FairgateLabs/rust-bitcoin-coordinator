@@ -1,4 +1,4 @@
-use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
+use bitcoin::{Amount, OutPoint};
 use bitcoind::bitcoind::BitcoindFlags;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClientApi;
 use console::style;

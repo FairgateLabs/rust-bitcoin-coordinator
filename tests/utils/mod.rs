@@ -197,6 +197,8 @@ pub fn create_store() -> BitcoinCoordinatorStore {
 }
 
 pub fn config_trace_aux() {
+    use tracing_subscriber::util::SubscriberInitExt;
+
     let default_modules = [
         "info",
         "libp2p=off",
@@ -215,12 +217,12 @@ pub fn config_trace_aux() {
         .parse(default_modules.join(","))
         .expect("Invalid filter");
 
-    tracing_subscriber::fmt()
-        //.without_time()
-        //.with_ansi(false)
+    // Try to set the global default, but ignore if it's already set
+    // This allows multiple tests to call this function without panicking
+    let _ = tracing_subscriber::fmt()
         .with_target(true)
         .with_env_filter(filter)
-        .init();
+        .try_init();
 }
 
 pub fn coordinate_tx(

@@ -406,35 +406,68 @@ impl BitcoinCoordinator {
                     txs_sent.push(tx);
                 }
                 Err(e) => {
-                    error!(
-                        "{} Error Sending Transaction({})",
-                        style("Coordinator").green(),
-                        style(tx.tx_id).blue()
-                    );
-
-                    // TODO: Handle specific errors when we send a tx and decide what to do.
                     let error_msg = e.to_string();
 
-                    // let coordinator_error = if error_msg.contains("already in mempool") {
-                    //     BitcoinCoordinatorError::TransactionAlreadyInMempool(tx.tx_id.to_string())
-                    // } else if error_msg.contains("mempool full")
-                    //     || error_msg.contains("insufficient priority")
-                    // {
-                    //     BitcoinCoordinatorError::MempoolFull(error_msg.clone())
-                    // } else if error_msg.contains("network") || error_msg.contains("connection") {
-                    //     BitcoinCoordinatorError::NetworkError(error_msg.clone())
-                    // } else {
-                    //     BitcoinCoordinatorError::BitcoinClientError(e)
-                    // };
-
-                    let news = CoordinatorNews::DispatchTransactionError(
-                        tx.tx_id,
-                        tx.context.clone(),
-                        error_msg,
+                    error!(
+                        "{} Error Sending Transaction({}): {}",
+                        style("Coordinator").green(),
+                        style(tx.tx_id).blue(),
+                        error_msg
                     );
 
-                    self.update_news(news)?;
-                    self.store.increment_tx_retry_count(tx.tx_id)?;
+                    if error_msg.contains("already in mempool")
+                        || error_msg.contains("Transaction outputs already in utxo set")
+                    {
+                        // Caso feliz disfrazado de error - la transacción ya está en mempool o blockchain
+                        let deliver_block_height = self.monitor.get_monitor_height()?;
+
+                        self.store
+                            .update_tx_to_dispatched(tx.tx_id, deliver_block_height)?;
+
+                        let news = CoordinatorNews::TransactionAlreadyInMempool(
+                            tx.tx_id,
+                            tx.context.clone(),
+                        );
+
+                        self.update_news(news)?;
+                        txs_sent.push(tx);
+                    } else if error_msg.contains("mempool full")
+                        || error_msg.contains("insufficient priority")
+                        || error_msg.contains("min relay fee")
+                    {
+                        self.store.increment_tx_retry_count(tx.tx_id)?;
+
+                        let news = CoordinatorNews::MempoolRejection(
+                            tx.tx_id,
+                            tx.context.clone(),
+                            error_msg,
+                        );
+
+                        self.update_news(news)?;
+                    } else if error_msg.contains("network")
+                        || error_msg.contains("connection")
+                        || error_msg.contains("timeout")
+                    {
+                        // Infra error
+                        self.store.increment_tx_retry_count(tx.tx_id)?;
+
+                        let news =
+                            CoordinatorNews::NetworkError(tx.tx_id, tx.context.clone(), error_msg);
+
+                        self.update_news(news)?;
+                    } else {
+                        // Unkwnon error
+                        self.store
+                            .update_tx_state(tx.tx_id, TransactionState::Failed)?;
+
+                        let news = CoordinatorNews::DispatchTransactionError(
+                            tx.tx_id,
+                            tx.context.clone(),
+                            error_msg,
+                        );
+
+                        self.update_news(news)?;
+                    }
                 }
             }
         }

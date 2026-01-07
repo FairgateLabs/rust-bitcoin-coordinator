@@ -26,6 +26,9 @@ enum StoreKey {
     InsufficientFundsNewsList,
     FundingNotFoundNews,
     EstimateFeerateTooHighNewsList,
+    TransactionAlreadyInMempoolNewsList,
+    MempoolRejectionNewsList,
+    NetworkErrorNewsList,
 }
 pub trait BitcoinCoordinatorStoreApi {
     fn save_tx(
@@ -104,6 +107,13 @@ impl BitcoinCoordinatorStore {
             StoreKey::EstimateFeerateTooHighNewsList => {
                 format!("{prefix}/news/estimate_feerate_too_high")
             }
+            StoreKey::TransactionAlreadyInMempoolNewsList => {
+                format!("{prefix}/news/transaction_already_in_mempool")
+            }
+            StoreKey::MempoolRejectionNewsList => {
+                format!("{prefix}/news/mempool_rejection")
+            }
+            StoreKey::NetworkErrorNewsList => format!("{prefix}/news/network_error"),
         }
     }
 
@@ -425,6 +435,72 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
                 self.store.set(&key, &news_list, None)?;
             }
+            CoordinatorNews::TransactionAlreadyInMempool(tx_id, context) => {
+                let key = self.get_key(StoreKey::TransactionAlreadyInMempoolNewsList);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
+                    .unwrap_or_default();
+
+                let is_new_news = news_list.iter().position(|(id, _, _)| id == &tx_id);
+
+                if is_new_news.is_none() {
+                    news_list.push((tx_id, context, (current_block_hash, false)));
+                } else {
+                    let pos = is_new_news.unwrap();
+                    let (_, _, (last_block_hash, _)) = &news_list[pos];
+
+                    if last_block_hash != &current_block_hash {
+                        news_list[pos] = (tx_id, context, (current_block_hash, false));
+                    }
+                }
+
+                self.store.set(&key, &news_list, None)?;
+            }
+            CoordinatorNews::MempoolRejection(tx_id, context, error) => {
+                let key = self.get_key(StoreKey::MempoolRejectionNewsList);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
+                    .unwrap_or_default();
+
+                let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
+
+                if is_new_news.is_none() {
+                    news_list.push((tx_id, context, error, (current_block_hash, false)));
+                } else {
+                    let pos = is_new_news.unwrap();
+                    let (_, _, _, (last_block_hash, _)) = &news_list[pos];
+
+                    if last_block_hash != &current_block_hash {
+                        news_list[pos] = (tx_id, context, error, (current_block_hash, false));
+                    }
+                }
+
+                self.store.set(&key, &news_list, None)?;
+            }
+            CoordinatorNews::NetworkError(tx_id, context, error) => {
+                let key = self.get_key(StoreKey::NetworkErrorNewsList);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
+                    .unwrap_or_default();
+
+                let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
+
+                if is_new_news.is_none() {
+                    news_list.push((tx_id, context, error, (current_block_hash, false)));
+                } else {
+                    let pos = is_new_news.unwrap();
+                    let (_, _, _, (last_block_hash, _)) = &news_list[pos];
+
+                    if last_block_hash != &current_block_hash {
+                        news_list[pos] = (tx_id, context, error, (current_block_hash, false));
+                    }
+                }
+
+                self.store.set(&key, &news_list, None)?;
+            }
         }
         Ok(())
     }
@@ -498,6 +574,45 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 if let Some((block_hash, _)) = news {
                     news = Some((block_hash, true));
                     self.store.set(&key, news, None)?;
+                }
+            }
+            AckCoordinatorNews::TransactionAlreadyInMempool(tx_id) => {
+                let key = self.get_key(StoreKey::TransactionAlreadyInMempoolNewsList);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
+                    .unwrap_or_default();
+
+                if let Some(pos) = news_list.iter().position(|(id, _, _)| *id == tx_id) {
+                    let (_, _, (_, ack)) = &mut news_list[pos];
+                    *ack = true;
+                    self.store.set(&key, &news_list, None)?;
+                }
+            }
+            AckCoordinatorNews::MempoolRejection(tx_id) => {
+                let key = self.get_key(StoreKey::MempoolRejectionNewsList);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
+                    .unwrap_or_default();
+
+                if let Some(pos) = news_list.iter().position(|(id, _, _, _)| *id == tx_id) {
+                    let (_, _, _, (_, ack)) = &mut news_list[pos];
+                    *ack = true;
+                    self.store.set(&key, &news_list, None)?;
+                }
+            }
+            AckCoordinatorNews::NetworkError(tx_id) => {
+                let key = self.get_key(StoreKey::NetworkErrorNewsList);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
+                    .unwrap_or_default();
+
+                if let Some(pos) = news_list.iter().position(|(id, _, _, _)| *id == tx_id) {
+                    let (_, _, _, (_, ack)) = &mut news_list[pos];
+                    *ack = true;
+                    self.store.set(&key, &news_list, None)?;
                 }
             }
         }
@@ -575,6 +690,45 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                         estimate_fee,
                         max_allowed,
                     ));
+                }
+            }
+        }
+
+        // Get transaction already in mempool news
+        let already_in_mempool_key = self.get_key(StoreKey::TransactionAlreadyInMempoolNewsList);
+        if let Some(news_list) = self
+            .store
+            .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&already_in_mempool_key)?
+        {
+            for (tx_id, context, (_, acked)) in news_list {
+                if !acked {
+                    all_news.push(CoordinatorNews::TransactionAlreadyInMempool(tx_id, context));
+                }
+            }
+        }
+
+        // Get mempool rejection news
+        let mempool_rejection_key = self.get_key(StoreKey::MempoolRejectionNewsList);
+        if let Some(news_list) = self
+            .store
+            .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&mempool_rejection_key)?
+        {
+            for (tx_id, context, error, (_, acked)) in news_list {
+                if !acked {
+                    all_news.push(CoordinatorNews::MempoolRejection(tx_id, context, error));
+                }
+            }
+        }
+
+        // Get network error news
+        let network_error_key = self.get_key(StoreKey::NetworkErrorNewsList);
+        if let Some(news_list) = self
+            .store
+            .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&network_error_key)?
+        {
+            for (tx_id, context, error, (_, acked)) in news_list {
+                if !acked {
+                    all_news.push(CoordinatorNews::NetworkError(tx_id, context, error));
                 }
             }
         }
