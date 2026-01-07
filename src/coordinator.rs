@@ -415,58 +415,55 @@ impl BitcoinCoordinator {
                         error_msg
                     );
 
-                    if error_msg.contains("already in mempool")
+                    let (news, should_push_to_sent) = if error_msg.contains("already in mempool")
                         || error_msg.contains("Transaction outputs already in utxo set")
                     {
-                        // Caso feliz disfrazado de error - la transacción ya está en mempool o blockchain
                         let deliver_block_height = self.monitor.get_monitor_height()?;
 
                         self.store
                             .update_tx_to_dispatched(tx.tx_id, deliver_block_height)?;
 
+                        // The transaction is already in mempool or blockchain, so we acknowledge it. Could be a border case or a bug.
                         let news = CoordinatorNews::TransactionAlreadyInMempool(
                             tx.tx_id,
                             tx.context.clone(),
                         );
-
-                        self.update_news(news)?;
-                        txs_sent.push(tx);
+                        (news, true)
                     } else if error_msg.contains("mempool full")
                         || error_msg.contains("insufficient priority")
                         || error_msg.contains("min relay fee")
                     {
                         self.store.increment_tx_retry_count(tx.tx_id)?;
-
                         let news = CoordinatorNews::MempoolRejection(
                             tx.tx_id,
                             tx.context.clone(),
                             error_msg,
                         );
-
-                        self.update_news(news)?;
+                        (news, false)
                     } else if error_msg.contains("network")
                         || error_msg.contains("connection")
                         || error_msg.contains("timeout")
                     {
                         // Infra error
                         self.store.increment_tx_retry_count(tx.tx_id)?;
-
                         let news =
                             CoordinatorNews::NetworkError(tx.tx_id, tx.context.clone(), error_msg);
-
-                        self.update_news(news)?;
+                        (news, false)
                     } else {
                         // Unkwnon error
                         self.store
                             .update_tx_state(tx.tx_id, TransactionState::Failed)?;
-
                         let news = CoordinatorNews::DispatchTransactionError(
                             tx.tx_id,
                             tx.context.clone(),
                             error_msg,
                         );
+                        (news, false)
+                    };
 
-                        self.update_news(news)?;
+                    self.update_news(news)?;
+                    if should_push_to_sent {
+                        txs_sent.push(tx);
                     }
                 }
             }
