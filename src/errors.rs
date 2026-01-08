@@ -83,6 +83,9 @@ pub enum BitcoinCoordinatorError {
 
     #[error("Transaction too heavy: {0}, weight: {1}, max weight: {2}")]
     TransactionTooHeavy(String, u64, u64),
+
+    #[error("Invalid configuration: {0}")]
+    InvalidConfiguration(String),
 }
 
 #[derive(Error, Debug)]
