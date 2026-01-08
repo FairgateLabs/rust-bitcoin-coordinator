@@ -1,19 +1,17 @@
 use bitcoin::{Address, Amount, CompressedPublicKey, Network, OutPoint};
-use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
+use bitcoind::{bitcoind::{Bitcoind, BitcoindFlags}, config::BitcoindConfig};
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     rpc_config::RpcConfig,
 };
 use console::style;
 use key_manager::create_key_manager_from_config;
-use key_manager::key_store::KeyStore;
 use key_manager::{config::KeyManagerConfig, key_type::BitcoinKeyType};
 use protocol_builder::{
     builder::ProtocolBuilder,
     types::{output::SpeedupData, Utxo},
 };
 use std::{rc::Rc, vec};
-use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 use tracing::info;
 use utils::{generate_random_string, generate_tx};
@@ -29,7 +27,6 @@ fn replacement_cycling_test() -> Result<(), anyhow::Error> {
     let network = Network::Regtest;
     let path = format!("test_output/test/{}", generate_random_string());
     let storage_config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&storage_config).unwrap());
     let config_bitcoin_client = RpcConfig::new(
         network,
         "http://127.0.0.1:18443".to_string(),
@@ -42,14 +39,12 @@ fn replacement_cycling_test() -> Result<(), anyhow::Error> {
         Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
     let bitcoin_client = BitcoinClient::new_from_config(&config_bitcoin_client)?;
 
-    let bitcoind = Bitcoind::new_with_flags(
-        "bitcoin-regtest",
-        "bitcoin/bitcoin:29.1",
-        config_bitcoin_client.clone(),
-        BitcoindFlags {
+    let bitcoind = Bitcoind::new(
+        BitcoindConfig::default(),
+        Some(BitcoindFlags {
             block_min_tx_fee: 0.00002,
             ..Default::default()
-        },
+        }),
     );
 
     info!("{} Starting bitcoind", style("Test").green());

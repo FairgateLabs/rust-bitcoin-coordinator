@@ -1,6 +1,6 @@
 use bitcoin::{Address, Amount, CompressedPublicKey, Network};
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
-use bitcoind::bitcoind::Bitcoind;
+use bitcoind::{bitcoind::Bitcoind, config::BitcoindConfig};
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     rpc_config::RpcConfig,
@@ -41,13 +41,8 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     let key_manager =
         Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
     let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
-    
-    let bitcoind_config = BitcoindConfig::new(
-        "bitcoin-regtest".to_string(),
-        "bitcoin/bitcoin:29.1".to_string(),
-        None,
-        config_bitcoin_client.clone()
-    );
+
+    let bitcoind_config = BitcoindConfig::default();
 
     let bitcoind = Bitcoind::new(
         bitcoind_config,

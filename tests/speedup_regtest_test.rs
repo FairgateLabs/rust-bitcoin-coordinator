@@ -5,7 +5,7 @@ use bitcoin_coordinator::{
     types::AckNews,
     AckMonitorNews, MonitorNews, TypesToMonitor,
 };
-use bitcoind::bitcoind::Bitcoind;
+use bitcoind::{bitcoind::Bitcoind, config::BitcoindConfig};
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     rpc_config::RpcConfig,
@@ -70,9 +70,8 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
     let bitcoin_client = BitcoinClient::new_from_config(&config_bitcoin_client)?;
 
     let bitcoind = Bitcoind::new(
-        "bitcoin-regtest",
-        "bitcoin/bitcoin:29.1",
-        config_bitcoin_client.clone(),
+        BitcoindConfig::default(),
+        None,
     );
 
     info!("{} Starting bitcoind", style("Test").green());

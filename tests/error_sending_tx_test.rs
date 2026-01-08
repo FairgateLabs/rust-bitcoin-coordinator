@@ -3,7 +3,7 @@ use bitcoin_coordinator::{
     config::CoordinatorSettingsConfig,
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
 };
-use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
+use bitcoind::{bitcoind::{Bitcoind, BitcoindFlags}, config::BitcoindConfig};
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     rpc_config::RpcConfig,
@@ -49,14 +49,12 @@ fn error_sending_tx_test() -> Result<(), anyhow::Error> {
         Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
     let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
 
-    let bitcoind = Bitcoind::new_with_flags(
-        "bitcoin-regtest",
-        "ruimarinho/bitcoin-core",
-        config_bitcoin_client.clone(),
-        BitcoindFlags {
+    let bitcoind = Bitcoind::new(
+        BitcoindConfig::default(),
+        Some(BitcoindFlags {
             block_min_tx_fee: 0.00002,
             ..Default::default()
-        },
+        }),
     );
 
     info!("{} Starting bitcoind", style("Test").green());
