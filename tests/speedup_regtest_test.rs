@@ -71,6 +71,7 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
 
     let bitcoind = Bitcoind::new(
         BitcoindConfig::default(),
+        config_bitcoin_client.clone(),
         None,
     );
 

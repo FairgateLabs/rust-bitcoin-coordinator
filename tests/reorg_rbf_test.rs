@@ -51,6 +51,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     let bitcoind = Bitcoind::new(
         BitcoindConfig::default(),
+        config_bitcoin_client.clone(),
         Some(BitcoindFlags {
             block_min_tx_fee: 0.00004,
             ..Default::default()

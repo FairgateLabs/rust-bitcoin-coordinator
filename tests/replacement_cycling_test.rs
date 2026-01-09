@@ -41,6 +41,7 @@ fn replacement_cycling_test() -> Result<(), anyhow::Error> {
 
     let bitcoind = Bitcoind::new(
         BitcoindConfig::default(),
+        config_bitcoin_client.clone(),
         Some(BitcoindFlags {
             block_min_tx_fee: 0.00002,
             ..Default::default()

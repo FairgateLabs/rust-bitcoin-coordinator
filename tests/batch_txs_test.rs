@@ -46,6 +46,7 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
 
     let bitcoind = Bitcoind::new(
         bitcoind_config,
+        config_bitcoin_client.clone(),
         None
     );
 
