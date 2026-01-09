@@ -3,14 +3,13 @@ use bitcoin_coordinator::{
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
     MonitorNews,
 };
-use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
+use bitcoind::{bitcoind::{Bitcoind, BitcoindFlags}, config::BitcoindConfig};
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     rpc_config::RpcConfig,
 };
 use console::style;
 use key_manager::create_key_manager_from_config;
-use key_manager::key_store::KeyStore;
 use key_manager::{config::KeyManagerConfig, key_type::BitcoinKeyType};
 use protocol_builder::types::Utxo;
 use std::rc::Rc;
@@ -50,14 +49,13 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
     let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
 
-    let bitcoind = Bitcoind::new_with_flags(
-        "bitcoin-regtest",
-        "bitcoin/bitcoin:29.1",
+    let bitcoind = Bitcoind::new(
+        BitcoindConfig::default(),
         config_bitcoin_client.clone(),
-        BitcoindFlags {
+        Some(BitcoindFlags {
             block_min_tx_fee: 0.00004,
             ..Default::default()
-        },
+        }),
     );
 
     info!("{} Starting bitcoind", style("Test").green());
