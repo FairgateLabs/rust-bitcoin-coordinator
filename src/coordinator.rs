@@ -138,6 +138,12 @@ impl BitcoinCoordinator {
             return Ok(());
         }
 
+        info!(
+            "{} Number of transactions to dispatch {}",
+            style("Coordinator").green(),
+            style(pending_txs.len()).yellow()
+        );
+
         let txs_to_dispatch: Vec<CoordinatedTransaction> = pending_txs
             .iter()
             .filter(|tx| self.should_dispatch_tx(tx).unwrap_or(false))
@@ -389,7 +395,7 @@ impl BitcoinCoordinator {
 
         for tx in txs {
             info!(
-                "{} Send Transaction({})",
+                "{} Sending Transaction({})",
                 style("Coordinator").green(),
                 style(tx.tx_id).yellow(),
             );
@@ -398,6 +404,11 @@ impl BitcoinCoordinator {
 
             match dispatch_result {
                 Ok(_) => {
+                    info!(
+                        "{} Sent Transaction({}) to mempool",
+                        style("Coordinator").green(),
+                        style(tx.tx_id).yellow(),
+                    );
                     let deliver_block_height = self.monitor.get_monitor_height()?;
 
                     self.store
@@ -432,6 +443,7 @@ impl BitcoinCoordinator {
                     } else if error_msg.contains("mempool full")
                         || error_msg.contains("insufficient priority")
                         || error_msg.contains("min relay fee")
+                        || error_msg.contains("mempool min fee not met")
                     {
                         self.store.increment_tx_retry_count(tx.tx_id)?;
                         let news = CoordinatorNews::MempoolRejection(

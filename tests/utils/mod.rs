@@ -356,6 +356,32 @@ pub fn create_and_start_bitcoind(
     info!("{} Starting bitcoind", style("Test").green());
     bitcoind.start()?;
 
+    // Wait for bitcoind to be ready to accept RPC connections
+    // Try to ping bitcoind with retries
+    use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
+    use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClientApi;
+    let bitcoin_client = BitcoinClient::new_from_config(config_bitcoin_client)?;
+    let mut retries = 0;
+    const MAX_RETRIES: u32 = 30; // Increase retries for slower systems
+    loop {
+        match bitcoin_client.get_best_block() {
+            Ok(_) => {
+                info!("{} Bitcoind is ready", style("Test").green());
+                break;
+            }
+            Err(_) => {
+                if retries >= MAX_RETRIES {
+                    return Err(anyhow::anyhow!(
+                        "Bitcoind failed to become ready after {} retries",
+                        MAX_RETRIES
+                    ));
+                }
+                retries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(1000)); // Increase wait time
+            }
+        }
+    }
+
     Ok(bitcoind)
 }
 
