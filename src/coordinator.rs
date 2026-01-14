@@ -58,15 +58,15 @@ pub trait BitcoinCoordinatorApi {
     /// * `tx` - The Bitcoin transaction to dispatch
     /// * `speedup` - Speed up information for the transaction (None means it should not be speed up)
     /// * `context` - Additional context information for the transaction to be returned in news
-    /// * `number_confirmation_trigger` - Just trigger news when the transaction has exactly this number of confirmations (None means all confirmations)
     /// * `block_height` - Block height to dispatch the transaction (None means now)
+    /// * `number_confirmation_trigger` - Just trigger news when the transaction has exactly this number of confirmations (None means all confirmations)
     fn dispatch(
         &self,
         tx: Transaction,
         speedup: Option<SpeedupData>,
         context: String,
-        number_confirmation_trigger: Option<u32>,
         block_height: Option<BlockHeight>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorError>;
 
     /// Cancels the monitor and the dispatch of a type of data
@@ -1179,8 +1179,8 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         tx: Transaction,
         speedup_data: Option<SpeedupData>,
         context: String,
-        number_confirmation_trigger: Option<u32>,
         target_block_height: Option<BlockHeight>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorError> {
         let to_monitor = TypesToMonitor::Transactions(
             vec![tx.compute_txid()],
