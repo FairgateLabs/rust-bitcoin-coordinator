@@ -5,6 +5,7 @@ use bitcoin_coordinator::errors::TxBuilderHelperError;
 use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::TypesToMonitor;
 use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
+use bitcoind::config::BitcoindConfig;
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi, MockBitcoinClient};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_transaction_monitor::monitor::MockMonitorApi;
@@ -336,51 +337,16 @@ pub fn create_and_start_bitcoind(
     config_bitcoin_client: &RpcConfig,
     flags: Option<BitcoindFlags>,
 ) -> Result<Bitcoind, anyhow::Error> {
-    const BITCOIND_IMAGE: &str = "bitcoin/bitcoin:29.1";
-
-    let bitcoind = if let Some(flags) = flags {
-        Bitcoind::new_with_flags(
-            "bitcoin-regtest",
-            BITCOIND_IMAGE,
-            config_bitcoin_client.clone(),
-            flags,
-        )
-    } else {
-        Bitcoind::new(
-            "bitcoin-regtest",
-            BITCOIND_IMAGE,
-            config_bitcoin_client.clone(),
-        )
-    };
+    let bitcoind_config = BitcoindConfig::default();
+    let bitcoind = Bitcoind::new(bitcoind_config, config_bitcoin_client.clone(), flags);
 
     info!("{} Starting bitcoind", style("Test").green());
-    bitcoind.start()?;
-
-    // Wait for bitcoind to be ready to accept RPC connections
-    // Try to ping bitcoind with retries
-    use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
-    use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClientApi;
-    let bitcoin_client = BitcoinClient::new_from_config(config_bitcoin_client)?;
-    let mut retries = 0;
-    const MAX_RETRIES: u32 = 30; // Increase retries for slower systems
-    loop {
-        match bitcoin_client.get_best_block() {
-            Ok(_) => {
-                info!("{} Bitcoind is ready", style("Test").green());
-                break;
-            }
-            Err(_) => {
-                if retries >= MAX_RETRIES {
-                    return Err(anyhow::anyhow!(
-                        "Bitcoind failed to become ready after {} retries",
-                        MAX_RETRIES
-                    ));
-                }
-                retries += 1;
-                std::thread::sleep(std::time::Duration::from_millis(1000)); // Increase wait time
-            }
-        }
-    }
+    bitcoind.start().map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to start bitcoind: {:?}. Make sure Docker is running.",
+            e
+        )
+    })?;
 
     Ok(bitcoind)
 }

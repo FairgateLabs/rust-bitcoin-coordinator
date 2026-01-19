@@ -28,10 +28,10 @@ pub const DEFAULT_MAX_TX_WEIGHT: u64 = 400_000;
 pub const DEFAULT_MAX_RBF_ATTEMPTS: u32 = 10;
 
 // Minimum funding amount in sats to ensure sufficient funds for speedups
-pub const DEFAULT_MIN_FUNDING_AMOUNT_SATS: u64 = 10000;
+pub const DEFAULT_MIN_FUNDING_AMOUNT_SATS: u64 = 10_000;
 
 // Fee percentage increase for RBF (150% of original fee)
-pub const DEFAULT_RBF_FEE_PERCENTAGE: f64 = 1.5;
+pub const DEFAULT_RBF_FEE_MULTIPLIER: f64 = 1.5;
 
 // Minimum blocks to wait before attempting to resend a speedup transaction (CPFP or RBF)
 pub const DEFAULT_MIN_BLOCKS_BEFORE_RESEND_SPEEDUP: u32 = 1;

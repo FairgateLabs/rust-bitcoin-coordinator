@@ -60,13 +60,14 @@ pub trait BitcoinCoordinatorApi {
     /// * `context` - Additional context information for the transaction to be returned in news
     /// * `number_confirmation_trigger` - Just trigger news when the transaction has exactly this number of confirmations (None means all confirmations)
     /// * `block_height` - Block height to dispatch the transaction (None means now)
+    /// * `number_confirmation_trigger` - Just trigger news when the transaction has exactly this number of confirmations (None means all confirmations)
     fn dispatch(
         &self,
         tx: Transaction,
         speedup: Option<SpeedupData>,
         context: String,
-        number_confirmation_trigger: Option<u32>,
         block_height: Option<BlockHeight>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorError>;
 
     /// Cancels the monitor and the dispatch of a type of data
@@ -108,8 +109,10 @@ impl BitcoinCoordinator {
         let monitor_settings = settings.clone().unwrap_or_default().monitor_settings;
         let monitor = Monitor::new_with_paths(rpc_config, storage.clone(), monitor_settings)?;
 
-        let coordinator_settings: CoordinatorSettings =
-            CoordinatorSettings::from(settings.unwrap_or_default());
+        let settings_config = settings.unwrap_or_default();
+        settings_config.validate()?;
+
+        let coordinator_settings: CoordinatorSettings = CoordinatorSettings::from(settings_config);
 
         let store = BitcoinCoordinatorStore::new(
             storage,
@@ -364,20 +367,27 @@ impl BitcoinCoordinator {
         }
 
         if dispatch_result.is_ok() {
+            let dispatch_block = self.client.get_best_block()?;
+
+            // Update broadcast_block_height with the block where the transaction was dispatched
+            let mut speedup_data_with_block = speedup_data;
+            speedup_data_with_block.broadcast_block_height = dispatch_block;
+
             self.monitor.monitor(TypesToMonitor::Transactions(
-                vec![speedup_data.tx_id],
+                vec![speedup_data_with_block.tx_id],
                 CPFP_TRANSACTION_CONTEXT.to_string(),
                 None,
             ))?;
 
             info!(
-                "{} Successfully sent {} Transaction({})",
+                "{} Successfully sent {} Transaction({}) dispatched at block height {}",
                 style("Coordinator").green(),
                 speedup_type,
-                style(speedup_data.tx_id).yellow(),
+                style(speedup_data_with_block.tx_id).yellow(),
+                style(dispatch_block).blue(),
             );
 
-            self.store.save_speedup(speedup_data)?;
+            self.store.save_speedup(speedup_data_with_block)?;
 
             if retry_txid.is_some() {
                 self.store.dequeue_speedup_for_retry(retry_txid.unwrap())?;
@@ -404,15 +414,17 @@ impl BitcoinCoordinator {
 
             match dispatch_result {
                 Ok(_) => {
+                    let dispatch_block = self.client.get_best_block()?;
+
                     info!(
-                        "{} Sent Transaction({}) to mempool",
+                        "{} Transaction({}) dispatched at block height {}",
                         style("Coordinator").green(),
                         style(tx.tx_id).yellow(),
+                        style(dispatch_block).blue(),
                     );
-                    let deliver_block_height = self.monitor.get_monitor_height()?;
 
                     self.store
-                        .update_tx_to_dispatched(tx.tx_id, deliver_block_height)?;
+                        .update_tx_to_dispatched(tx.tx_id, dispatch_block)?;
 
                     txs_sent.push(tx);
                 }
@@ -795,14 +807,12 @@ impl BitcoinCoordinator {
             &funding.pub_key,
         );
 
-        let monitor_height = self.monitor.get_monitor_height()?;
-
         let speedup_data = CoordinatedSpeedUpTransaction::new(
             speedup_tx_id,
             funding,
             new_funding_utxo,
             is_rbf,
-            monitor_height,
+            0, // Temporary value, will be updated after send_transaction
             SpeedupState::Dispatched,
             bump_fee,
             txs_data,
@@ -1221,8 +1231,8 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         tx: Transaction,
         speedup_data: Option<SpeedupData>,
         context: String,
-        number_confirmation_trigger: Option<u32>,
         target_block_height: Option<BlockHeight>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorError> {
         let to_monitor = TypesToMonitor::Transactions(
             vec![tx.compute_txid()],
