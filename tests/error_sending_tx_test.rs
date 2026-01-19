@@ -1,101 +1,57 @@
-use bitcoin::{Address, Amount, CompressedPublicKey, Network};
+use bitcoin::Amount;
 use bitcoin_coordinator::{
     config::CoordinatorSettingsConfig,
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
 };
-use bitcoind::{bitcoind::{Bitcoind, BitcoindFlags}, config::BitcoindConfig};
-use bitvmx_bitcoin_rpc::{
-    bitcoin_client::{BitcoinClient, BitcoinClientApi},
-    rpc_config::RpcConfig,
-};
-use console::style;
-use key_manager::create_key_manager_from_config;
-use key_manager::{config::KeyManagerConfig, key_type::BitcoinKeyType};
+use bitcoind::bitcoind::BitcoindFlags;
+use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClientApi;
 use protocol_builder::types::Utxo;
 use std::rc::Rc;
-use storage_backend::storage::Storage;
-use storage_backend::storage_config::StorageConfig;
 use tracing::info;
-use utils::generate_random_string;
 
-use crate::utils::{config_trace_aux, coordinate_tx};
+use crate::utils::{config_trace_aux, coordinate_tx, create_test_setup, TestSetupConfig};
 mod utils;
 
-// This test verifies the behavior of the BitcoinCoordinator when an error occurs while sending a transaction.
+// This test verifies the behavior of the BitcoinCoordinator when an error occurs while sending a speedup transaction (either CPFP or RBF).
 //
 // The test procedure includes:
-// - Dispatching a transaction that requires funding.
-// - Asserting that the coordinator performs exactly the configured number of retries.
-// - Validating that the retry count matches the retry_attempts_sending_tx setting.
+// - Dispatching a transaction that requires a speedup (e.g., CPFP).
+// - Intentionally causing an error by using an invalid funding UTXO for the speedup transaction.
+// - Asserting that the coordinator accurately reports the error.
 #[test]
-#[ignore = "This test works, but it runs in regtest with a bitcoind running"]
-fn error_sending_tx_test() -> Result<(), anyhow::Error> {
+fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
-    let network = Network::Regtest;
-    let path = format!("test_output/test/{}", generate_random_string());
-    let storage_config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&storage_config).unwrap());
-    let config_bitcoin_client = RpcConfig::new(
-        network,
-        "http://127.0.0.1:18443".to_string(),
-        "foo".to_string(),
-        "rpcpassword".to_string(),
-        "test_wallet".to_string(),
-    );
-    let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
-    let key_manager =
-        Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
-    let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
-
-    let bitcoind = Bitcoind::new(
-        BitcoindConfig::default(),
-        config_bitcoin_client.clone(),
-        Some(BitcoindFlags {
+    let setup = create_test_setup(TestSetupConfig {
+        blocks_mined,
+        bitcoind_flags: Some(BitcoindFlags {
             block_min_tx_fee: 0.00002,
             ..Default::default()
         }),
-    );
-
-    info!("{} Starting bitcoind", style("Test").green());
-    bitcoind.start()?;
-
-    info!("{} Creating keypair in key manager", style("Test").green());
-    let public_key = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0).unwrap();
-    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
-    let funding_wallet = Address::p2wpkh(&compressed, network);
-    let regtest_wallet = bitcoin_client.init_wallet("test_wallet").unwrap();
-
-    info!(
-        "{} Mine {} blocks to address {:?}",
-        style("Test").green(),
-        blocks_mined,
-        regtest_wallet
-    );
+    })?;
 
     let amount = Amount::from_sat(23450000);
-
-    bitcoin_client
-        .mine_blocks_to_address(blocks_mined, &regtest_wallet)
-        .unwrap();
-
-    let (funding_speedup, funding_speedup_vout) =
-        bitcoin_client.fund_address(&funding_wallet, amount)?;
 
     // Increment the block count after mining 1 block to fund the address
     blocks_mined += 1;
 
+    let (funding_speedup, _) = setup
+        .bitcoin_client
+        .fund_address(&setup.funding_wallet, amount)?;
+
+    // Increment the block count after mining 1 block for the funding speedup transaction
+    blocks_mined += 1;
+
     const RETRY_INTERVAL_SECONDS: u64 = 1;
-    const EXPECTED_RETRIES: u32 = 3;
     let mut settings = CoordinatorSettingsConfig::default();
-    settings.retry_attempts_sending_tx = Some(EXPECTED_RETRIES);
+    settings.retry_attempts_sending_tx = Some(4);
     settings.retry_interval_seconds = Some(RETRY_INTERVAL_SECONDS);
 
     let coordinator = Rc::new(BitcoinCoordinator::new_with_paths(
-        &config_bitcoin_client,
-        storage.clone(),
-        key_manager.clone(),
+        &setup.config_bitcoin_client,
+        setup.storage.clone(),
+        setup.key_manager.clone(),
         Some(settings),
     )?);
 
@@ -104,77 +60,111 @@ fn error_sending_tx_test() -> Result<(), anyhow::Error> {
         coordinator.tick()?;
     }
 
+    // Add funding for the speedup transaction using an invalid output index to trigger an error
     coordinator.add_funding(Utxo::new(
         funding_speedup.compute_txid(),
-        funding_speedup_vout,
+        10,
         amount.to_sat(),
-        &public_key,
+        &setup.public_key,
     ))?;
 
     coordinator.tick()?;
 
-    // Dispatch the first transaction that will fail due to invalid UTXO
     coordinate_tx(
         coordinator.clone(),
         amount,
-        network,
-        key_manager.clone(),
-        bitcoin_client.clone(),
-        Some(0),
+        setup.network,
+        setup.key_manager.clone(),
+        setup.bitcoin_client.clone(),
+        None,
     )?;
 
-    // Mine a block to confirm the initial funding transaction
-    bitcoin_client
-        .mine_blocks_to_address(1, &funding_wallet)
+    // Mine a block to confirm the initial transactions (tx1 and speedup tx)
+    setup
+        .bitcoin_client
+        .mine_blocks_to_address(1, &setup.funding_wallet)
         .unwrap();
     coordinator.tick()?;
 
-    // Track the number of error notifications we receive
-    let mut error_count = 0;
+    // First tick: Attempt to send the transaction for the first time, expecting an error
+    info!("Should print error 1");
+    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
+    coordinator.tick()?;
 
-    // Process retries: we expect 1 initial attempt + EXPECTED_RETRIES retries
-    // The coordinator will:
-    // 1. Try to send the transaction initially (fails due to invalid UTXO)
-    // 2. Queue it for retry and increment retry count on each failure
-    // 3. Stop retrying after reaching the configured retry_attempts_sending_tx limit
-    for attempt in 0..=EXPECTED_RETRIES {
-        // Wait for retry interval (except for first attempt)
-        if attempt > 0 {
-            std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
-        }
+    // Second tick: Retry sending the transaction, expecting another error
+    info!("Should print error 2");
+    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
+    coordinator.tick()?;
 
+    setup
+        .bitcoin_client
+        .mine_blocks_to_address(1, &setup.funding_wallet)
+        .unwrap();
+    coordinator.tick()?;
+
+    // Third tick: Retry sending the transaction again, expecting a third error
+    info!("Should print error 3");
+    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
+    coordinator.tick()?;
+
+    // Before the final retry, update the funding with a valid UTXO to allow successful dispatch
+    let (funding_speedup, funding_vout) = setup
+        .bitcoin_client
+        .fund_address(&setup.funding_wallet, amount)?;
+
+    coordinator.add_funding(Utxo::new(
+        funding_speedup.compute_txid(),
+        funding_vout,
+        amount.to_sat(),
+        &setup.public_key,
+    ))?;
+
+    coordinator.tick()?;
+
+    // Dispatch a new transaction (tx2) to be processed
+    coordinate_tx(
+        coordinator.clone(),
+        amount,
+        setup.network,
+        setup.key_manager.clone(),
+        setup.bitcoin_client.clone(),
+        None,
+    )?;
+
+    // Mine 5 blocks to confirm transaction tx2 and its speedup transaction
+    for _ in 0..5 {
         coordinator.tick()?;
 
-        // Check for error notifications
-        let news = coordinator.get_news()?;
-        for news_item in &news.coordinator_news {
-            if let bitcoin_coordinator::types::CoordinatorNews::DispatchTransactionError(_, _, _) =
-                news_item
-            {
-                error_count += 1;
-                info!("Error notification {} received", error_count);
-            }
-        }
+        setup
+            .bitcoin_client
+            .mine_blocks_to_address(1, &setup.funding_wallet)
+            .unwrap();
 
-        // Mine a block every few attempts to keep the chain moving
-        if attempt % 2 == 0 {
-            bitcoin_client
-                .mine_blocks_to_address(1, &funding_wallet)
-                .unwrap();
-            coordinator.tick()?;
-        }
+        coordinator.tick()?;
     }
 
-    // Verify that we received exactly the expected number of error notifications
-    // We should get 1 error for the initial attempt + EXPECTED_RETRIES errors for retries
-    let expected_errors = 1 + EXPECTED_RETRIES;
-    assert_eq!(
-        error_count, expected_errors as usize,
-        "Expected {} error notifications (1 initial + {} retries), but got {}",
-        expected_errors, EXPECTED_RETRIES, error_count
-    );
+    // Wait for the retry interval to pass before the final retry
+    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECONDS));
 
-    bitcoind.stop()?;
+    // Mine 5 more blocks to ensure transaction tx2 and its speedup transaction are confirmed
+    for _ in 0..5 {
+        coordinator.tick()?;
+
+        setup
+            .bitcoin_client
+            .mine_blocks_to_address(1, &setup.funding_wallet)
+            .unwrap();
+
+        coordinator.tick()?;
+    }
+
+    let news = coordinator.get_news()?;
+    // Verify that there is one error notification due to retrying, and two confirmed transactions.
+    // Note that although there were three retry attempts, only one error notification is present.
+    assert_eq!(news.coordinator_news.len(), 1);
+    assert_eq!(news.monitor_news.len(), 2);
+
+    setup.bitcoind.stop()?;
 
     Ok(())
 }

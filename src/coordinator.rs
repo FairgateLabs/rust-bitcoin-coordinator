@@ -59,12 +59,14 @@ pub trait BitcoinCoordinatorApi {
     /// * `speedup` - Speed up information for the transaction (None means it should not be speed up)
     /// * `context` - Additional context information for the transaction to be returned in news
     /// * `block_height` - Block height to dispatch the transaction (None means now)
+    /// * `number_confirmation_trigger` - Just trigger news when the transaction has exactly this number of confirmations (None means all confirmations)
     fn dispatch(
         &self,
         tx: Transaction,
         speedup: Option<SpeedupData>,
         context: String,
         block_height: Option<BlockHeight>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorError>;
 
     /// Cancels the monitor and the dispatch of a type of data
@@ -361,6 +363,7 @@ impl BitcoinCoordinator {
             self.monitor.monitor(TypesToMonitor::Transactions(
                 vec![speedup_data.tx_id],
                 CPFP_TRANSACTION_CONTEXT.to_string(),
+                None,
             ))?;
 
             info!(
@@ -1155,7 +1158,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
     }
 
     fn monitor(&self, data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError> {
-        if let TypesToMonitor::Transactions(txs, _) = data.clone() {
+        if let TypesToMonitor::Transactions(txs, _, _) = data.clone() {
             if txs.is_empty() {
                 return Err(BitcoinCoordinatorError::BitcoinCoordinatorError(
                     "transactions array is empty".to_string(),
@@ -1179,8 +1182,13 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         speedup_data: Option<SpeedupData>,
         context: String,
         target_block_height: Option<BlockHeight>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorError> {
-        let to_monitor = TypesToMonitor::Transactions(vec![tx.compute_txid()], context.clone());
+        let to_monitor = TypesToMonitor::Transactions(
+            vec![tx.compute_txid()],
+            context.clone(),
+            number_confirmation_trigger,
+        );
         self.monitor.monitor(to_monitor)?;
 
         // Save the transaction to be dispatched.
@@ -1199,7 +1207,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
     fn cancel(&self, data: TypesToMonitor) -> Result<(), BitcoinCoordinatorError> {
         self.monitor.cancel(data.clone())?;
 
-        if let TypesToMonitor::Transactions(txs, _) = data {
+        if let TypesToMonitor::Transactions(txs, _, _) = data {
             for tx in txs {
                 self.store.remove_tx(tx)?;
             }

@@ -1,78 +1,32 @@
-use bitcoin::{Address, Amount, CompressedPublicKey, Network};
+use bitcoin::Amount;
 use bitcoin_coordinator::coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi};
-use bitcoind::{bitcoind::Bitcoind, config::BitcoindConfig};
-use bitvmx_bitcoin_rpc::{
-    bitcoin_client::{BitcoinClient, BitcoinClientApi},
-    rpc_config::RpcConfig,
-};
+use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClientApi;
 use console::style;
-use key_manager::create_key_manager_from_config;
-use key_manager::{config::KeyManagerConfig, key_type::BitcoinKeyType};
 use protocol_builder::types::Utxo;
 use std::rc::Rc;
-use storage_backend::storage::Storage;
-use storage_backend::storage_config::StorageConfig;
 use tracing::info;
-use utils::generate_random_string;
 
-use crate::utils::{config_trace_aux, coordinate_tx};
+use crate::utils::{config_trace_aux, coordinate_tx, create_test_setup, TestSetupConfig};
 mod utils;
 
+// This is a integration test.
 // The idea of this test is to dispatch a lot of txs and check if the coordinator can handle it.
 // What we are testing is the batch dispatching of txs. So should be able to dispatch 200 txs in a single tick and create 3 CPFPs.
 #[test]
-#[ignore = "This test requires a running bitcoind in regtest mode"]
 fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
-    let network = Network::Regtest;
-    let path = format!("test_output/test/{}", generate_random_string());
-    let storage_config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&storage_config).unwrap());
-    let config_bitcoin_client = RpcConfig::new(
-        network,
-        "http://127.0.0.1:18443".to_string(),
-        "foo".to_string(),
-        "rpcpassword".to_string(),
-        "test_wallet".to_string(),
-    );
-    let key_manager_config = KeyManagerConfig::new(network.to_string(), None, None);
-    let key_manager =
-        Rc::new(create_key_manager_from_config(&key_manager_config, &storage_config).unwrap());
-    let bitcoin_client = Rc::new(BitcoinClient::new_from_config(&config_bitcoin_client)?);
-
-    let bitcoind_config = BitcoindConfig::default();
-
-    let bitcoind = Bitcoind::new(
-        bitcoind_config,
-        config_bitcoin_client.clone(),
-        None
-    );
-
-    info!("{} Starting bitcoind", style("Test").green());
-    bitcoind.start()?;
-
-    info!("{} Creating keypair in key manager", style("Test").green());
-    let public_key = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0).unwrap();
-    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
-    let funding_wallet = Address::p2wpkh(&compressed, network);
-    let regtest_wallet = bitcoin_client.init_wallet("test_wallet").unwrap();
-
-    info!(
-        "{} Mine {} blocks to address {:?}",
-        style("Test").green(),
+    let setup = create_test_setup(TestSetupConfig {
         blocks_mined,
-        regtest_wallet
-    );
+        bitcoind_flags: None,
+    })?;
 
     let amount = Amount::from_sat(23450000);
 
-    bitcoin_client
-        .mine_blocks_to_address(blocks_mined, &regtest_wallet)
-        .unwrap();
-
-    let (funding_tx, funding_vout) = bitcoin_client.fund_address(&funding_wallet, amount)?;
+    let (funding_tx, funding_vout) = setup
+        .bitcoin_client
+        .fund_address(&setup.funding_wallet, amount)?;
 
     // Fund address mines 1 block
     blocks_mined = blocks_mined + 1;
@@ -80,7 +34,7 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     info!(
         "{} Funding tx address {:?}",
         style("Test").green(),
-        funding_wallet
+        setup.funding_wallet
     );
 
     info!(
@@ -90,8 +44,9 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         funding_vout
     );
 
-    let (funding_speedup, funding_speedup_vout) =
-        bitcoin_client.fund_address(&funding_wallet, amount)?;
+    let (funding_speedup, funding_speedup_vout) = setup
+        .bitcoin_client
+        .fund_address(&setup.funding_wallet, amount)?;
 
     // Funding speed up tx mines 1 block
     blocks_mined = blocks_mined + 1;
@@ -104,9 +59,9 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     );
 
     let coordinator = Rc::new(BitcoinCoordinator::new_with_paths(
-        &config_bitcoin_client,
-        storage.clone(),
-        key_manager.clone(),
+        &setup.config_bitcoin_client,
+        setup.storage.clone(),
+        setup.key_manager.clone(),
         None,
     )?);
 
@@ -121,7 +76,7 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         funding_speedup.compute_txid(),
         funding_speedup_vout,
         amount.to_sat(),
-        &public_key,
+        &setup.public_key,
     ))?;
 
     // Create 60 txs with funding and dispatch them using the coordinator.
@@ -129,9 +84,9 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         coordinate_tx(
             coordinator.clone(),
             amount,
-            network,
-            key_manager.clone(),
-            bitcoin_client.clone(),
+            setup.network,
+            setup.key_manager.clone(),
+            setup.bitcoin_client.clone(),
             None,
         )?;
     }
@@ -141,7 +96,9 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         coordinator.tick()?;
     }
 
-    bitcoin_client.mine_blocks_to_address(1, &funding_wallet)?;
+    setup
+        .bitcoin_client
+        .mine_blocks_to_address(1, &setup.funding_wallet)?;
 
     coordinator.tick()?;
 
@@ -155,7 +112,9 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         coordinator.tick()?;
     }
 
-    bitcoin_client.mine_blocks_to_address(1, &funding_wallet)?;
+    setup
+        .bitcoin_client
+        .mine_blocks_to_address(1, &setup.funding_wallet)?;
 
     coordinator.tick()?;
 
@@ -166,14 +125,16 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         coordinator.tick()?;
     }
 
-    bitcoin_client.mine_blocks_to_address(1, &funding_wallet)?;
+    setup
+        .bitcoin_client
+        .mine_blocks_to_address(1, &setup.funding_wallet)?;
 
     coordinator.tick()?;
 
     let news = coordinator.get_news()?;
     assert_eq!(news.monitor_news.len(), 60);
 
-    bitcoind.stop()?;
+    setup.bitcoind.stop()?;
 
     Ok(())
 }
