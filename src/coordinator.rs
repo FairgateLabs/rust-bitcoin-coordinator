@@ -360,20 +360,27 @@ impl BitcoinCoordinator {
         }
 
         if dispatch_result.is_ok() {
+            let dispatch_block = self.client.get_best_block()?;
+
+            // Update broadcast_block_height with the block where the transaction was dispatched
+            let mut speedup_data_with_block = speedup_data;
+            speedup_data_with_block.broadcast_block_height = dispatch_block;
+
             self.monitor.monitor(TypesToMonitor::Transactions(
-                vec![speedup_data.tx_id],
+                vec![speedup_data_with_block.tx_id],
                 CPFP_TRANSACTION_CONTEXT.to_string(),
                 None,
             ))?;
 
             info!(
-                "{} Successfully sent {} Transaction({})",
+                "{} Successfully sent {} Transaction({}) dispatched at block height {}",
                 style("Coordinator").green(),
                 speedup_type,
-                style(speedup_data.tx_id).yellow(),
+                style(speedup_data_with_block.tx_id).yellow(),
+                style(dispatch_block).blue(),
             );
 
-            self.store.save_speedup(speedup_data)?;
+            self.store.save_speedup(speedup_data_with_block)?;
 
             if retry_txid.is_some() {
                 self.store.dequeue_speedup_for_retry(retry_txid.unwrap())?;
@@ -400,10 +407,17 @@ impl BitcoinCoordinator {
 
             match dispatch_result {
                 Ok(_) => {
-                    let deliver_block_height = self.monitor.get_monitor_height()?;
+                    let dispatch_block = self.client.get_best_block()?;
+
+                    info!(
+                        "{} Transaction({}) dispatched at block height {}",
+                        style("Coordinator").green(),
+                        style(tx.tx_id).yellow(),
+                        style(dispatch_block).blue(),
+                    );
 
                     self.store
-                        .update_tx_to_dispatched(tx.tx_id, deliver_block_height)?;
+                        .update_tx_to_dispatched(tx.tx_id, dispatch_block)?;
 
                     txs_sent.push(tx);
                 }
@@ -755,14 +769,12 @@ impl BitcoinCoordinator {
             &funding.pub_key,
         );
 
-        let monitor_height = self.monitor.get_monitor_height()?;
-
         let speedup_data = CoordinatedSpeedUpTransaction::new(
             speedup_tx_id,
             funding,
             new_funding_utxo,
             is_rbf,
-            monitor_height,
+            0, // Temporary value, will be updated after send_transaction
             SpeedupState::Dispatched,
             bump_fee,
             txs_data,
