@@ -360,16 +360,7 @@ impl BitcoinCoordinator {
         }
 
         if dispatch_result.is_ok() {
-            let dispatch_block = self
-                .client
-                .get_mempool_entry(&speedup_data.tx_id)
-                .map_err(|e| {
-                    BitcoinCoordinatorError::BitcoinCoordinatorError(format!(
-                        "Failed to get mempool entry after sending speedup transaction: {}",
-                        e
-                    ))
-                })?
-                .height as u32;
+            let dispatch_block = self.client.get_best_block()?;
 
             // Update broadcast_block_height with the block where the transaction was dispatched
             let mut speedup_data_with_block = speedup_data;
@@ -416,16 +407,7 @@ impl BitcoinCoordinator {
 
             match dispatch_result {
                 Ok(_) => {
-                    let dispatch_block = self
-                        .client
-                        .get_mempool_entry(&tx.tx_id)
-                        .map_err(|e| {
-                            BitcoinCoordinatorError::BitcoinCoordinatorError(format!(
-                                "Failed to get mempool entry after sending transaction: {}",
-                                e
-                            ))
-                        })?
-                        .height as u32;
+                    let dispatch_block = self.client.get_best_block()?;
 
                     info!(
                         "{} Transaction({}) dispatched at block height {}",
