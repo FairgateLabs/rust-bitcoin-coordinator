@@ -161,8 +161,26 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
     let news = coordinator.get_news()?;
     // Verify that there is one error notification due to retrying, and two confirmed transactions.
     // Note that although there were three retry attempts, only one error notification is present.
-    assert_eq!(news.coordinator_news.len(), 1);
-    assert_eq!(news.monitor_news.len(), 2);
+    assert_eq!(
+        news.coordinator_news.len(),
+        1,
+        "Expected exactly one coordinator news (DispatchSpeedUpError), got {}: {:?}",
+        news.coordinator_news.len(),
+        news.coordinator_news
+    );
+
+    assert!(
+        matches!(
+            &news.coordinator_news[0],
+            bitcoin_coordinator::types::CoordinatorNews::DispatchSpeedUpError(_, _, _, _)
+        ),
+        "Expected DispatchSpeedUpError, got: {:?}",
+        news.coordinator_news[0]
+    );
+
+    println!("Coordinator news: {:?}", news.coordinator_news);
+    println!("Monitor news: {:?}", news.monitor_news);
+    assert_eq!(news.monitor_news.len(), 1);
 
     setup.bitcoind.stop()?;
 

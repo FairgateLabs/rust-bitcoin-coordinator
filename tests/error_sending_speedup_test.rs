@@ -159,10 +159,36 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
     }
 
     let news = coordinator.get_news()?;
-    // Verify that there is one error notification due to retrying, and two confirmed transactions.
-    // Note that although there were three retry attempts, only one error notification is present.
-    assert_eq!(news.coordinator_news.len(), 1);
-    assert_eq!(news.monitor_news.len(), 2);
+    // Verify error notifications and confirmed transactions.
+    // The error "bad-txns-inputs-missingorspent" is now classified as "Other" (non-retryable),
+    // so it's reported immediately as DispatchSpeedUpError.
+    // There should be just one error notification for the failed CPFP attempt.
+    assert_eq!(
+        news.coordinator_news.len(),
+        1,
+        "Expected exactly one coordinator news (DispatchSpeedUpError), got {}: {:?}",
+        news.coordinator_news.len(),
+        news.coordinator_news
+    );
+
+    assert!(
+        matches!(
+            &news.coordinator_news[0],
+            bitcoin_coordinator::types::CoordinatorNews::DispatchSpeedUpError(_, _, _, _)
+        ),
+        "Expected DispatchSpeedUpError, got: {:?}",
+        news.coordinator_news[0]
+    );
+
+    // Verify monitor news: should be exactly 1 (tx2 confirmed, tx1's CPFP failed so it may not be confirmed)
+    // Note: CPFP transactions are filtered out from monitor_news
+    assert_eq!(
+        news.monitor_news.len(),
+        1,
+        "Expected exactly one monitor news (tx2 confirmed), got {}: {:?}",
+        news.monitor_news.len(),
+        news.monitor_news
+    );
 
     setup.bitcoind.stop()?;
 
