@@ -521,7 +521,7 @@ impl BitcoinCoordinator {
                             self.store
                                 .update_tx_to_dispatched(tx.tx_id, deliver_block_height)?;
 
-                            // The transaction is already in mempool or blockchain, so we acknowledge it. Could be a border case or a bug.
+                            // The transaction is already in mempool or blockchain, so we acknowledge it.
                             let news = CoordinatorNews::TransactionAlreadyInMempool(
                                 tx.tx_id,
                                 tx.context.clone(),
