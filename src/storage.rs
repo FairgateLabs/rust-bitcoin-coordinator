@@ -134,12 +134,12 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let key = self.get_key(StoreKey::Transaction(*tx_id));
         let tx = self.store.get::<&str, CoordinatedTransaction>(&key)?;
 
-        if tx.is_none() {
+        if let Some(tx) = tx {
+            Ok(tx)
+        } else {
             let message = format!("Transaction not found: {tx_id}");
-            return Err(BitcoinCoordinatorStoreError::TransactionNotFound(message));
+            Err(BitcoinCoordinatorStoreError::TransactionNotFound(message))
         }
-
-        Ok(tx.unwrap())
     }
 
     fn get_txs_in_progress(
@@ -173,16 +173,15 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             let tx = self.get_tx(&tx_id)?;
 
             if tx.state == TransactionState::ToDispatch {
-                if tx.retry_info.is_none() {
-                    txs_filter.push(tx);
-                } else {
-                    let retry_info = tx.retry_info.as_ref().unwrap();
+                if let Some(retry_info) = &tx.retry_info {
                     if retry_info.retries_count < self.retry_attempts_sending_tx
                         && Utc::now().timestamp_millis() as u64 - retry_info.last_retry_timestamp
                             >= self.retry_interval_seconds * 1000
                     {
                         txs_filter.push(tx);
                     }
+                } else {
+                    txs_filter.push(tx);
                 }
             }
         }
@@ -319,13 +318,8 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
                 let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
 
-                if is_new_news.is_none() {
-                    // Insert news with current block hash and ack in false
-                    news_list.push((tx_id, amount, required, (current_block_hash, false)));
-                } else {
-                    let pos = is_new_news.unwrap();
+                if let Some(pos) = is_new_news {
                     let (_, _, _, (existing_block_hash, _)) = &news_list[pos];
-
                     if existing_block_hash == &current_block_hash {
                         // We already have this news, do not update
                         return Ok(());
@@ -333,6 +327,9 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                         // Replace the notification if the block hash is different
                         news_list[pos] = (tx_id, amount, required, (current_block_hash, false));
                     }
+                } else {
+                    // Insert news with current block hash and ack in false
+                    news_list.push((tx_id, amount, required, (current_block_hash, false)));
                 }
 
                 self.store.set(&key, &news_list, None)?;
@@ -346,17 +343,16 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
                 let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
 
-                if is_new_news.is_none() {
-                    // Insert news if it doesn't already exist
-                    news_list.push((tx_id, context, error, (current_block_hash, false)));
-                } else {
-                    let pos = is_new_news.unwrap();
+                if let Some(pos) = is_new_news {
                     let (_, _, _, (last_block_hash, _)) = &news_list[pos];
 
                     if last_block_hash != &current_block_hash {
                         // Update the news if the block hash is different
                         news_list[pos] = (tx_id, context, error, (current_block_hash, false));
                     }
+                } else {
+                    // Insert news if it doesn't already exist
+                    news_list.push((tx_id, context, error, (current_block_hash, false)));
                 }
 
                 self.store.set(&key, &news_list, None)?;
@@ -374,11 +370,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                     .iter()
                     .position(|(ids, _, id, _, _)| ids == &tx_ids && id == &txid);
 
-                if is_new_news.is_none() {
-                    // Insert news if it doesn't already exist
-                    news_list.push((tx_ids, contexts, txid, error, (current_block_hash, false)));
-                } else {
-                    let pos = is_new_news.unwrap();
+                if let Some(pos) = is_new_news {
                     let (_, _, _, _, (last_block_hash, _)) = &news_list[pos];
 
                     info!("last_block_hash: {:?} ", last_block_hash);
@@ -388,6 +380,9 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                         news_list[pos] =
                             (tx_ids, contexts, txid, error, (current_block_hash, false));
                     }
+                } else {
+                    // Insert news if it doesn't already exist
+                    news_list.push((tx_ids, contexts, txid, error, (current_block_hash, false)));
                 }
 
                 self.store.set(&key, &news_list, None)?;
@@ -396,17 +391,14 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::FundingNotFoundNews);
                 let news = self.store.get::<&str, (BlockHash, bool)>(&key)?;
 
-                // Check if there is no existing news for "FundingNotFound"
-                if news.is_none() {
-                    // If no existing news, set the current block hash and mark it as not acknowledged
-                    self.store.set(&key, (current_block_hash, false), None)?;
-                } else {
-                    // If there is existing news, unpack the block hash and acknowledgment status
-                    let (last_block_hash, _) = news.unwrap();
-                    // If the existing block hash is different from the current one, update the store
+                if let Some((last_block_hash, _)) = news {
+                    // If there is existing news, check if the block hash differs
                     if last_block_hash != current_block_hash {
                         self.store.set(&key, (current_block_hash, false), None)?;
                     }
+                } else {
+                    // If no existing news, set the current block hash and mark it as not acknowledged
+                    self.store.set(&key, (current_block_hash, false), None)?;
                 }
             }
             CoordinatorNews::EstimateFeerateTooHigh(estimate_fee, max_allowed) => {
@@ -420,17 +412,16 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                     .iter()
                     .position(|(fee, max, _)| *fee == estimate_fee && *max == max_allowed);
 
-                if is_new_news.is_none() {
-                    // Insert news if it doesn't already exist
-                    news_list.push((estimate_fee, max_allowed, (current_block_hash, false)));
-                } else {
-                    let pos = is_new_news.unwrap();
+                if let Some(pos) = is_new_news {
                     let (_, _, (last_block_hash, _)) = &news_list[pos];
 
                     if last_block_hash != &current_block_hash {
                         // Replace the notification if the block hash is different
                         news_list[pos] = (estimate_fee, max_allowed, (current_block_hash, false));
                     }
+                } else {
+                    // Insert news if it doesn't already exist
+                    news_list.push((estimate_fee, max_allowed, (current_block_hash, false)));
                 }
 
                 self.store.set(&key, &news_list, None)?;
@@ -444,15 +435,14 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
                 let is_new_news = news_list.iter().position(|(id, _, _)| id == &tx_id);
 
-                if is_new_news.is_none() {
-                    news_list.push((tx_id, context, (current_block_hash, false)));
-                } else {
-                    let pos = is_new_news.unwrap();
+                if let Some(pos) = is_new_news {
                     let (_, _, (last_block_hash, _)) = &news_list[pos];
 
                     if last_block_hash != &current_block_hash {
                         news_list[pos] = (tx_id, context, (current_block_hash, false));
                     }
+                } else {
+                    news_list.push((tx_id, context, (current_block_hash, false)));
                 }
 
                 self.store.set(&key, &news_list, None)?;
@@ -466,15 +456,14 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
                 let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
 
-                if is_new_news.is_none() {
-                    news_list.push((tx_id, context, error, (current_block_hash, false)));
-                } else {
-                    let pos = is_new_news.unwrap();
+                if let Some(pos) = is_new_news {
                     let (_, _, _, (last_block_hash, _)) = &news_list[pos];
 
                     if last_block_hash != &current_block_hash {
                         news_list[pos] = (tx_id, context, error, (current_block_hash, false));
                     }
+                } else {
+                    news_list.push((tx_id, context, error, (current_block_hash, false)));
                 }
 
                 self.store.set(&key, &news_list, None)?;
@@ -488,15 +477,13 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
                 let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
 
-                if is_new_news.is_none() {
-                    news_list.push((tx_id, context, error, (current_block_hash, false)));
-                } else {
-                    let pos = is_new_news.unwrap();
+                if let Some(pos) = is_new_news {
                     let (_, _, _, (last_block_hash, _)) = &news_list[pos];
-
                     if last_block_hash != &current_block_hash {
                         news_list[pos] = (tx_id, context, error, (current_block_hash, false));
                     }
+                } else {
+                    news_list.push((tx_id, context, error, (current_block_hash, false)));
                 }
 
                 self.store.set(&key, &news_list, None)?;

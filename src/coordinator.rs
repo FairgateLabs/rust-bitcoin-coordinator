@@ -287,18 +287,17 @@ impl BitcoinCoordinator {
         &self,
         txs_info: (Vec<Txid>, Vec<String>),
         speedup_type: String,
-        retry_attempts_count: Option<u32>,
+        is_retry_tx: bool,
         speedup_tx_id: Txid,
         tx: Transaction,
         dispatch_error: String,
     ) -> Result<(), BitcoinCoordinatorError> {
-        if retry_attempts_count.is_some() {
+        if is_retry_tx {
             warn!(
-                "{} Error Resending {} Transaction({}) | RetryAttempt({})",
+                "{} Error Resending {} Transaction({}) | IsRetryTx",
                 style("Coordinator").green(),
                 speedup_type,
                 style(speedup_tx_id).yellow(),
-                retry_attempts_count.unwrap(),
             );
         } else {
             error!(
@@ -416,7 +415,7 @@ impl BitcoinCoordinator {
                         self.inform_dispatch_speedup_error(
                             txs_info.clone(),
                             speedup_type.clone(),
-                            None,
+                            retry_txid.is_some(),
                             speedup_data.tx_id,
                             tx.clone(),
                             error_msg,
@@ -445,7 +444,7 @@ impl BitcoinCoordinator {
                         self.inform_dispatch_speedup_error(
                             txs_info.clone(),
                             speedup_type.clone(),
-                            None,
+                            retry_txid.is_some(),
                             speedup_data.tx_id,
                             tx.clone(),
                             error_msg,
