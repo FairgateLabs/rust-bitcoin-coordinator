@@ -572,8 +572,7 @@ impl BitcoinCoordinator {
                     let ack = AckMonitorNews::Transaction(tx_status.tx_id);
                     self.monitor.ack_news(ack)?;
 
-                    if tx_status
-                        .is_finalized(self.settings.monitor_settings.max_monitoring_confirmations)
+                    if tx_status.is_finalized(self.settings.monitor_settings.confirmation_threshold)
                     {
                         // Once the transaction is finalized, we are not monitoring it anymore.
                         self.store
@@ -617,8 +616,7 @@ impl BitcoinCoordinator {
                         style(tx_status.confirmations).blue(),
                     );
 
-                    if tx_status
-                        .is_finalized(self.settings.monitor_settings.max_monitoring_confirmations)
+                    if tx_status.is_finalized(self.settings.monitor_settings.confirmation_threshold)
                     {
                         // Once the transaction is finalized, we are not monitoring it anymore.
                         self.store
