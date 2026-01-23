@@ -198,6 +198,8 @@ pub fn create_store() -> BitcoinCoordinatorStore {
 }
 
 pub fn config_trace_aux() {
+    use tracing_subscriber::util::SubscriberInitExt;
+
     let default_modules = [
         "info",
         "libp2p=off",
@@ -216,12 +218,12 @@ pub fn config_trace_aux() {
         .parse(default_modules.join(","))
         .expect("Invalid filter");
 
-    tracing_subscriber::fmt()
-        //.without_time()
-        //.with_ansi(false)
+    // Try to set the global default, but ignore if it's already set
+    // This allows multiple tests to call this function without panicking
+    let _ = tracing_subscriber::fmt()
         .with_target(true)
         .with_env_filter(filter)
-        .init();
+        .try_init();
 }
 
 pub fn coordinate_tx(
@@ -339,7 +341,12 @@ pub fn create_and_start_bitcoind(
     let bitcoind = Bitcoind::new(bitcoind_config, config_bitcoin_client.clone(), flags);
 
     info!("{} Starting bitcoind", style("Test").green());
-    bitcoind.start().map_err(|e| anyhow::anyhow!("Failed to start bitcoind: {:?}. Make sure Docker is running.", e))?;
+    bitcoind.start().map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to start bitcoind: {:?}. Make sure Docker is running.",
+            e
+        )
+    })?;
 
     Ok(bitcoind)
 }

@@ -1,6 +1,6 @@
 use crate::{
     config::{CoordinatorSettings, CoordinatorSettingsConfig},
-    errors::BitcoinCoordinatorError,
+    errors::{BitcoinBroadcastErrorKind, BitcoinCoordinatorError},
     settings::CPFP_TRANSACTION_CONTEXT,
     speedup::SpeedupStore,
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
@@ -139,6 +139,12 @@ impl BitcoinCoordinator {
         if pending_txs.is_empty() {
             return Ok(());
         }
+
+        info!(
+            "{} Number of transactions to dispatch {}",
+            style("Coordinator").green(),
+            style(pending_txs.len()).yellow()
+        );
 
         let txs_to_dispatch: Vec<CoordinatedTransaction> = pending_txs
             .iter()
@@ -281,18 +287,17 @@ impl BitcoinCoordinator {
         &self,
         txs_info: (Vec<Txid>, Vec<String>),
         speedup_type: String,
-        retry_attempts_count: Option<u32>,
+        is_retry_tx: bool,
         speedup_tx_id: Txid,
         tx: Transaction,
         dispatch_error: String,
     ) -> Result<(), BitcoinCoordinatorError> {
-        if retry_attempts_count.is_some() {
+        if is_retry_tx {
             warn!(
-                "{} Error Resending {} Transaction({}) | RetryAttempt({})",
+                "{} Error Resending {} Transaction({}) | IsRetryTx",
                 style("Coordinator").green(),
                 speedup_type,
                 style(speedup_tx_id).yellow(),
-                retry_attempts_count.unwrap(),
             );
         } else {
             error!(
@@ -331,59 +336,126 @@ impl BitcoinCoordinator {
             style(speedup_data.tx_id).yellow(),
         );
 
-        let dispatch_result = self.client.send_transaction(&tx);
-
         let txs_info: (Vec<Txid>, Vec<String>) = speedup_data
             .speedup_tx_data
             .iter()
             .map(|(_, tx, context)| (tx.compute_txid(), context.clone()))
             .collect();
 
-        if dispatch_result.is_err() {
-            self.inform_dispatch_speedup_error(
-                txs_info.clone(),
-                speedup_type.clone(),
-                None,
-                speedup_data.tx_id,
-                tx.clone(),
-                dispatch_result.as_ref().err().as_ref().unwrap().to_string(),
-            )?;
+        let dispatch_result = self.client.send_transaction(&tx);
 
-            if retry_txid.is_some() {
-                self.store
-                    .increment_speedup_retry_count(speedup_data.tx_id)?;
-            } else {
-                self.store.enqueue_speedup_for_retry(speedup_data)?;
+        match dispatch_result {
+            Ok(_) => {
+                let dispatch_block = self.client.get_best_block()?;
+
+                // Update broadcast_block_height with the block where the transaction was dispatched
+                let mut speedup_data_with_block = speedup_data;
+                speedup_data_with_block.broadcast_block_height = dispatch_block;
+
+                self.monitor.monitor(TypesToMonitor::Transactions(
+                    vec![speedup_data_with_block.tx_id],
+                    CPFP_TRANSACTION_CONTEXT.to_string(),
+                    None,
+                ))?;
+
+                info!(
+                    "{} Successfully sent {} Transaction({}) dispatched at block height {}",
+                    style("Coordinator").green(),
+                    speedup_type,
+                    style(speedup_data_with_block.tx_id).yellow(),
+                    style(dispatch_block).blue(),
+                );
+
+                self.store.save_speedup(speedup_data_with_block)?;
+
+                if let Some(retry_txid) = retry_txid {
+                    self.store.dequeue_speedup_for_retry(retry_txid)?;
+                }
             }
+            Err(e) => {
+                let error_msg = e.to_string();
+                let error_kind = BitcoinBroadcastErrorKind::from_error_message(&error_msg);
 
-            return Ok(());
-        }
+                match error_kind {
+                    BitcoinBroadcastErrorKind::AlreadyKnown => {
+                        // The speedup transaction is already known by the node (mempool or blockchain),
+                        // So we just acknowledge it, and warn the user.
+                        warn!(
+                            "{} {} Transaction({}) already known by node: {}",
+                            style("Coordinator").green(),
+                            speedup_type,
+                            style(speedup_data.tx_id).yellow(),
+                            error_msg
+                        );
 
-        if dispatch_result.is_ok() {
-            let dispatch_block = self.client.get_best_block()?;
+                        let dispatch_block = self.client.get_best_block()?;
 
-            // Update broadcast_block_height with the block where the transaction was dispatched
-            let mut speedup_data_with_block = speedup_data;
-            speedup_data_with_block.broadcast_block_height = dispatch_block;
+                        let mut speedup_data_with_block = speedup_data;
+                        speedup_data_with_block.broadcast_block_height = dispatch_block;
 
-            self.monitor.monitor(TypesToMonitor::Transactions(
-                vec![speedup_data_with_block.tx_id],
-                CPFP_TRANSACTION_CONTEXT.to_string(),
-                None,
-            ))?;
+                        self.monitor.monitor(TypesToMonitor::Transactions(
+                            vec![speedup_data_with_block.tx_id],
+                            CPFP_TRANSACTION_CONTEXT.to_string(),
+                            None,
+                        ))?;
 
-            info!(
-                "{} Successfully sent {} Transaction({}) dispatched at block height {}",
-                style("Coordinator").green(),
-                speedup_type,
-                style(speedup_data_with_block.tx_id).yellow(),
-                style(dispatch_block).blue(),
-            );
+                        // Treat as success: persist the speedup so it can be tracked/confirmed/finalized.
+                        self.store.save_speedup(speedup_data_with_block)?;
 
-            self.store.save_speedup(speedup_data_with_block)?;
+                        if let Some(retry_txid) = retry_txid {
+                            self.store.dequeue_speedup_for_retry(retry_txid)?;
+                        }
+                    }
+                    BitcoinBroadcastErrorKind::MempoolRejection
+                    | BitcoinBroadcastErrorKind::NetworkError => {
+                        // Retryable errors (mempool policy / infrastructure).
+                        // If we reach here it's because:
+                        // - this is the first attempt (no `retry_txid`), or
+                        // - the entry came from `get_speedups_for_retry`, which already respected max_retries and intervals.
+                        self.inform_dispatch_speedup_error(
+                            txs_info.clone(),
+                            speedup_type.clone(),
+                            retry_txid.is_some(),
+                            speedup_data.tx_id,
+                            tx.clone(),
+                            error_msg,
+                        )?;
 
-            if retry_txid.is_some() {
-                self.store.dequeue_speedup_for_retry(retry_txid.unwrap())?;
+                        if retry_txid.is_some() {
+                            // Increment the retry counter for an already enqueued entry.
+                            self.store
+                                .increment_speedup_retry_count(speedup_data.tx_id)?;
+                        } else {
+                            // First failure: enqueue for retry with retry_count = 0.
+                            self.store.enqueue_speedup_for_retry(speedup_data)?;
+                        }
+                    }
+                    BitcoinBroadcastErrorKind::Other => {
+                        // Non-retryable error (malformed transaction, invalid inputs, etc.)
+                        // Don't retry, just report the error
+                        error!(
+                            "{} Fatal error sending {} Transaction({}): {} (not retrying)",
+                            style("Coordinator").green(),
+                            speedup_type,
+                            style(speedup_data.tx_id).yellow(),
+                            error_msg
+                        );
+
+                        self.inform_dispatch_speedup_error(
+                            txs_info.clone(),
+                            speedup_type.clone(),
+                            retry_txid.is_some(),
+                            speedup_data.tx_id,
+                            tx.clone(),
+                            error_msg,
+                        )?;
+
+                        // Remove from retry queue if it was there
+                        if let Some(retry_txid) = retry_txid {
+                            self.store.dequeue_speedup_for_retry(retry_txid)?;
+                        }
+                    }
+                }
             }
         }
 
@@ -398,7 +470,7 @@ impl BitcoinCoordinator {
 
         for tx in txs {
             info!(
-                "{} Send Transaction({})",
+                "{} Sending Transaction({})",
                 style("Coordinator").green(),
                 style(tx.tx_id).yellow(),
             );
@@ -422,35 +494,67 @@ impl BitcoinCoordinator {
                     txs_sent.push(tx);
                 }
                 Err(e) => {
-                    error!(
-                        "{} Error Sending Transaction({})",
-                        style("Coordinator").green(),
-                        style(tx.tx_id).blue()
-                    );
-
-                    // TODO: Handle specific errors when we send a tx and decide what to do.
                     let error_msg = e.to_string();
 
-                    // let coordinator_error = if error_msg.contains("already in mempool") {
-                    //     BitcoinCoordinatorError::TransactionAlreadyInMempool(tx.tx_id.to_string())
-                    // } else if error_msg.contains("mempool full")
-                    //     || error_msg.contains("insufficient priority")
-                    // {
-                    //     BitcoinCoordinatorError::MempoolFull(error_msg.clone())
-                    // } else if error_msg.contains("network") || error_msg.contains("connection") {
-                    //     BitcoinCoordinatorError::NetworkError(error_msg.clone())
-                    // } else {
-                    //     BitcoinCoordinatorError::BitcoinClientError(e)
-                    // };
-
-                    let news = CoordinatorNews::DispatchTransactionError(
-                        tx.tx_id,
-                        tx.context.clone(),
-                        error_msg,
+                    error!(
+                        "{} Error Sending Transaction({}): {}",
+                        style("Coordinator").green(),
+                        style(tx.tx_id).blue(),
+                        error_msg
                     );
 
+                    let error_kind = BitcoinBroadcastErrorKind::from_error_message(&error_msg);
+
+                    let (news, should_push_to_sent) = match error_kind {
+                        BitcoinBroadcastErrorKind::AlreadyKnown => {
+                            let deliver_block_height = self.monitor.get_monitor_height()?;
+
+                            self.store
+                                .update_tx_to_dispatched(tx.tx_id, deliver_block_height)?;
+
+                            // The transaction is already in mempool or blockchain, so we acknowledge it.
+                            let news = CoordinatorNews::TransactionAlreadyInMempool(
+                                tx.tx_id,
+                                tx.context.clone(),
+                            );
+                            (news, true)
+                        }
+                        BitcoinBroadcastErrorKind::MempoolRejection => {
+                            self.store.increment_tx_retry_count(tx.tx_id)?;
+                            let news = CoordinatorNews::MempoolRejection(
+                                tx.tx_id,
+                                tx.context.clone(),
+                                error_msg,
+                            );
+                            (news, false)
+                        }
+                        BitcoinBroadcastErrorKind::NetworkError => {
+                            // Infra error
+                            self.store.increment_tx_retry_count(tx.tx_id)?;
+                            let news = CoordinatorNews::NetworkError(
+                                tx.tx_id,
+                                tx.context.clone(),
+                                error_msg,
+                            );
+                            (news, false)
+                        }
+                        BitcoinBroadcastErrorKind::Other => {
+                            // Unknown error
+                            self.store
+                                .update_tx_state(tx.tx_id, TransactionState::Failed)?;
+                            let news = CoordinatorNews::DispatchTransactionError(
+                                tx.tx_id,
+                                tx.context.clone(),
+                                error_msg,
+                            );
+                            (news, false)
+                        }
+                    };
+
                     self.update_news(news)?;
-                    self.store.increment_tx_retry_count(tx.tx_id)?;
+                    if should_push_to_sent {
+                        txs_sent.push(tx);
+                    }
                 }
             }
         }
