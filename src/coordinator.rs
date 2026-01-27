@@ -140,7 +140,7 @@ impl BitcoinCoordinator {
             return Ok(());
         }
 
-        info!(
+        debug!(
             "{} Number of transactions to dispatch {}",
             style("Coordinator").green(),
             style(pending_txs.len()).yellow()
