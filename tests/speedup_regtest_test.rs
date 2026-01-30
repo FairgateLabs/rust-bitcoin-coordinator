@@ -146,7 +146,7 @@ fn speedup_tx() -> Result<(), anyhow::Error> {
         // Ack the news
         match news.monitor_news[0] {
             MonitorNews::Transaction(txid, _, _) => {
-                let ack_news = AckMonitorNews::Transaction(txid);
+                let ack_news = AckMonitorNews::Transaction(txid, "My tx".to_string());
                 coordinator.ack_news(AckNews::Monitor(ack_news))?;
             }
             _ => {

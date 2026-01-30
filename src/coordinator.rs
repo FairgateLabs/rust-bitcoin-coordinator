@@ -673,7 +673,7 @@ impl BitcoinCoordinator {
                     // Handle the case where the transaction is a CPFP (Child Pays For Parent) transaction.
 
                     // First we acknowledge the transaction to clear any related news.
-                    let ack = AckMonitorNews::Transaction(tx_status.tx_id);
+                    let ack = AckMonitorNews::Transaction(tx_status.tx_id, tx.context.clone());
                     self.monitor.ack_news(ack)?;
 
                     if tx_status
