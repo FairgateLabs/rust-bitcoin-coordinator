@@ -126,7 +126,7 @@ fn create_tx_to_speedup(
     key_manager: Rc<KeyManager>,
 ) -> (Transaction, Utxo) {
     // Create the  for funding
-    let external_output = OutputType::segwit_key(origin_amount, &origin_pubkey).unwrap();
+    let external_output = OutputType::segwit_key(origin_amount.into(), &origin_pubkey).unwrap();
 
     let mut protocol = Protocol::new("transfer_tx");
     protocol.add_external_transaction("origin").unwrap();
@@ -146,14 +146,14 @@ fn create_tx_to_speedup(
         .unwrap();
 
     // Add the output for the transfer transaction
-    let transfer_output = OutputType::segwit_key(amount, &to_pubkey).unwrap();
+    let transfer_output = OutputType::segwit_key(amount.into(), &to_pubkey).unwrap();
     protocol
         .add_transaction_output("transfer", &transfer_output)
         .unwrap();
 
     // Add the output for the speed up transaction
-    let speedup_amount = 294; // This is the minimal non-dust output.
-    let speedup_output = OutputType::segwit_key(speedup_amount, &to_pubkey).unwrap();
+    let speedup_amount = 540; // This is the minimal non-dust output.
+    let speedup_output = OutputType::segwit_key(speedup_amount.into(), &to_pubkey).unwrap();
 
     protocol
         .add_transaction_output("transfer", &speedup_output)
@@ -162,7 +162,7 @@ fn create_tx_to_speedup(
     // Add the output for the change
     let change = origin_amount - amount - fee - speedup_amount;
     if change > 0 {
-        let change_output = OutputType::segwit_key(change, &origin_pubkey).unwrap();
+        let change_output = OutputType::segwit_key(change.into(), &origin_pubkey).unwrap();
 
         protocol
             .add_transaction_output("transfer", &change_output)
@@ -198,8 +198,6 @@ pub fn create_store() -> BitcoinCoordinatorStore {
 }
 
 pub fn config_trace_aux() {
-    use tracing_subscriber::util::SubscriberInitExt;
-
     let default_modules = [
         "info",
         "libp2p=off",

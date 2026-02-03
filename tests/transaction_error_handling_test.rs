@@ -32,7 +32,7 @@ fn create_simple_tx(
     num_outputs: Option<u32>, // Optional: number of outputs in the funding transaction
 ) -> Result<Transaction, anyhow::Error> {
     let amount = origin_amount.saturating_sub(fee);
-    let external_output = OutputType::segwit_key(origin_amount, &origin_pubkey)?;
+    let external_output = OutputType::segwit_key(origin_amount.into(), &origin_pubkey)?;
 
     let mut protocol = Protocol::new("transfer_tx");
     protocol.add_external_transaction("origin")?;
@@ -53,7 +53,7 @@ fn create_simple_tx(
     )?;
 
     // Add the output for the transfer transaction (no speedup output)
-    let transfer_output = OutputType::segwit_key(amount, &origin_pubkey)?;
+    let transfer_output = OutputType::segwit_key(amount.into(), &origin_pubkey)?;
     protocol.add_transaction_output("transfer", &transfer_output)?;
 
     protocol.build_and_sign(&key_manager, "id")?;
