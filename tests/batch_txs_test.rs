@@ -17,6 +17,7 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
+    info!("Starting batch_txs_regtest_test with {} initial blocks mined", blocks_mined);
     let setup = create_test_setup(TestSetupConfig {
         blocks_mined,
         bitcoind_flags: None,
@@ -65,13 +66,26 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         None,
     )?);
 
+    info!(
+        "Advancing coordinator by {} ticks to catch up with blockchain height",
+        blocks_mined
+    );
     // Since we've already mined 102 blocks, we need to advance the coordinator by 102 ticks
     // so the indexer can catch up with the current blockchain height.
-    for _ in 0..blocks_mined {
+    for i in 0..blocks_mined {
+        if i % 20 == 0 {
+            info!("Coordinator tick: {}/{}", i + 1, blocks_mined);
+        }
         coordinator.tick()?;
     }
 
     // Add funding for speed up transaction
+    info!(
+        "Adding funding for speed up tx: {:?}, vout {:?}, amount {}",
+        funding_speedup.compute_txid(),
+        funding_speedup_vout,
+        amount.to_sat()
+    );
     coordinator.add_funding(Utxo::new(
         funding_speedup.compute_txid(),
         funding_speedup_vout,
@@ -80,7 +94,11 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     ))?;
 
     // Create 60 txs with funding and dispatch them using the coordinator.
-    for _ in 0..60 {
+    info!("Dispatching 60 transactions via coordinator.");
+    for i in 0..60 {
+        if i % 10 == 0 {
+            info!("Coordinating tx {}/60", i + 1);
+        }
         coordinate_tx(
             coordinator.clone(),
             amount,
@@ -92,48 +110,79 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     }
 
     // Up to here we have 60 txs dispatched and they should be batched.
-    for _ in 0..60 {
+    info!("Ticking coordinator 60 times to dispatch/batch the 60 txs.");
+    for i in 0..60 {
+        if i % 10 == 0 {
+            info!("Coordinator batch dispatch tick {}/60", i + 1);
+        }
         coordinator.tick()?;
     }
 
+    info!("Mining one block to process batched txs");
     setup
         .bitcoin_client
         .mine_blocks_to_address(1, &setup.funding_wallet)?;
 
+    info!("Ticking coordinator after block mined to process state transitions of batched txs");
     coordinator.tick()?;
 
     // Only 24 transactions can remain unconfirmed at this point because the coordinator enforces a maximum limit of 24 unconfirmed parent transactions (MAX_LIMIT_UNCONFIRMED_PARENTS).
     // The first batch of transactions is successfully dispatched, but when the coordinator attempts to dispatch the next batch, it hits the unconfirmed parent limit and does not dispatch further transactions.
     // This test asserts that the coordinator correctly enforces this policy.
     let news = coordinator.get_news()?;
+    info!(
+        "After first mining+tick: monitor_news.len() = {}, expecting 24",
+        news.monitor_news.len()
+    );
     assert_eq!(news.monitor_news.len(), 24);
 
-    for _ in 0..24 {
+    info!("Processing next batch of ticks (24 ticks) to continue dispatching.");
+    for i in 0..24 {
+        if i % 6 == 0 {
+            info!("Coordinator tick {}/24 for next batch", i + 1);
+        }
         coordinator.tick()?;
     }
 
+    info!("Mining second block for next batch of CPFPs");
     setup
         .bitcoin_client
         .mine_blocks_to_address(1, &setup.funding_wallet)?;
 
+    info!("Ticking coordinator after second block mined");
     coordinator.tick()?;
 
     let news = coordinator.get_news()?;
+    info!(
+        "After second mining+tick: monitor_news.len() = {}, expecting 48",
+        news.monitor_news.len()
+    );
     assert_eq!(news.monitor_news.len(), 48);
 
-    for _ in 0..12 {
+    info!("Processing next batch of ticks (12 ticks) to finish remaining transactions.");
+    for i in 0..12 {
+        if i % 4 == 0 {
+            info!("Coordinator tick {}/12 for final batch", i + 1);
+        }
         coordinator.tick()?;
     }
 
+    info!("Mining third block for final set of CPFPs");
     setup
         .bitcoin_client
         .mine_blocks_to_address(1, &setup.funding_wallet)?;
 
+    info!("Ticking coordinator after third block mined");
     coordinator.tick()?;
 
     let news = coordinator.get_news()?;
+    info!(
+        "After third mining+tick: monitor_news.len() = {}, expecting 60 (all done!)",
+        news.monitor_news.len()
+    );
     assert_eq!(news.monitor_news.len(), 60);
 
+    info!("Stopping bitcoind for cleanup at end of test.");
     setup.bitcoind.stop()?;
 
     Ok(())

@@ -561,7 +561,12 @@ fn test_mempool_full() -> Result<(), anyhow::Error> {
     // Create coordinator BEFORE creating funding transactions to avoid connection issues
     let mut settings = CoordinatorSettingsConfig::default();
     let mut monitor_settings = MonitorSettingsConfig::default();
-    monitor_settings.confirmation_threshold = Some(1);
+    monitor_settings
+        .indexer_settings
+        .as_mut()
+        .unwrap()
+        .confirmation_threshold = 1;
+
     monitor_settings.max_monitoring_confirmations = Some(1);
     settings.monitor_settings = Some(monitor_settings);
 

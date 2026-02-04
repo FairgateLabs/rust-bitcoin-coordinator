@@ -152,7 +152,7 @@ fn create_tx_to_speedup(
         .unwrap();
 
     // Add the output for the speed up transaction
-    let speedup_amount = 294; // This is the minimal non-dust output.
+    let speedup_amount = 540; // This is the minimal from protocol_builder
     let speedup_output = OutputType::segwit_key(speedup_amount, &to_pubkey).unwrap();
 
     protocol
@@ -203,7 +203,7 @@ pub fn config_trace_aux() {
     let default_modules = [
         "info",
         "libp2p=off",
-        "bitvmx_transaction_monitor=off",
+        "bitvmx_transaction_monitor=info",
         "bitcoin_indexer=off",
         "bitcoin_coordinator=info",
         "bitcoin_client=off",
