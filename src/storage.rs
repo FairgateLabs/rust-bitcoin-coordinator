@@ -221,7 +221,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
     fn remove_tx(&self, tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
         let tx_key = self.get_key(StoreKey::Transaction(tx_id));
-        self.store.delete(&tx_key)?;
+        self.store.remove(&tx_key, None)?;
 
         let txs_key = self.get_key(StoreKey::PendingTransactionList);
         let mut txs = self
