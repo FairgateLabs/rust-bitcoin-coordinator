@@ -152,7 +152,7 @@ fn create_tx_to_speedup(
         .unwrap();
 
     // Add the output for the speed up transaction
-    let speedup_amount = 294; // This is the minimal non-dust output.
+    let speedup_amount: u64 = 540; // This is the minimal non-dust output.
     let speedup_output = OutputType::segwit_key(speedup_amount, &to_pubkey).unwrap();
 
     protocol
