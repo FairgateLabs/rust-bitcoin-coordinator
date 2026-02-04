@@ -13,9 +13,9 @@ use bitcoin::{Network, Transaction, Txid};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, rpc_config::RpcConfig};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClientApi, types::BlockHeight};
 use bitvmx_transaction_monitor::{
-    errors::MonitorError,
     monitor::{Monitor, MonitorApi},
-    types::{AckMonitorNews, MonitorNews, MonitorType, TransactionStatus, TypesToMonitor},
+    types::{AckMonitorNews, MonitorNews, MonitorType, TypesToMonitor},
+    TransactionInfo,
 };
 use console::style;
 use key_manager::key_manager::KeyManager;
@@ -84,7 +84,7 @@ pub trait BitcoinCoordinatorApi {
     /// * `utxo` - Utxo to use for speed-ups
     fn add_funding(&self, utxo: Utxo) -> Result<(), BitcoinCoordinatorError>;
 
-    fn get_transaction(&self, txid: Txid) -> Result<TransactionStatus, BitcoinCoordinatorError>;
+    fn get_transaction(&self, txid: Txid) -> Result<TransactionInfo, BitcoinCoordinatorError>;
 
     /// Retrieves news about monitored transactions
     /// Returns information about transaction confirmations.
@@ -659,46 +659,43 @@ impl BitcoinCoordinator {
 
         for tx in txs {
             // Get updated transaction status from monitor
-            let tx_status = self.monitor.get_tx_status(&tx.tx_id);
+            let tx_status = self.monitor.get_tx_status(&tx.tx_id)?;
 
-            match tx_status {
-                Ok(tx_status) => {
-                    debug!(
-                        "{} {} Transaction({}) | Confirmations({})",
-                        style("Coordinator").green(),
-                        tx.get_tx_name(),
-                        style(tx.tx_id).blue(),
-                        style(tx_status.confirmations).blue(),
-                    );
-                    // Handle the case where the transaction is a CPFP (Child Pays For Parent) transaction.
+            if tx_status.is_not_found() || tx_status.is_in_mempool() {
+                // DO something here
+                continue;
+            }
 
-                    // First we acknowledge the transaction to clear any related news.
-                    let ack = AckMonitorNews::Transaction(tx_status.tx_id, tx.context.clone());
-                    self.monitor.ack_news(ack)?;
+            debug!(
+                "{} {} Transaction({}) | Confirmations({})",
+                style("Coordinator").green(),
+                tx.get_tx_name(),
+                style(tx.tx_id).blue(),
+                style(tx_status.confirmations).blue(),
+            );
+            // Handle the case where the transaction is a CPFP (Child Pays For Parent) transaction.
 
-                    if tx_status
-                        .is_finalized(self.settings.monitor_settings.max_monitoring_confirmations)
-                    {
-                        // Once the transaction is finalized, we are not monitoring it anymore.
-                        self.store
-                            .update_speedup_state(tx_status.tx_id, SpeedupState::Finalized)?;
-                        continue;
-                    }
+            // First we acknowledge the transaction to clear any related news.
+            let ack = AckMonitorNews::Transaction(tx_status.tx_id(), tx.context.clone());
+            self.monitor.ack_news(ack)?;
 
-                    if tx_status.is_confirmed() {
-                        // We want to keep the confirmation on the storage to calculate the maximum speedups
-                        self.store
-                            .update_speedup_state(tx_status.tx_id, SpeedupState::Confirmed)?;
-                        continue;
-                    }
+            if tx_status.is_finalized() {
+                // Once the transaction is finalized, we are not monitoring it anymore.
+                self.store
+                    .update_speedup_state(tx_status.tx_id(), SpeedupState::Finalized)?;
+                continue;
+            }
 
-                    if tx_status.is_orphan() {
-                        self.store
-                            .update_speedup_state(tx_status.tx_id, SpeedupState::Dispatched)?;
-                    }
-                }
-                Err(MonitorError::TransactionNotFound(_)) => {}
-                Err(e) => return Err(e.into()),
+            if tx_status.is_confirmed() {
+                // We want to keep the confirmation on the storage to calculate the maximum speedups
+                self.store
+                    .update_speedup_state(tx_status.tx_id(), SpeedupState::Confirmed)?;
+                continue;
+            }
+
+            if tx_status.is_orphan() {
+                self.store
+                    .update_speedup_state(tx_status.tx_id(), SpeedupState::Dispatched)?;
             }
         }
 
@@ -710,37 +707,41 @@ impl BitcoinCoordinator {
 
         for tx in txs {
             // Get updated transaction status from monitor
-            let tx_status = self.monitor.get_tx_status(&tx.tx_id);
+            let tx_status = self.monitor.get_tx_status(&tx.tx_id)?;
 
-            match tx_status {
-                Ok(tx_status) => {
-                    debug!(
-                        "{} Transaction({}) | Confirmations({})",
-                        style("Coordinator").green(),
-                        style(tx.tx_id).yellow(),
-                        style(tx_status.confirmations).blue(),
-                    );
+            info!(
+                "{} Transaction({}) is in progress and status",
+                style("Coordinator").green(),
+                style(tx.tx_id).yellow(),
+            );
+            if tx_status.is_not_found() || tx_status.is_in_mempool() {
+                // DO something here
+                continue;
+            }
 
-                    if tx_status
-                        .is_finalized(self.settings.monitor_settings.max_monitoring_confirmations)
-                    {
-                        // Once the transaction is finalized, we are not monitoring it anymore.
-                        self.store
-                            .update_tx_state(tx_status.tx_id, TransactionState::Finalized)?;
+            debug!(
+                "{} Transaction({}) | Confirmations({})",
+                style("Coordinator").green(),
+                style(tx.tx_id).yellow(),
+                style(tx_status.confirmations).blue(),
+            );
 
-                        continue;
-                    }
+            if tx_status.is_finalized() {
+                // Once the transaction is finalized, we are not monitoring it anymore.
+                self.store
+                    .update_tx_state(tx_status.tx_id(), TransactionState::Finalized)?;
 
-                    if tx_status.is_confirmed() {
-                        self.store
-                            .update_tx_state(tx_status.tx_id, TransactionState::Confirmed)?;
-                    }
-                }
-                Err(MonitorError::TransactionNotFound(_)) => {
-                    // In case a transaction is not found, we just wait.
-                    // We are going to speed up the CPFP.
-                }
-                Err(e) => return Err(e.into()),
+                continue;
+            }
+
+            if tx_status.is_confirmed() {
+                self.store
+                    .update_tx_state(tx_status.tx_id(), TransactionState::Confirmed)?;
+            }
+
+            if tx_status.is_orphan() {
+                self.store
+                    .update_tx_state(tx_status.tx_id(), TransactionState::Dispatched)?;
             }
         }
 
@@ -1252,7 +1253,13 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         let is_ready_str = if is_ready { "Ready" } else { "Not Ready" };
         debug!("{} {}", style("Coordinator").green(), is_ready_str);
 
+        info!(
+            "{} Monitor is ready: {:?}",
+            style("Coordinator").green(),
+            is_ready
+        );
         if !is_ready {
+            info!("{} Monitor is not ready", style("Coordinator").green());
             return Ok(());
         }
 
@@ -1332,7 +1339,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         Ok(())
     }
 
-    fn get_transaction(&self, txid: Txid) -> Result<TransactionStatus, BitcoinCoordinatorError> {
+    fn get_transaction(&self, txid: Txid) -> Result<TransactionInfo, BitcoinCoordinatorError> {
         let tx_status = self.monitor.get_tx_status(&txid)?;
         Ok(tx_status)
     }

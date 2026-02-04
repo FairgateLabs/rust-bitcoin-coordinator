@@ -1,8 +1,6 @@
 use bitcoin::{Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use bitvmx_transaction_monitor::types::{
-    AckMonitorNews, BlockInfo, MonitorNews, TransactionBlockchainStatus,
-};
+use bitvmx_transaction_monitor::types::{AckMonitorNews, MonitorNews};
 use protocol_builder::types::{output::SpeedupData, Utxo};
 use serde::{Deserialize, Serialize};
 
@@ -59,15 +57,6 @@ impl CoordinatedTransaction {
             retry_info: None,
         }
     }
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct TransactionNew {
-    pub tx_id: Txid,
-    pub tx: Transaction,
-    pub block_info: BlockInfo,
-    pub confirmations: u32,
-    pub status: TransactionBlockchainStatus,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
