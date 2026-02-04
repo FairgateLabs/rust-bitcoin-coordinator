@@ -271,6 +271,8 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             (TransactionState::ToDispatch, TransactionState::Failed) => true,
             (TransactionState::Dispatched, TransactionState::Confirmed) => true,
             (TransactionState::Confirmed, TransactionState::Finalized) => true,
+            // Allow transition from Confirmed to Dispatched when transaction becomes orphan (reorg)
+            (TransactionState::Confirmed, TransactionState::Dispatched) => true,
             (current, new) if current == new => true,
             // Invalid transitions
             _ => false,
