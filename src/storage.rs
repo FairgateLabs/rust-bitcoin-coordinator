@@ -45,7 +45,7 @@ pub trait BitcoinCoordinatorStoreApi {
         &self,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError>;
 
-    fn get_txs_to_dispatch(
+    fn get_active_transactions(
         &self,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError>;
 
@@ -163,24 +163,36 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(txs_filter)
     }
 
-    fn get_txs_to_dispatch(
+    fn get_active_transactions(
         &self,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError> {
+        // Get all transactions in progress (ToDispatch, Dispatched, Confirmed) until they are finalized
         let txs = self.get_txs()?;
         let mut txs_filter = Vec::new();
 
         for tx_id in txs {
             let tx = self.get_tx(&tx_id)?;
 
-            if tx.state == TransactionState::ToDispatch {
-                if let Some(retry_info) = &tx.retry_info {
-                    if retry_info.retries_count < self.retry_attempts_sending_tx
-                        && Utc::now().timestamp_millis() as u64 - retry_info.last_retry_timestamp
-                            >= self.retry_interval_seconds * 1000
-                    {
+            // Include transactions that are in progress (not finalized)
+            if tx.state == TransactionState::ToDispatch
+                || tx.state == TransactionState::Dispatched
+                || tx.state == TransactionState::Confirmed
+            {
+                // For ToDispatch state, check retry conditions
+                if tx.state == TransactionState::ToDispatch {
+                    if let Some(retry_info) = &tx.retry_info {
+                        if retry_info.retries_count < self.retry_attempts_sending_tx
+                            && Utc::now().timestamp_millis() as u64
+                                - retry_info.last_retry_timestamp
+                                >= self.retry_interval_seconds * 1000
+                        {
+                            txs_filter.push(tx);
+                        }
+                    } else {
                         txs_filter.push(tx);
                     }
                 } else {
+                    // For Dispatched and Confirmed states, include them directly
                     txs_filter.push(tx);
                 }
             }

@@ -208,7 +208,7 @@ fn test_cancel_monitor() -> Result<(), anyhow::Error> {
 }
 
 #[test]
-fn test_increment_tx_retry_count_and_get_txs_to_dispatch() -> Result<(), anyhow::Error> {
+fn test_increment_tx_retry_count_and_get_active_transactions() -> Result<(), anyhow::Error> {
     const RETRY_INTERVAL: u64 = 2;
     const MAX_RETRIES: u32 = 3;
     const MAX_UNCONFIRMED_SPEEDUPS: u32 = 1;
@@ -237,8 +237,8 @@ fn test_increment_tx_retry_count_and_get_txs_to_dispatch() -> Result<(), anyhow:
     // Save the transaction
     store.save_tx(tx.clone(), None, None, "context_tx".to_string())?;
 
-    // Test get_txs_to_dispatch
-    let to_dispatch = store.get_txs_to_dispatch()?;
+    // Test get_active_transactions
+    let to_dispatch = store.get_active_transactions()?;
     assert_eq!(to_dispatch.len(), 1);
     assert_eq!(to_dispatch[0].tx.compute_txid(), tx_id);
 
@@ -247,8 +247,8 @@ fn test_increment_tx_retry_count_and_get_txs_to_dispatch() -> Result<(), anyhow:
     let tx_after_retry = store.get_tx(&tx_id)?;
     assert_eq!(tx_after_retry.retry_info.unwrap().retries_count, 1);
 
-    // Test get_txs_to_dispatch again after incrementing the retry count, should be empty because the retry interval is not reached
-    let to_dispatch = store.get_txs_to_dispatch()?;
+    // Test get_active_transactions again after incrementing the retry count, should be empty because the retry interval is not reached
+    let to_dispatch = store.get_active_transactions()?;
     assert_eq!(to_dispatch.len(), 0);
 
     // Test increment_tx_retry_count again
@@ -258,8 +258,8 @@ fn test_increment_tx_retry_count_and_get_txs_to_dispatch() -> Result<(), anyhow:
 
     std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL));
 
-    // Test get_txs_to_dispatch again after incrementing the retry count, should be empty because the retry interval is not reached
-    let to_dispatch = store.get_txs_to_dispatch()?;
+    // Test get_active_transactions again after incrementing the retry count, should be empty because the retry interval is not reached
+    let to_dispatch = store.get_active_transactions()?;
     assert_eq!(to_dispatch.len(), 1);
     clear_output();
     Ok(())
