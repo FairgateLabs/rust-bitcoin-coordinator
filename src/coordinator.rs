@@ -1277,20 +1277,13 @@ impl BitcoinCoordinator {
 impl BitcoinCoordinatorApi for BitcoinCoordinator {
     fn tick(&self) -> Result<(), BitcoinCoordinatorError> {
         self.monitor.tick()?;
-        // The monitor is considered ready when it has fully indexed the blockchain and is up to date with the latest block.
-        // Note that if there is a significant gap in the indexing process, it may take multiple ticks for the monitor to become ready.
-        let is_ready = self.monitor.is_ready()?;
 
-        let is_ready_str = if is_ready { "Ready" } else { "Not Ready" };
-        debug!("{} {}", style("Coordinator").green(), is_ready_str);
-
-        info!(
-            "{} Monitor is ready: {:?}",
-            style("Coordinator").green(),
-            is_ready
-        );
-        if !is_ready {
-            info!("{} Monitor is not ready", style("Coordinator").green());
+        if self.is_ready()? {
+            debug!("{} State: Ready", style("Coordinator").green());
+            info!("{} Monitor Ready", style("Coordinator").green());
+        } else {
+            debug!("{} State: Not Ready", style("Coordinator").green());
+            info!("{} Monitor Not Ready", style("Coordinator").green());
             return Ok(());
         }
 
@@ -1326,6 +1319,8 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
 
     fn is_ready(&self) -> Result<bool, BitcoinCoordinatorError> {
         // The coordinator is currently considered ready when the monitor is ready.
+        // The monitor is considered ready when it has fully indexed the blockchain and is up to date with the latest block.
+        // Note that if there is a significant gap in the indexing process, it may take multiple ticks for the monitor to become ready.
         Ok(self.monitor.is_ready()?)
     }
 
