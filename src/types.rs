@@ -13,16 +13,21 @@ pub enum TransactionState {
     // The transaction is ready and queued to be sent.
     ToDispatch,
 
-    // The transaction has been broadcast to the network and is waiting for confirmations.
-    Dispatched,
+    // The transaction has been broadcast to the network and it is in the mempool. It is waiting for mining.
+    InMempool,
 
+    // The transaction has been mined and confirmed by the network.
     Confirmed,
 
-    // The transaction has been successfully confirmed by the network.
+    // The transaction has been successfully reach the target block height and it is considered finalized.
     Finalized,
 
-    // The transaction has failed to be broadcasted.
+    // The transaction has failed to be broadcasted and rejected by the network.
     Failed,
+
+    // The transaction (typically an RBF speedup) was removed from the mempool because it was replaced by a newer RBF transaction.
+    // This state indicates the transaction is no longer relevant and should not be monitored or re-dispatched.
+    Replaced,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -35,7 +40,6 @@ pub struct CoordinatedTransaction {
     pub target_block_height: Option<BlockHeight>,
     pub state: TransactionState,
     pub context: String,
-    pub retry_info: Option<RetryInfo>,
 }
 
 impl CoordinatedTransaction {
@@ -54,18 +58,12 @@ impl CoordinatedTransaction {
             state,
             target_block_height,
             context,
-            retry_info: None,
         }
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub enum SpeedupState {
-    Dispatched,
-    Error,
-    Confirmed,
-    Finalized,
-}
+// SpeedupState is now unified with TransactionState
+pub type SpeedupState = TransactionState;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct CoordinatedSpeedUpTransaction {
@@ -77,9 +75,13 @@ pub struct CoordinatedSpeedUpTransaction {
     // The change funding utxo.
     pub next_funding: Utxo,
 
-    // If true, this speedup is a replacement (RBF) for a previous speedup.
-    // Otherwise, it is a new speedup (CPFP)
-    pub is_rbf: bool,
+    // If Some(txid), this speedup has been replaced by the speedup transaction with this txid.
+    // If None, this speedup is not replaced by any other speedup.
+    pub replaced_by_tx_id: Option<Txid>,
+
+    // If Some(txid), this speedup is a replacement (RBF) for the speedup transaction with this txid.
+    // If None, it is a new speedup (CPFP)
+    pub replaces_tx_id: Option<Txid>,
 
     pub broadcast_block_height: BlockHeight,
 
@@ -92,8 +94,6 @@ pub struct CoordinatedSpeedUpTransaction {
     pub speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
 
     pub network_fee_rate_used: u64,
-
-    pub retry_info: Option<RetryInfo>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
@@ -117,21 +117,21 @@ impl CoordinatedSpeedUpTransaction {
         tx_id: Txid,
         prev_funding: Utxo,
         next_funding: Utxo,
-        is_rbf: bool,
+        replaces_tx_id: Option<Txid>,
         broadcast_block_height: BlockHeight,
         state: SpeedupState,
         bump_fee_percentage_used: f64,
         speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
         network_fee_rate_used: u64,
     ) -> Self {
-        let mut context = if is_rbf {
+        let mut context = if replaces_tx_id.is_some() {
             RBF_TRANSACTION_CONTEXT.to_string()
         } else {
             CPFP_TRANSACTION_CONTEXT.to_string()
         };
 
         if broadcast_block_height == 0
-            && state == SpeedupState::Finalized
+            && state == TransactionState::Finalized
             && speedup_tx_data.is_empty()
         {
             context = FUNDING_TRANSACTION_CONTEXT.to_string();
@@ -141,14 +141,14 @@ impl CoordinatedSpeedUpTransaction {
             tx_id,
             prev_funding,
             next_funding,
-            is_rbf,
+            replaced_by_tx_id: None, // Initially, no transaction replaces this one
+            replaces_tx_id,
             broadcast_block_height,
             state,
             context,
             bump_fee_percentage_used,
             speedup_tx_data,
             network_fee_rate_used,
-            retry_info: None,
         }
     }
 }
@@ -156,18 +156,24 @@ impl CoordinatedSpeedUpTransaction {
 impl CoordinatedSpeedUpTransaction {
     pub fn is_funding(&self) -> bool {
         self.broadcast_block_height == 0
-            && self.state == SpeedupState::Finalized
+            && self.state == TransactionState::Finalized
             && self.speedup_tx_data.is_empty()
     }
 
-    pub fn is_rbf(&self) -> bool {
-        self.is_rbf
+    /// Returns true if this speedup is replacing another speedup transaction
+    pub fn is_replacing(&self) -> bool {
+        self.replaces_tx_id.is_some()
+    }
+
+    /// Returns true if this speedup is being replaced by another speedup transaction
+    pub fn is_being_replaced(&self) -> bool {
+        self.replaced_by_tx_id.is_some()
     }
 
     pub fn get_tx_name(&self) -> String {
         if self.is_funding() {
             "FUNDING".to_string()
-        } else if self.is_rbf() {
+        } else if self.is_replacing() {
             "RBF".to_string()
         } else {
             "CPFP".to_string()

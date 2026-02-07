@@ -1,19 +1,19 @@
 use crate::errors::BitcoinCoordinatorStoreError;
 use crate::settings::{MAX_LIMIT_UNCONFIRMED_PARENTS, MIN_UNCONFIRMED_TXS_FOR_CPFP};
 use crate::storage::BitcoinCoordinatorStore;
-use crate::types::{CoordinatedSpeedUpTransaction, RetryInfo, SpeedupState};
+use crate::types::{CoordinatedSpeedUpTransaction, TransactionState};
 use bitcoin::Txid;
-use chrono::Utc;
+use console::style;
 use protocol_builder::types::Utxo;
 use storage_backend::storage::KeyValueStore;
-use tracing::debug;
+use tracing::info;
 
 pub trait SpeedupStore {
     fn add_funding(&self, funding: Utxo) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn get_funding(&self) -> Result<Option<Utxo>, BitcoinCoordinatorStoreError>;
 
-    fn get_pending_speedups(
+    fn get_active_speedups(
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
 
@@ -21,7 +21,7 @@ pub trait SpeedupStore {
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
 
-    fn get_all_pending_speedups(
+    fn get_all_active_speedups(
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
 
@@ -56,48 +56,27 @@ pub trait SpeedupStore {
     fn update_speedup_state(
         &self,
         txid: Txid,
-        state: SpeedupState,
+        state: TransactionState,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn has_reached_max_unconfirmed_speedups(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
 
     fn get_available_unconfirmed_txs(&self) -> Result<u32, BitcoinCoordinatorStoreError>;
-
-    fn get_speedups_for_retry(
-        &self,
-        max_retries: u32,
-        interval_seconds: u64,
-    ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError>;
-
-    fn enqueue_speedup_for_retry(
-        &self,
-        speedup: CoordinatedSpeedUpTransaction,
-    ) -> Result<(), BitcoinCoordinatorStoreError>;
-
-    fn dequeue_speedup_for_retry(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
-
-    fn increment_speedup_retry_count(&self, txid: Txid)
-        -> Result<(), BitcoinCoordinatorStoreError>;
 }
 
 enum SpeedupStoreKey {
-    PendingSpeedUpList,
+    ActiveSpeedUpList,
     // SpeedupInfo,
     SpeedUpTransaction(Txid),
-
-    RetrySpeedUpTransactionList,
 }
 
 impl SpeedupStoreKey {
     fn get_key(&self) -> String {
         let prefix = "bitcoin_coordinator";
         match self {
-            SpeedupStoreKey::PendingSpeedUpList => format!("{prefix}/speedup/pending/list"),
+            SpeedupStoreKey::ActiveSpeedUpList => format!("{prefix}/speedup/active/list"),
             SpeedupStoreKey::SpeedUpTransaction(tx_id) => {
                 format!("{prefix}/speedup/{tx_id}")
-            }
-            SpeedupStoreKey::RetrySpeedUpTransactionList => {
-                format!("{prefix}/speedup/retry/list")
             }
         }
     }
@@ -113,9 +92,9 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             next_funding.txid,
             next_funding.clone(),
             next_funding,
-            false,
+            None, // Funding is not an RBF replacement
             0,
-            SpeedupState::Finalized,
+            TransactionState::Finalized,
             1.0,
             vec![],
             1,
@@ -127,7 +106,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
     }
 
     fn get_available_unconfirmed_txs(&self) -> Result<u32, BitcoinCoordinatorStoreError> {
-        let speedups = self.get_all_pending_speedups()?;
+        let speedups = self.get_all_active_speedups()?;
 
         let mut available_utxos = MAX_LIMIT_UNCONFIRMED_PARENTS;
 
@@ -136,21 +115,22 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         for speedup in speedups.iter() {
             // In case there is a RBF at the top, we necessary need to find a confirmed RBF
             // to be able to fund otherwise there is no capacity for funding unconfirmed txs.
-            if is_rbf_active && !speedup.is_rbf {
+            if is_rbf_active && !speedup.is_replacing() {
                 return Ok(0);
             }
 
-            if speedup.state == SpeedupState::Confirmed || speedup.state == SpeedupState::Finalized
+            if speedup.state == TransactionState::Confirmed
+                || speedup.state == TransactionState::Finalized
             {
                 return Ok(available_utxos);
             }
 
-            if speedup.is_rbf && speedup.state == SpeedupState::Dispatched {
+            if speedup.is_replacing() && speedup.state == TransactionState::InMempool {
                 is_rbf_active = true;
                 continue;
             }
 
-            if is_rbf_active && speedup.is_rbf {
+            if is_rbf_active && speedup.is_replacing() {
                 return Ok(0);
             }
 
@@ -179,19 +159,20 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             return Ok(None);
         }
 
-        let speedups = self.get_all_pending_speedups()?;
+        let speedups = self.get_all_active_speedups()?;
 
         let mut should_be_a_replace = false;
 
         for speedup in speedups.iter() {
             if !should_be_a_replace {
-                if speedup.state == SpeedupState::Finalized
-                    || speedup.state == SpeedupState::Confirmed
+                if speedup.state == TransactionState::Finalized
+                    || speedup.state == TransactionState::Confirmed
+                    || speedup.state == TransactionState::Replaced
                 {
                     return Ok(Some(speedup.next_funding.clone()));
                 }
 
-                if !speedup.is_rbf {
+                if !speedup.is_replacing() {
                     // Encountered an unconfirmed regular speedup. We can use this as funding.
                     return Ok(Some(speedup.next_funding.clone()));
                 }
@@ -203,8 +184,8 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             }
 
             // We are searching for a previous confirmed replace speedup.
-            if speedup.is_rbf {
-                if speedup.state == SpeedupState::Confirmed {
+            if speedup.is_replacing() {
+                if speedup.state == TransactionState::Confirmed {
                     // Found a confirmed replace speedup; use as funding.
                     return Ok(Some(speedup.next_funding.clone()));
                 }
@@ -212,7 +193,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
                 continue;
             }
 
-            if speedup.state == SpeedupState::Confirmed {
+            if speedup.state == TransactionState::Confirmed {
                 // Found a confirmed regular speedup; use as funding.
                 return Ok(Some(speedup.next_funding.clone()));
             } else {
@@ -226,72 +207,85 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         Ok(None)
     }
 
-    // Returns the list of pending speedups in reverse order until the last finalized speedup.
-    fn get_pending_speedups(
+    // Returns the list of active speedups (InMempool, Error, Confirmed) until they are finalized.
+    // Similar to get_active_transactions(), this includes speedups that are in progress.
+    fn get_active_speedups(
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
-        let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
+        let key = SpeedupStoreKey::ActiveSpeedUpList.get_key();
         let speedups = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
 
-        let mut pending_speedups = Vec::new();
+        let mut active_speedups = Vec::new();
 
         for txid in speedups.iter().rev() {
             let speedup = self.get_speedup(txid)?;
 
-            if speedup.state == SpeedupState::Finalized {
-                // Up to here we don't need to go back more, this is like a checkpoint. In our case is the last funding tx added.
-                return Ok(pending_speedups);
+            if speedup.state == TransactionState::Finalized
+                || speedup.state == TransactionState::Replaced
+            {
+                // Up to here we don't need to go back more, this is like a checkpoint.
+                // In our case is the last funding tx added (Finalized) or a replaced RBF (Replaced).
+                return Ok(active_speedups);
             }
 
-            // If the speedup is not finalized, it means that it is still pending.
-            pending_speedups.push(speedup);
+            // Include speedups that are in progress (InMempool, Error, Confirmed)
+            // Include all active speedups (not finalized, not failed, and not replaced)
+            // Failed and Replaced speedups are not active - they represent errors or superseded transactions that cannot be retried
+            if speedup.state != TransactionState::Finalized
+                && speedup.state != TransactionState::Failed
+                && speedup.state != TransactionState::Replaced
+            {
+                active_speedups.push(speedup);
+            }
         }
 
-        pending_speedups.reverse();
+        active_speedups.reverse();
 
-        Ok(pending_speedups)
+        Ok(active_speedups)
     }
 
     fn get_unconfirmed_speedups(
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
-        let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
+        let key = SpeedupStoreKey::ActiveSpeedUpList.get_key();
         let speedups = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
 
-        let mut pending_speedups = Vec::new();
+        let mut active_speedups = Vec::new();
 
         for txid in speedups.iter().rev() {
             let speedup = self.get_speedup(txid)?;
 
-            if speedup.state == SpeedupState::Confirmed || speedup.state == SpeedupState::Finalized
+            if speedup.state == TransactionState::Confirmed
+                || speedup.state == TransactionState::Finalized
+                || speedup.state == TransactionState::Replaced
             {
-                // No need to check further; confirmed or finalized speedup found.
-                return Ok(pending_speedups);
+                // No need to check further; confirmed, finalized, or replaced speedup found.
+                return Ok(active_speedups);
             }
 
             // If the speedup is not finalized or confirmed, it means that it is still unconfirmed.
-            pending_speedups.push(speedup);
+            active_speedups.push(speedup);
         }
 
-        Ok(pending_speedups)
+        Ok(active_speedups)
     }
 
-    fn get_all_pending_speedups(
+    fn get_all_active_speedups(
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
-        let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
+        let key = SpeedupStoreKey::ActiveSpeedUpList.get_key();
         let speedup_ids = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
 
-        let mut pending_speedups = Vec::new();
+        let mut active_speedups = Vec::new();
 
         for txid in speedup_ids.iter() {
             let speedup = self.get_speedup(txid)?;
-            pending_speedups.push(speedup);
+            active_speedups.push(speedup);
         }
 
-        pending_speedups.reverse();
+        active_speedups.reverse();
 
-        Ok(pending_speedups)
+        Ok(active_speedups)
     }
 
     /// Determines if a speedup (CPFP) transaction can be created and dispatched.
@@ -303,6 +297,13 @@ impl SpeedupStore for BitcoinCoordinatorStore {
     fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError> {
         let is_funding_available = self.is_funding_available()?;
         let is_enough_unconfirmed_txs = self.has_enough_unconfirmed_txs_for_cpfp()?;
+
+        info!(
+            "{} Can speedup: Funding available({}) | Enough unconfirmed txs({})",
+            style("Coordinator").green(),
+            is_funding_available,
+            is_enough_unconfirmed_txs
+        );
 
         Ok(is_funding_available && is_enough_unconfirmed_txs)
     }
@@ -323,14 +324,19 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         &self,
         speedup: CoordinatedSpeedUpTransaction,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
-        // Whenever a speedup is created, we add it to the list of pending speedups because is not finished.
+        // Whenever a speedup is created, we add it to the list of active speedups because is not finished.
         // Also speedup should be saved at the end of the list. Because is gonna be the new way to fund next speedups.
+        // However, if the speedup already exists in the list (e.g., when updating replaced_by_tx_id),
+        // we don't add it again to avoid duplicates.
 
-        let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
+        let key = SpeedupStoreKey::ActiveSpeedUpList.get_key();
         let mut speedups = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
-        speedups.push(speedup.tx_id);
 
-        self.store.set(&key, speedups, None)?;
+        // Only add to the list if it's not already present
+        if !speedups.contains(&speedup.tx_id) {
+            speedups.push(speedup.tx_id);
+            self.store.set(&key, speedups, None)?;
+        }
 
         // Save speedup to get by id.
         let key = SpeedupStoreKey::SpeedUpTransaction(speedup.tx_id).get_key();
@@ -353,13 +359,13 @@ impl SpeedupStore for BitcoinCoordinatorStore {
     }
 
     fn has_reached_max_unconfirmed_speedups(&self) -> Result<bool, BitcoinCoordinatorStoreError> {
-        let speedups = self.get_pending_speedups()?;
+        let speedups = self.get_active_speedups()?;
 
         // sum up all consecutive unconfirmed speedups, and if sum is greater than MAX_UNCONFIRMED_SPEEDUPS, return true.
         let mut sum = 0;
 
         for speedup in speedups.iter() {
-            if speedup.state == SpeedupState::Dispatched {
+            if speedup.state == TransactionState::InMempool {
                 sum += 1;
             } else {
                 break;
@@ -372,16 +378,13 @@ impl SpeedupStore for BitcoinCoordinatorStore {
     fn update_speedup_state(
         &self,
         txid: Txid,
-        state: SpeedupState,
+        state: TransactionState,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
-        if state == SpeedupState::Finalized {
-            // Means that the speedup transaction was finalized.
-            // Then we need to remove it from the pending list.
-            let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
-            let mut speedups = self
-                .store
-                .get::<&str, Vec<Txid>>(&key)?
-                .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
+        if state == TransactionState::Finalized || state == TransactionState::Replaced {
+            // Means that the speedup transaction was finalized or replaced.
+            // Then we need to remove it from the active list.
+            let key = SpeedupStoreKey::ActiveSpeedUpList.get_key();
+            let mut speedups = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
 
             let index = speedups
                 .iter()
@@ -389,11 +392,14 @@ impl SpeedupStore for BitcoinCoordinatorStore {
                 .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
             // Iterate over all previous speedup transactions (before the current index)
-            // to find any that have reached the Finalized state and remove them from the pending list.
-            // This cleanup prevents the pending speedup list from growing indefinitely with finalized entries.
+            // to find any that have reached the Finalized or Replaced state and remove them from the active list.
+            // This cleanup prevents the active speedup list from growing indefinitely with finalized/replaced entries.
             for (i, txid) in speedups[0..index].iter().enumerate() {
-                if self.get_speedup(txid)?.state == SpeedupState::Finalized {
-                    // If a finalized transaction is found, remove it from the list and update the store.
+                let speedup_state = self.get_speedup(txid)?.state;
+                if speedup_state == TransactionState::Finalized
+                    || speedup_state == TransactionState::Replaced
+                {
+                    // If a finalized or replaced transaction is found, remove it from the list and update the store.
                     speedups.remove(i);
                     self.store.set(&key, &speedups, None)?;
                     break;
@@ -425,12 +431,12 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         )>,
         BitcoinCoordinatorStoreError,
     > {
-        let speedups = self.get_pending_speedups()?;
+        let speedups = self.get_active_speedups()?;
 
         let mut last_rbf_tx = None;
 
         for speedup in speedups.iter() {
-            if speedup.is_rbf && speedup.state == SpeedupState::Dispatched {
+            if speedup.is_replacing() && speedup.state == TransactionState::InMempool {
                 if last_rbf_tx.is_none() {
                     last_rbf_tx = Some(speedup.clone());
                 }
@@ -438,7 +444,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
                 continue;
             }
 
-            if speedup.state == SpeedupState::Confirmed {
+            if speedup.state == TransactionState::Confirmed {
                 // If the last speedup is confirmed, we don't need to replace it. It is already confirmed.
                 return Ok(None);
             }
@@ -447,97 +453,5 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         }
 
         Ok(None)
-    }
-
-    fn get_speedups_for_retry(
-        &self,
-        max_retries: u32,
-        interval_seconds: u64,
-    ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
-        let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
-        let speedups: Vec<CoordinatedSpeedUpTransaction> = self
-            .store
-            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
-            .unwrap_or_default();
-
-        let mut eligible_speedups = Vec::new();
-        let current_time = Utc::now().timestamp_millis() as u64;
-
-        for speedup in speedups.iter() {
-            if let Some(retry_info) = &speedup.retry_info {
-                if retry_info.retries_count < max_retries {
-                    if current_time >= retry_info.last_retry_timestamp + interval_seconds * 1000 {
-                        eligible_speedups.push(speedup.clone());
-                    } else {
-                        debug!(
-                            "Skipping RetrySpeedup({}) because the retry interval has not passed | CurrentTime({}) | LastRetryTimestamp({}) | IntervalSeconds({})",
-                            speedup.tx_id, current_time, retry_info.last_retry_timestamp, interval_seconds
-                        );
-                    }
-                } else {
-                    debug!(
-                        "Skipping RetrySpeedup({}) because it has reached the max retries | RetriesCount({}) | MaxRetries({})",
-                        speedup.tx_id, retry_info.retries_count, max_retries
-                    );
-                }
-            }
-        }
-
-        Ok(eligible_speedups)
-    }
-
-    fn enqueue_speedup_for_retry(
-        &self,
-        mut speedup: CoordinatedSpeedUpTransaction,
-    ) -> Result<(), BitcoinCoordinatorStoreError> {
-        let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
-        let mut speedups = self
-            .store
-            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
-            .unwrap_or_default();
-
-        speedup.retry_info = Some(RetryInfo::new(0, Utc::now().timestamp_millis() as u64));
-
-        speedups.push(speedup);
-        self.store.set(&key, &speedups, None)?;
-
-        Ok(())
-    }
-
-    fn dequeue_speedup_for_retry(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
-        let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
-        let mut speedups = self
-            .store
-            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
-            .unwrap_or_default();
-        speedups.retain(|s| s.tx_id != txid);
-        self.store.set(&key, &speedups, None)?;
-
-        Ok(())
-    }
-
-    fn increment_speedup_retry_count(
-        &self,
-        txid: Txid,
-    ) -> Result<(), BitcoinCoordinatorStoreError> {
-        let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
-        let mut speedups = self
-            .store
-            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
-            .unwrap_or_default();
-
-        for speedup in speedups.iter_mut() {
-            if speedup.tx_id == txid {
-                speedup.retry_info = Some(RetryInfo::new(
-                    speedup.retry_info.clone().unwrap().retries_count + 1,
-                    Utc::now().timestamp_millis() as u64,
-                ));
-
-                self.store.set(&key, &speedups, None)?;
-                break;
-            }
-        }
-
-        Ok(())
     }
 }
