@@ -58,8 +58,7 @@ pub fn get_mocks() -> (
     let path_storage = format!("test_output/test/storage/{}", generate_random_string());
     let storage_config = StorageConfig::new(path_storage, None);
     let storage = Rc::new(Storage::new(&storage_config).unwrap());
-    let store =
-        BitcoinCoordinatorStore::new(storage.clone(), 1, MAX_RETRIES, RETRY_INTERVAL).unwrap();
+    let store = BitcoinCoordinatorStore::new(storage.clone(), 1).unwrap();
     let bitcoin_client = MockBitcoinClient::new();
 
     (mock_monitor, store, bitcoin_client, key_manager)
@@ -189,12 +188,10 @@ fn create_tx_to_speedup(
 }
 
 pub fn create_store() -> BitcoinCoordinatorStore {
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let path = format!("test_output/speedup/{}", generate_random_string());
     let storage_config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&storage_config).unwrap());
-    BitcoinCoordinatorStore::new(storage, 10, MAX_RETRIES, RETRY_INTERVAL).unwrap()
+    BitcoinCoordinatorStore::new(storage, 10).unwrap()
 }
 
 pub fn config_trace_aux() {
@@ -205,7 +202,7 @@ pub fn config_trace_aux() {
         "libp2p=off",
         "bitvmx_transaction_monitor=info",
         "bitcoin_indexer=off",
-        "bitcoin_coordinator=info",
+        "bitcoin_coordinator=debug",
         "bitcoin_client=off",
         "p2p_protocol=off",
         "p2p_handler=off",

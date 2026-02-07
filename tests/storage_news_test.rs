@@ -10,8 +10,6 @@ mod utils;
 
 #[test]
 fn coordinator_news_test() -> Result<(), anyhow::Error> {
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let path = format!(
         "test_output/coordinator_news_test/{}",
         generate_random_string()
@@ -24,7 +22,7 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
             .unwrap();
 
-    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+    let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
     // Initially, there should be no news
     let news_list = store.get_news()?;
@@ -214,8 +212,6 @@ fn coordinator_news_test() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_transaction_already_in_mempool_news() -> Result<(), anyhow::Error> {
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let path = format!("test_output/storage_news_test/{}", generate_random_string());
 
     let storage_config = StorageConfig::new(path, None);
@@ -225,7 +221,7 @@ fn test_transaction_already_in_mempool_news() -> Result<(), anyhow::Error> {
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
             .unwrap();
 
-    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+    let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
     let tx_id =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
@@ -263,8 +259,6 @@ fn test_transaction_already_in_mempool_news() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_mempool_rejection_news() -> Result<(), anyhow::Error> {
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let path = format!("test_output/storage_news_test/{}", generate_random_string());
 
     let storage_config = StorageConfig::new(path, None);
@@ -274,7 +268,7 @@ fn test_mempool_rejection_news() -> Result<(), anyhow::Error> {
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
             .unwrap();
 
-    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+    let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
     let tx_id =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
@@ -310,8 +304,6 @@ fn test_mempool_rejection_news() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_network_error_news() -> Result<(), anyhow::Error> {
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let path = format!("test_output/storage_news_test/{}", generate_random_string());
 
     let storage_config = StorageConfig::new(path, None);
@@ -321,7 +313,7 @@ fn test_network_error_news() -> Result<(), anyhow::Error> {
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
             .unwrap();
 
-    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+    let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
     let tx_id =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
@@ -357,8 +349,6 @@ fn test_network_error_news() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_dispatch_transaction_error_news() -> Result<(), anyhow::Error> {
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let path = format!("test_output/storage_news_test/{}", generate_random_string());
 
     let storage_config = StorageConfig::new(path, None);
@@ -368,7 +358,7 @@ fn test_dispatch_transaction_error_news() -> Result<(), anyhow::Error> {
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
             .unwrap();
 
-    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+    let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
     let tx_id =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
@@ -404,8 +394,6 @@ fn test_dispatch_transaction_error_news() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_all_error_types_together() -> Result<(), anyhow::Error> {
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let path = format!("test_output/storage_news_test/{}", generate_random_string());
 
     let storage_config = StorageConfig::new(path, None);
@@ -415,7 +403,7 @@ fn test_all_error_types_together() -> Result<(), anyhow::Error> {
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
             .unwrap();
 
-    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+    let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
     let tx_id_1 =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200a").unwrap();
@@ -515,14 +503,12 @@ fn test_all_error_types_together() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_transaction_state_failed_on_fatal_error() -> Result<(), anyhow::Error> {
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let path = format!("test_output/storage_news_test/{}", generate_random_string());
 
     let storage_config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&storage_config)?);
 
-    let store = BitcoinCoordinatorStore::new(storage, 1, MAX_RETRIES, RETRY_INTERVAL)?;
+    let store = BitcoinCoordinatorStore::new(storage, 1)?;
 
     let tx = Transaction {
         version: Version::TWO,

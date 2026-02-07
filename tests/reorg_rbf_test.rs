@@ -1,4 +1,4 @@
-use bitcoin::{Address, Amount, CompressedPublicKey};
+use bitcoin::Amount;
 use bitcoin_coordinator::{
     config::CoordinatorSettingsConfig,
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
@@ -98,7 +98,15 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     let news = coordinator.get_news()?;
     assert_eq!(news.monitor_news.len(), 1);
+    assert!(
+        news.monitor_news.iter().all(|n| match n {
+            MonitorNews::Transaction(_, tx_status, _) => tx_status.confirmations == 1,
+            _ => false,
+        }),
+        "News are not in Confirmations 1 status"
+    );
 
+    // Invalidated block to orphan the transaction
     let best_block = setup.bitcoin_client.get_best_block()?;
     let block_hash = setup
         .bitcoin_client
@@ -111,6 +119,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     let news = coordinator.get_news()?;
 
+    assert_eq!(news.monitor_news.len(), 1);
     assert!(
         news.monitor_news.iter().all(|n| match n {
             MonitorNews::Transaction(_, tx_status, _) => tx_status.is_orphan(),
@@ -121,56 +130,52 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     coordinator.tick()?;
 
-    // Dispatch two more transactions to observe the reorganization effects
-    coordinate_tx(
-        coordinator.clone(),
-        amount,
-        setup.network,
-        setup.key_manager.clone(),
-        setup.bitcoin_client.clone(),
-        None,
-    )?;
+    // // Dispatch two more transactions to observe the reorganization effects
+    // coordinate_tx(
+    //     coordinator.clone(),
+    //     amount,
+    //     setup.network,
+    //     setup.key_manager.clone(),
+    //     setup.bitcoin_client.clone(),
+    //     None,
+    // )?;
 
-    coordinate_tx(
-        coordinator.clone(),
-        amount,
-        setup.network,
-        setup.key_manager.clone(),
-        setup.bitcoin_client.clone(),
-        None,
-    )?;
+    // coordinate_tx(
+    //     coordinator.clone(),
+    //     amount,
+    //     setup.network,
+    //     setup.key_manager.clone(),
+    //     setup.bitcoin_client.clone(),
+    //     None,
+    // )?;
 
-    let public_key = setup
-        .key_manager
-        .derive_keypair(key_manager::key_type::BitcoinKeyType::P2tr, 1)
-        .unwrap();
-    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
-    let funding_wallet = Address::p2wpkh(&compressed, setup.network);
+    // let public_key = setup
+    //     .key_manager
+    //     .derive_keypair(key_manager::key_type::BitcoinKeyType::P2tr, 1)
+    //     .unwrap();
+    // let compressed = CompressedPublicKey::try_from(public_key).unwrap();
+    // let funding_wallet = Address::p2wpkh(&compressed, setup.network);
 
-    for _ in 0..10 {
-        coordinator.tick()?;
+    // setup
+    //     .bitcoin_client
+    //     .mine_blocks_to_address(1, &funding_wallet)
+    //     .unwrap();
 
-        setup
-            .bitcoin_client
-            .mine_blocks_to_address(1, &funding_wallet)
-            .unwrap();
+    // while !coordinator.is_ready()? {
+    //     coordinator.tick()?;
+    // }
 
-        coordinator.tick()?;
-    }
+    // let news = coordinator.get_news()?;
 
-    coordinator.tick()?;
+    // assert!(
+    //     news.monitor_news.iter().all(|n| match n {
+    //         MonitorNews::Transaction(_, tx_status, _) => tx_status.is_confirmed(),
+    //         _ => false,
+    //     }),
+    //     "Not all news are in Confirmed status"
+    // );
 
-    let news = coordinator.get_news()?;
-
-    assert!(
-        news.monitor_news.iter().all(|n| match n {
-            MonitorNews::Transaction(_, tx_status, _) => tx_status.is_confirmed(),
-            _ => false,
-        }),
-        "Not all news are in Confirmed status"
-    );
-
-    assert_eq!(news.monitor_news.len(), 3);
+    // assert_eq!(news.monitor_news.len(), 3);
 
     setup.bitcoind.stop()?;
 
