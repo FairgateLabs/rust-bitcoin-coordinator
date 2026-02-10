@@ -15,7 +15,7 @@ use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClientApi, types::BlockHeight};
 use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
     types::{MonitorNews, MonitorType, TypesToMonitor},
-    TransactionInfo,
+    TransactionStatus,
 };
 use console::style;
 use key_manager::key_manager::KeyManager;
@@ -84,7 +84,7 @@ pub trait BitcoinCoordinatorApi {
     /// * `utxo` - Utxo to use for speed-ups
     fn add_funding(&self, utxo: Utxo) -> Result<(), BitcoinCoordinatorError>;
 
-    fn get_transaction(&self, txid: Txid) -> Result<TransactionInfo, BitcoinCoordinatorError>;
+    fn get_transaction(&self, txid: Txid) -> Result<TransactionStatus, BitcoinCoordinatorError>;
 
     /// Retrieves news about monitored transactions
     /// Returns information about transaction confirmations.
@@ -363,7 +363,6 @@ impl BitcoinCoordinator {
         txs_info: (Vec<Txid>, Vec<String>),
         speedup_type: String,
         speedup_tx_id: Txid,
-        tx: Transaction,
         dispatch_error: String,
     ) -> Result<(), BitcoinCoordinatorError> {
         error!(
@@ -482,7 +481,6 @@ impl BitcoinCoordinator {
                             txs_info.clone(),
                             speedup_type.clone(),
                             speedup_data.tx_id,
-                            tx.clone(),
                             error_msg,
                         )?;
 
@@ -507,7 +505,6 @@ impl BitcoinCoordinator {
                             txs_info.clone(),
                             speedup_type.clone(),
                             speedup_data.tx_id,
-                            tx.clone(),
                             error_msg,
                         )?;
                     }
@@ -1495,7 +1492,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         Ok(())
     }
 
-    fn get_transaction(&self, txid: Txid) -> Result<TransactionInfo, BitcoinCoordinatorError> {
+    fn get_transaction(&self, txid: Txid) -> Result<TransactionStatus, BitcoinCoordinatorError> {
         let tx_status = self.monitor.get_tx_status(&txid)?;
         Ok(tx_status)
     }

@@ -8,4 +8,4 @@ pub mod types;
 pub use bitvmx_transaction_monitor::types::AckMonitorNews;
 pub use bitvmx_transaction_monitor::types::MonitorNews;
 pub use bitvmx_transaction_monitor::types::TypesToMonitor;
-pub use bitvmx_transaction_monitor::TransactionInfo;
+pub use bitvmx_transaction_monitor::TransactionStatus;
