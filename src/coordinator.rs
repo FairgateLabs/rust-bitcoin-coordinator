@@ -1178,13 +1178,6 @@ impl BitcoinCoordinator {
             .as_ref()
             .map_or_else(|| speedup.tx_id, |rbf| rbf.tx_id);
 
-        info!(
-            "{} INFOOOOOOOOOO | SpeedupTxId({}) | RBFTxId({})",
-            style("Coordinator").green(),
-            style(speedup.tx_id).yellow(),
-            style(replaces_tx_id).yellow(),
-        );
-
         let mut txs_to_speedup: Vec<CoordinatedTransaction> = Vec::new();
 
         for (_, tx, _) in speedup.speedup_tx_data.clone() {
