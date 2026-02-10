@@ -8,7 +8,6 @@ use bitvmx_bitcoin_rpc::types::BlockHeight;
 use protocol_builder::types::output::SpeedupData;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
-use tracing::info;
 pub struct BitcoinCoordinatorStore {
     pub store: Rc<Storage>,
     pub max_unconfirmed_speedups: u32,
@@ -256,7 +255,6 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             (TransactionState::ToDispatch, TransactionState::InMempool) => true,
             (TransactionState::ToDispatch, TransactionState::Failed) => true,
             (TransactionState::InMempool, TransactionState::Confirmed) => true,
-            (TransactionState::InMempool, TransactionState::Replaced) => true, // RBF speedup replaced by newer RBF
             (TransactionState::Confirmed, TransactionState::Finalized) => true,
             // Allow transition from Confirmed to InMempool when transaction becomes orphan (reorg)
             (TransactionState::Confirmed, TransactionState::InMempool) => true,
@@ -362,8 +360,6 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 if let Some(pos) = is_new_news {
                     let (_, _, _, _, (last_block_hash, _)) = &news_list[pos];
 
-                    info!("last_block_hash: {:?} ", last_block_hash);
-                    info!("current_block_hash: {:?} ", current_block_hash);
                     if last_block_hash != &current_block_hash {
                         // Update the news if the block hash is different
                         news_list[pos] =

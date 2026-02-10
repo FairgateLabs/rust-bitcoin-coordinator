@@ -74,7 +74,8 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     // Since we've already mined 102 blocks, we need to advance the coordinator by 102 ticks
     // so the indexer can catch up with the current blockchain height.
-    for _ in 0..blocks_mined {
+    // Tick coordinator until it is ready (indexer is caught up with the current blockchain height)
+    while !coordinator.is_ready()? {
         coordinator.tick()?;
     }
 
@@ -104,8 +105,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
     // In this tick coordinator should RBF the last CPFP.
     coordinator.tick()?;
 
-    for _ in 0..19 {
-        info!("Mine and Tick");
+    for _ in 0..30 {
         // Mine a block to mined txs (tx1 and speedup tx)
         setup
             .bitcoin_client
@@ -114,9 +114,6 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
         coordinator.tick()?;
     }
-
-    // Give the coordinator one more tick to process any remaining news
-    coordinator.tick()?;
 
     let news = coordinator.get_news()?;
     // After 19 blocks mined, the 10 transactions should have been confirmed/finalized.

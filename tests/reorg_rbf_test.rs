@@ -1,4 +1,4 @@
-use bitcoin::Amount;
+use bitcoin::{Address, Amount, CompressedPublicKey};
 use bitcoin_coordinator::{
     config::CoordinatorSettingsConfig,
     coordinator::{BitcoinCoordinator, BitcoinCoordinatorApi},
@@ -19,7 +19,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
     // This test simulates a blockchain reorganization scenario. It begins by setting up a Bitcoin
     // regtest environment and dispatching a transaction with a Child-Pays-For-Parent (CPFP) speedup.
-    // The test continues to apply speedups until a Replace-By-Fee (RBF) is necessary. After executing
+    // The test continues to apply speedups until a Replace-By-Fee (Should RBF last speedu) is necessary. After executing
     // the RBF, the blockchain is reorganized. The test then verifies that all transactions are correctly
     // handled and ensures that dispatching can continue smoothly.
 
@@ -130,52 +130,52 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     coordinator.tick()?;
 
-    // // Dispatch two more transactions to observe the reorganization effects
-    // coordinate_tx(
-    //     coordinator.clone(),
-    //     amount,
-    //     setup.network,
-    //     setup.key_manager.clone(),
-    //     setup.bitcoin_client.clone(),
-    //     None,
-    // )?;
+    // Dispatch two more transactions to observe the reorganization effects
+    coordinate_tx(
+        coordinator.clone(),
+        amount,
+        setup.network,
+        setup.key_manager.clone(),
+        setup.bitcoin_client.clone(),
+        None,
+    )?;
 
-    // coordinate_tx(
-    //     coordinator.clone(),
-    //     amount,
-    //     setup.network,
-    //     setup.key_manager.clone(),
-    //     setup.bitcoin_client.clone(),
-    //     None,
-    // )?;
+    coordinate_tx(
+        coordinator.clone(),
+        amount,
+        setup.network,
+        setup.key_manager.clone(),
+        setup.bitcoin_client.clone(),
+        None,
+    )?;
 
-    // let public_key = setup
-    //     .key_manager
-    //     .derive_keypair(key_manager::key_type::BitcoinKeyType::P2tr, 1)
-    //     .unwrap();
-    // let compressed = CompressedPublicKey::try_from(public_key).unwrap();
-    // let funding_wallet = Address::p2wpkh(&compressed, setup.network);
+    let public_key = setup
+        .key_manager
+        .derive_keypair(key_manager::key_type::BitcoinKeyType::P2tr, 1)
+        .unwrap();
+    let compressed = CompressedPublicKey::try_from(public_key).unwrap();
+    let funding_wallet = Address::p2wpkh(&compressed, setup.network);
 
-    // setup
-    //     .bitcoin_client
-    //     .mine_blocks_to_address(1, &funding_wallet)
-    //     .unwrap();
+    setup
+        .bitcoin_client
+        .mine_blocks_to_address(1, &funding_wallet)
+        .unwrap();
 
-    // while !coordinator.is_ready()? {
-    //     coordinator.tick()?;
-    // }
+    while !coordinator.is_ready()? {
+        coordinator.tick()?;
+    }
 
-    // let news = coordinator.get_news()?;
+    let news = coordinator.get_news()?;
 
-    // assert!(
-    //     news.monitor_news.iter().all(|n| match n {
-    //         MonitorNews::Transaction(_, tx_status, _) => tx_status.is_confirmed(),
-    //         _ => false,
-    //     }),
-    //     "Not all news are in Confirmed status"
-    // );
+    assert!(
+        news.monitor_news.iter().all(|n| match n {
+            MonitorNews::Transaction(_, tx_status, _) => tx_status.is_confirmed(),
+            _ => false,
+        }),
+        "Not all news are in Confirmed status"
+    );
 
-    // assert_eq!(news.monitor_news.len(), 3);
+    assert_eq!(news.monitor_news.len(), 3);
 
     setup.bitcoind.stop()?;
 

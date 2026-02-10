@@ -341,7 +341,7 @@ impl BitcoinCoordinator {
     fn speedup_cpfp_tx(&self) -> Result<(), BitcoinCoordinatorError> {
         let funding = self.store.get_funding()?.unwrap();
 
-        let last_speedup = self.store.get_last_speedup()?;
+        let last_speedup = self.store.get_last_pending_speedup()?;
 
         if let Some((speedup, _)) = last_speedup {
             let bump_fee_percentage =
@@ -372,7 +372,6 @@ impl BitcoinCoordinator {
             speedup_type,
             style(speedup_tx_id).yellow(),
         );
-        debug!("Transaction Details: {:?}", style(&tx).magenta());
 
         let news = CoordinatorNews::DispatchSpeedUpError(
             txs_info.0,
@@ -400,6 +399,8 @@ impl BitcoinCoordinator {
             style(speedup_data.tx_id).yellow(),
         );
 
+        let speedup_tx_id = tx.compute_txid();
+
         let txs_info: (Vec<Txid>, Vec<String>) = speedup_data
             .speedup_tx_data
             .iter()
@@ -413,11 +414,11 @@ impl BitcoinCoordinator {
                 let dispatch_block = self.client.get_best_block()?;
 
                 // Update broadcast_block_height with the block where the transaction was dispatched
-                let mut speedup_data_with_block = speedup_data;
-                speedup_data_with_block.broadcast_block_height = dispatch_block;
+                let mut speedup = speedup_data;
+                speedup.broadcast_block_height = dispatch_block;
 
                 self.monitor.monitor(TypesToMonitor::Transactions(
-                    vec![speedup_data_with_block.tx_id],
+                    vec![speedup.tx_id],
                     CPFP_TRANSACTION_CONTEXT.to_string(),
                     None,
                 ))?;
@@ -426,11 +427,21 @@ impl BitcoinCoordinator {
                     "{} Successfully sent {} Transaction({}) dispatched at block height {}",
                     style("Coordinator").green(),
                     speedup_type,
-                    style(speedup_data_with_block.tx_id).yellow(),
+                    style(speedup.tx_id).yellow(),
                     style(dispatch_block).blue(),
                 );
 
-                self.store.save_speedup(speedup_data_with_block)?;
+                // If this is an RBF transaction replacing another speedup, update the replaced speedup
+                // to mark it as being replaced by this new speedup
+                if let Some(replaced_txid) = speedup.replaces_tx_id {
+                    if let Ok(mut replaced_speedup) = self.store.get_speedup(&replaced_txid) {
+                        replaced_speedup.replaced_by_tx_id = Some(speedup_tx_id);
+
+                        self.store.save_speedup(replaced_speedup)?;
+                    }
+                }
+
+                self.store.save_speedup(speedup)?;
             }
             Err(e) => {
                 let error_msg = e.to_string();
@@ -723,23 +734,32 @@ impl BitcoinCoordinator {
                 //
                 // In that scenario, the "old" speedup will eventually appear as NotFound.
                 // Check if this speedup was replaced by another by checking replaced_by_tx_id field.
+
                 if speedup.is_being_replaced() {
                     // This speedup was replaced by another RBF transaction.
                     // Mark it as Replaced but don't cancel monitoring yet - we'll cancel it only when
                     // the replacing transaction reaches Finalized state.
+
+                    let tx_name = speedup.get_tx_name();
+
                     debug!(
-                        "{} Speedup Transaction({}) was replaced by another RBF, marking as Replaced",
+                        "{} {} Transaction({}) was replaced by another RBF",
                         style("Coordinator").green(),
+                        tx_name,
                         style(speedup.tx_id).blue(),
                     );
 
-                    // Mark it as Replaced so it is removed from the active speedups list.
-                    // We don't cancel monitoring here - that will be done when the replacing transaction is finalized.
-                    self.store
-                        .update_speedup_state(speedup.tx_id, TransactionState::Replaced)?;
+                    // We just wait that the transaccion that reaplace it is finalized to remove it from active txs.
 
                     continue;
                 }
+
+                info!(
+                    "{} Transaction was not replaced by another RBF {} and is not replacing another RBF {}",
+                    style("Coordinator").green(),
+                    style(speedup.is_being_replaced()).blue(),
+                    style(speedup.is_replacing()).blue(),
+                );
 
                 // CPFP CASE:
                 // ----------
@@ -805,9 +825,16 @@ impl BitcoinCoordinator {
         // Re-dispatch speedups that need to be resent
         if !speedups_to_dispatch.is_empty() {
             debug!(
-                "{} Total number of speedups to be dispatched {}",
+                "{} Total number of speedups to be dispatched {} [{:?}]",
                 style("Coordinator").green(),
-                style(speedups_to_dispatch.len()).yellow()
+                style(speedups_to_dispatch.len()).yellow(),
+                style(
+                    speedups_to_dispatch
+                        .iter()
+                        .map(|s| s.tx_id)
+                        .collect::<Vec<_>>()
+                )
+                .blue(),
             );
 
             for speedup in speedups_to_dispatch {
@@ -924,8 +951,6 @@ impl BitcoinCoordinator {
             return Ok(());
         }
 
-        let is_rbf = replaces_tx_id.is_some();
-
         let txs_speedup_data = txs_data
             .iter()
             .map(|(speedup_data, tx, _)| (speedup_data.clone(), tx.vsize()))
@@ -935,6 +960,8 @@ impl BitcoinCoordinator {
 
         let (diff_fee_for_unconfirmed_chain, chain_vsize) =
             self.get_diff_fee_for_unconfirmed_chain(new_network_fee_rate)?;
+
+        let is_rbf = replaces_tx_id.is_some();
 
         let (speedup_tx, speedup_fee) = self.get_speedup_tx(
             &txs_speedup_data,
@@ -1000,15 +1027,6 @@ impl BitcoinCoordinator {
             txs_data,
             new_network_fee_rate,
         );
-
-        // If this is an RBF transaction replacing another speedup, update the replaced speedup
-        // to mark it as being replaced by this new speedup
-        if let Some(replaced_txid) = replaces_tx_id {
-            if let Ok(mut replaced_speedup) = self.store.get_speedup(&replaced_txid) {
-                replaced_speedup.replaced_by_tx_id = Some(speedup_tx_id);
-                self.store.save_speedup(replaced_speedup)?;
-            }
-        }
 
         self.dispatch_speedup(speedup_tx, speedup_data)?;
 
@@ -1152,9 +1170,20 @@ impl BitcoinCoordinator {
         }
     }
 
-    fn rbf_last_cpfp(&self) -> Result<(), BitcoinCoordinatorError> {
+    fn replace_last_speedup(&self) -> Result<(), BitcoinCoordinatorError> {
         // When this function is called, we know that the last speedup exists to be replaced.
-        let (speedup, rbf_tx) = self.store.get_last_speedup()?.unwrap();
+        let (speedup, rbf_tx) = self.store.get_last_pending_speedup()?.unwrap();
+
+        let replaces_tx_id = rbf_tx
+            .as_ref()
+            .map_or_else(|| speedup.tx_id, |rbf| rbf.tx_id);
+
+        info!(
+            "{} INFOOOOOOOOOO | SpeedupTxId({}) | RBFTxId({})",
+            style("Coordinator").green(),
+            style(speedup.tx_id).yellow(),
+            style(replaces_tx_id).yellow(),
+        );
 
         let mut txs_to_speedup: Vec<CoordinatedTransaction> = Vec::new();
 
@@ -1172,17 +1201,25 @@ impl BitcoinCoordinator {
 
         let new_bump_fee = self.get_bump_fee_percentage_strategy(increase_last_bump_fee)?;
 
+        info!(
+            "{} RBF last CPFP | SpeedupTxId({}) | PrevBumpFee({}) | NewBumpFee({})",
+            style("Coordinator").green(),
+            style(speedup.tx_id).yellow(),
+            style(increase_last_bump_fee).blue(),
+            style(new_bump_fee).red()
+        );
+
         self.create_and_send_cpfp_tx(
             speedup.speedup_tx_data,
             speedup.prev_funding,
             new_bump_fee,
-            Some(speedup.tx_id),
+            Some(replaces_tx_id),
         )?;
 
         Ok(())
     }
 
-    fn boost_cpfp_again(&self) -> Result<(), BitcoinCoordinatorError> {
+    fn perform_speedup(&self) -> Result<(), BitcoinCoordinatorError> {
         // Check if we can send transactions or we stop the process until CPFP transactions start to be confirmed.
         if self.store.can_speedup()? {
             self.speedup_cpfp_tx()?;
@@ -1327,7 +1364,7 @@ impl BitcoinCoordinator {
     /// has reached the limit (`max_unconfirmed_speedups`). If so, it's necessary to replace
     /// the last speedup transaction with a higher-fee variant using RBF, to free up the ability
     /// to further speed up transactions if needed.
-    fn should_rbf_last_speedup(&self) -> Result<bool, BitcoinCoordinatorError> {
+    fn should_replace_last_speedup(&self) -> Result<bool, BitcoinCoordinatorError> {
         let reached_unconfirmed_speedups = self.store.has_reached_max_unconfirmed_speedups()?;
 
         if reached_unconfirmed_speedups {
@@ -1337,8 +1374,8 @@ impl BitcoinCoordinator {
         Ok(false)
     }
 
-    fn should_boost_speedup_again(&self) -> Result<bool, BitcoinCoordinatorError> {
-        let last_speedup = self.store.get_last_speedup()?;
+    fn should_boost_speedup(&self) -> Result<bool, BitcoinCoordinatorError> {
+        let last_speedup = self.store.get_last_pending_speedup()?;
 
         if let Some((speedup, rbf_tx)) = last_speedup {
             let current_block_height = self.monitor.get_monitor_height()?;
@@ -1347,6 +1384,7 @@ impl BitcoinCoordinator {
             // The logic is: if the current block height is greater than the sum of the speedup's broadcast block height and the number of RBFs,
             // then enough blocks have passed without confirmation, so we should bump the fee again.
             // This helps ensure that stuck transactions are periodically rebroadcast with higher fees to improve their chances of confirmation.
+
             let last_broadcast_block_height = if let Some(rbf_tx) = rbf_tx {
                 rbf_tx.broadcast_block_height
             } else {
@@ -1357,8 +1395,9 @@ impl BitcoinCoordinator {
                 >= self.settings.min_blocks_before_resend_speedup
             {
                 debug!(
-                    "{} Last CPFP should be bumped | CurrentHeight({}) | BroadcastHeight({}) | MinBlocksBeforeRBF({})",
+                    "{} Last {} should be bumped | CurrentHeight({}) | BroadcastHeight({}) | MinBlocksBeforeRBF({})",
                     style("Coordinator").green(),
+                    style(speedup.get_tx_name()).blue(),
                     style(current_block_height).blue(),
                     style(last_broadcast_block_height).blue(),
                     style(self.settings.min_blocks_before_resend_speedup).blue(),
@@ -1388,14 +1427,16 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
         self.process_active_transactions()?;
         self.process_active_speedups()?;
 
-        if self.should_boost_speedup_again()? {
-            if self.should_rbf_last_speedup()? {
-                self.rbf_last_cpfp()?;
-                return Ok(());
-            }
-
-            self.boost_cpfp_again()?;
+        if !self.should_boost_speedup()? {
+            return Ok(());
         }
+
+        if self.should_replace_last_speedup()? {
+            self.replace_last_speedup()?;
+            return Ok(());
+        }
+
+        self.perform_speedup()?;
 
         Ok(())
     }

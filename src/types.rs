@@ -24,10 +24,6 @@ pub enum TransactionState {
 
     // The transaction has failed to be broadcasted and rejected by the network.
     Failed,
-
-    // The transaction (typically an RBF speedup) was removed from the mempool because it was replaced by a newer RBF transaction.
-    // This state indicates the transaction is no longer relevant and should not be monitored or re-dispatched.
-    Replaced,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -67,6 +63,8 @@ pub type SpeedupState = TransactionState;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct CoordinatedSpeedUpTransaction {
+    pub speedup_type: SpeedupType,
+
     pub tx_id: Txid,
 
     // The previous funding utxo.
@@ -94,6 +92,12 @@ pub struct CoordinatedSpeedUpTransaction {
     pub speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
 
     pub network_fee_rate_used: u64,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub enum SpeedupType {
+    RBF,
+    CPFP,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
@@ -124,7 +128,8 @@ impl CoordinatedSpeedUpTransaction {
         speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
         network_fee_rate_used: u64,
     ) -> Self {
-        let mut context = if replaces_tx_id.is_some() {
+        let is_rbf = replaces_tx_id.is_some();
+        let mut context = if is_rbf {
             RBF_TRANSACTION_CONTEXT.to_string()
         } else {
             CPFP_TRANSACTION_CONTEXT.to_string()
@@ -138,6 +143,11 @@ impl CoordinatedSpeedUpTransaction {
         }
 
         Self {
+            speedup_type: if is_rbf {
+                SpeedupType::RBF
+            } else {
+                SpeedupType::CPFP
+            },
             tx_id,
             prev_funding,
             next_funding,
