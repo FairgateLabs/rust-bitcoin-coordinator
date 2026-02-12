@@ -14,7 +14,7 @@ use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, rpc_config::RpcConfig};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClientApi, types::BlockHeight};
 use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
-    types::{MonitorNews, MonitorType, TypesToMonitor},
+    types::{MonitorNews, TypesToMonitor},
     TransactionStatus,
 };
 use console::style;
@@ -28,7 +28,7 @@ use storage_backend::storage::Storage;
 use tracing::{debug, error, info, warn};
 
 pub struct BitcoinCoordinator {
-    monitor: MonitorType,
+    monitor: Monitor,
     key_manager: Rc<KeyManager>,
     store: BitcoinCoordinatorStore,
     client: BitcoinClient,
