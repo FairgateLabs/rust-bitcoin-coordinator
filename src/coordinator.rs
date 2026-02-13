@@ -13,7 +13,7 @@ use bitcoin::{Network, Transaction, Txid};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, rpc_config::RpcConfig};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClientApi, types::BlockHeight};
 use bitvmx_transaction_monitor::{
-    monitor::{Monitor, MonitorApi},
+    monitor::Monitor,
     types::{MonitorNews, TypesToMonitor},
     TransactionStatus,
 };
