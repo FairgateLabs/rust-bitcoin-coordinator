@@ -36,6 +36,9 @@ pub struct CoordinatedTransaction {
     pub target_block_height: Option<BlockHeight>,
     pub state: TransactionState,
     pub context: String,
+    // Number of blocks to wait before considering the transaction stuck in mempool
+    // None means this transaction doesn't have a stuck threshold
+    pub stuck_in_mempool_blocks: Option<u32>,
 }
 
 impl CoordinatedTransaction {
@@ -45,6 +48,7 @@ impl CoordinatedTransaction {
         state: TransactionState,
         target_block_height: Option<BlockHeight>,
         context: String,
+        stuck_in_mempool_blocks: Option<u32>,
     ) -> Self {
         Self {
             tx_id: tx.compute_txid(),
@@ -54,6 +58,7 @@ impl CoordinatedTransaction {
             state,
             target_block_height,
             context,
+            stuck_in_mempool_blocks,
         }
     }
 }
@@ -247,6 +252,11 @@ pub enum CoordinatorNews {
     /// - String: Context information about the transaction
     /// - String: Error message describing the network error
     NetworkError(Txid, String, String),
+
+    /// Transaction is stuck in mempool for too long
+    /// - Txid: The transaction ID that is stuck
+    /// - String: Context information about the transaction
+    TransactionStuckInMempool(Txid, String),
 }
 
 impl News {
@@ -267,6 +277,7 @@ pub enum AckCoordinatorNews {
     TransactionAlreadyInMempool(Txid),
     MempoolRejection(Txid),
     NetworkError(Txid),
+    TransactionStuckInMempool(Txid),
 }
 
 pub enum AckNews {

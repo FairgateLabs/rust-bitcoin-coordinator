@@ -20,9 +20,8 @@ mod utils;
 fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
-    let mut blocks_mined = 102;
     let setup = create_test_setup(TestSetupConfig {
-        blocks_mined,
+        blocks_mined: 102,
         bitcoind_flags: Some(BitcoindFlags {
             block_min_tx_fee: 0.00004,
             ..Default::default()
@@ -35,8 +34,6 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         .bitcoin_client
         .fund_address(&setup.funding_wallet, amount)?;
 
-    // Fund address mines 1 block
-    blocks_mined = blocks_mined + 1;
 
     info!(
         "{} Funding tx address {:?}",
@@ -54,9 +51,6 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
     let (funding_speedup, funding_speedup_vout) = setup
         .bitcoin_client
         .fund_address(&setup.funding_wallet, amount)?;
-
-    // Funding speed up tx mines 1 block
-    blocks_mined = blocks_mined + 1;
 
     info!(
         "{} Funding speed up tx: {:?} | vout: {:?}",

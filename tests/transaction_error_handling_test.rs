@@ -145,7 +145,7 @@ fn test_transaction_already_in_mempool() -> Result<(), anyhow::Error> {
     ))?;
 
     // Try to dispatch the same transaction (already confirmed in blockchain)
-    coordinator.dispatch(tx.clone(), None, context.clone(), None, None)?;
+    coordinator.dispatch_without_speedup(tx.clone(), context.clone(), None, None, 10)?;
 
     // Process the dispatch attempt - this should detect "Transaction outputs already in utxo set"
     coordinator.tick()?;
@@ -249,7 +249,7 @@ fn test_mempool_rejection() -> Result<(), anyhow::Error> {
     ))?;
 
     // Dispatch the transaction (will fail due to low fee)
-    coordinator.dispatch(tx.clone(), None, context.clone(), None, None)?;
+    coordinator.dispatch_without_speedup(tx.clone(), context.clone(), None, None, 10)?;
 
     // Process dispatch attempts
     coordinator.tick()?;
@@ -331,7 +331,7 @@ fn test_dispatch_transaction_error_fatal() -> Result<(), anyhow::Error> {
     ))?;
 
     // Dispatch the invalid transaction (will fail)
-    coordinator.dispatch(invalid_tx.clone(), None, context.clone(), None, None)?;
+    coordinator.dispatch_without_speedup(invalid_tx.clone(), context.clone(), None, None, 10)?;
 
     // Process dispatch attempt
     coordinator.tick()?;
@@ -434,7 +434,7 @@ fn test_network_error() -> Result<(), anyhow::Error> {
     ))?;
 
     // Dispatch the transaction (will fail due to low fee)
-    coordinator.dispatch(tx.clone(), None, context.clone(), None, None)?;
+    coordinator.dispatch_without_speedup(tx.clone(), context.clone(), None, None, 10)?;
 
     // Do one tick to attempt sending the transaction (will fail with MempoolRejection)
     coordinator.tick()?;
@@ -627,7 +627,13 @@ fn test_mempool_full() -> Result<(), anyhow::Error> {
             None, // Let it use the default pattern (fund_address transaction)
         )?;
 
-        coordinator.dispatch(tx.clone(), None, tx_context.clone(), Some(10000), None)?;
+        coordinator.dispatch_without_speedup(
+            tx.clone(),
+            tx_context.clone(),
+            Some(10000),
+            None,
+            10,
+        )?;
 
         if idx % 100 == 0 && idx != 0 {
             info!("Dispatched {} transactions out of {}", idx, NUM_TXS);

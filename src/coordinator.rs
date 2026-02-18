@@ -69,6 +69,23 @@ pub trait BitcoinCoordinatorApi {
         number_confirmation_trigger: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorError>;
 
+    /// Dispatches a transaction to the Bitcoin network without speedup support
+    ///
+    /// # Arguments
+    /// * `tx` - The Bitcoin transaction to dispatch
+    /// * `context` - Additional context information for the transaction to be returned in news
+    /// * `block_height` - Block height to dispatch the transaction (None means now)
+    /// * `number_confirmation_trigger` - Just trigger news when the transaction has exactly this number of confirmations (None means all confirmations)
+    /// * `stuck_in_mempool_blocks` - Number of blocks to wait before considering the transaction stuck in mempool
+    fn dispatch_without_speedup(
+        &self,
+        tx: Transaction,
+        context: String,
+        block_height: Option<BlockHeight>,
+        number_confirmation_trigger: Option<u32>,
+        stuck_in_mempool_blocks: u32,
+    ) -> Result<(), BitcoinCoordinatorError>;
+
     /// Cancels the monitor and the dispatch of a type of data
     /// This method removes the monitor and the dispatch from the coordinator's store.
     /// Which means that the data will no longer be monitored.
@@ -141,6 +158,30 @@ impl BitcoinCoordinator {
             let tx_status = self.monitor.get_tx_status(&tx.tx_id)?;
 
             if tx_status.is_in_mempool() {
+                // Check if transaction is stuck in mempool
+                if let Some(stuck_threshold) = tx.stuck_in_mempool_blocks {
+                    if let Some(broadcast_height) = tx.broadcast_block_height {
+                        let current_height = self.monitor.get_monitor_height()?;
+                        let blocks_in_mempool = current_height.saturating_sub(broadcast_height);
+
+                        if blocks_in_mempool >= stuck_threshold {
+                            // update_news will check if notification already exists and only add if not present or not acked
+                            let news = CoordinatorNews::TransactionStuckInMempool(
+                                tx.tx_id,
+                                tx.context.clone(),
+                            );
+                            self.update_news(news)?;
+
+                            warn!(
+                                "{} Transaction({}) stuck in mempool for {} blocks (threshold: {})",
+                                style("Coordinator").green(),
+                                style(tx.tx_id).yellow(),
+                                style(blocks_in_mempool).red(),
+                                style(stuck_threshold).blue(),
+                            );
+                        }
+                    }
+                }
                 // Skip transactions that are still in the mempool,
                 // as they are actively being monitored but not yet confirmed on the blockchain.
                 // If transaction was speedup, then speedup will be boost or RBF.
@@ -1519,12 +1560,44 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
 
         // Save the transaction to be dispatched.
         self.store
-            .save_tx(tx.clone(), speedup_data, target_block_height, context)?;
+            .save_tx(tx.clone(), speedup_data, target_block_height, context, None)?;
 
         info!(
             "{} Mark Transaction({}) to dispatch",
             style("Coordinator").green(),
             style(tx.compute_txid()).yellow()
+        );
+
+        Ok(())
+    }
+
+    fn dispatch_without_speedup(
+        &self,
+        tx: Transaction,
+        context: String,
+        target_block_height: Option<BlockHeight>,
+        number_confirmation_trigger: Option<u32>,
+        stuck_in_mempool_blocks: u32,
+    ) -> Result<(), BitcoinCoordinatorError> {
+        let to_monitor = TypesToMonitor::Transactions(
+            vec![tx.compute_txid()],
+            context.clone(),
+            number_confirmation_trigger,
+        );
+        self.monitor.monitor(to_monitor)?;
+
+        self.store.save_tx(
+            tx.clone(),
+            None,
+            target_block_height,
+            context,
+            Some(stuck_in_mempool_blocks),
+        )?;
+
+        info!(
+            "{} Mark Transaction({}) to dispatch without speedup",
+            style("Coordinator").green(),
+            style(tx.compute_txid()).yellow(),
         );
 
         Ok(())
