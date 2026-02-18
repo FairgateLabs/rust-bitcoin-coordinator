@@ -128,6 +128,144 @@ impl BitcoinCoordinator {
         })
     }
 
+    /// Review transactions and update their states based on monitor status.
+    /// This method checks the status of transactions in the mempool or confirmed on chain,
+    /// and updates their states accordingly. It also adds transactions that need to be
+    /// re-dispatched to the txs_to_dispatch vector.
+    fn review_transactions(
+        &self,
+        txs_to_review: Vec<CoordinatedTransaction>,
+        txs_to_dispatch: &mut Vec<CoordinatedTransaction>,
+    ) -> Result<(), BitcoinCoordinatorError> {
+        for tx in txs_to_review {
+            let tx_status = self.monitor.get_tx_status(&tx.tx_id)?;
+
+            if tx_status.is_in_mempool() {
+                // Skip transactions that are still in the mempool,
+                // as they are actively being monitored but not yet confirmed on the blockchain.
+                // If transaction was speedup, then speedup will be boost or RBF.
+                continue;
+            }
+
+            if tx_status.is_not_found() {
+                // If the transaction is not found we need to mark as dispatched and dispatch it again.
+                self.store
+                    .update_tx_state(tx_status.tx_id(), TransactionState::ToDispatch)?;
+
+                txs_to_dispatch.push(tx);
+
+                continue;
+            }
+
+            if tx_status.is_finalized() {
+                // Once the transaction is finalized, we are not monitoring it anymore.
+                debug!(
+                    "{} Transaction({}) | Finalized | Confirmations({})",
+                    style("Coordinator").green(),
+                    style(tx.tx_id).yellow(),
+                    style(tx_status.confirmations).blue(),
+                );
+                self.store
+                    .update_tx_state(tx_status.tx_id(), TransactionState::Finalized)?;
+                continue;
+            }
+
+            if tx_status.is_confirmed() {
+                debug!(
+                    "{} Transaction({}) | Confirmed | Confirmations({})",
+                    style("Coordinator").green(),
+                    style(tx.tx_id).yellow(),
+                    style(tx_status.confirmations).blue(),
+                );
+                self.store
+                    .update_tx_state(tx_status.tx_id(), TransactionState::Confirmed)?;
+                continue;
+            }
+
+            if tx_status.is_orphan() {
+                // The transaction is orphaned, meaning it was previously mined but has become unconfirmed due to a blockchain reorganization.
+                // If the orphaned transaction is still in the mempool, it's not necessary to re-dispatch it.
+                // Then we mark transaction that is in meempool.
+                // Note: get_tx_status will automatically mark an orphan transaction as NotFound if it's no longer present in the mempool.
+                debug!(
+                    "{} Transaction({}) | Orphan | Confirmations({})",
+                    style("Coordinator").green(),
+                    style(tx.tx_id).yellow(),
+                    style(tx_status.confirmations).blue(),
+                );
+                self.store
+                    .update_tx_state(tx_status.tx_id(), TransactionState::InMempool)?;
+                continue;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Dispatch transactions, separating them into those that need speedup and those that don't.
+    fn dispatch_transactions(
+        &self,
+        txs_to_dispatch: Vec<CoordinatedTransaction>,
+    ) -> Result<(), BitcoinCoordinatorError> {
+        if txs_to_dispatch.is_empty() {
+            return Ok(());
+        }
+
+        debug!(
+            "{} Total number of transactions to be dispatched {}",
+            style("Coordinator").green(),
+            style(txs_to_dispatch.len()).yellow()
+        );
+
+        let (txs_to_dispatch_with_speedup, txs_to_dispatch_without_speedup): (Vec<_>, Vec<_>) =
+            txs_to_dispatch
+                .into_iter()
+                .partition(|tx| self.should_speedup(tx));
+
+        if !txs_to_dispatch_without_speedup.is_empty() {
+            info!(
+                "{} Number of transactions to dispatch without speedup {}",
+                style("Coordinator").green(),
+                style(txs_to_dispatch_without_speedup.len()).yellow()
+            );
+
+            self.dispatch_txs(txs_to_dispatch_without_speedup)?;
+        }
+
+        if !txs_to_dispatch_with_speedup.is_empty() {
+            info!(
+                "{} Number of transactions to dispatch with speedup {}",
+                style("Coordinator").green(),
+                style(txs_to_dispatch_with_speedup.len()).yellow()
+            );
+
+            // Check if we can send transactions or we stop the process until CPFP transactions start to be confirmed.
+            if self.store.can_speedup()? {
+                self.speedup_and_dispatch_in_batch(txs_to_dispatch_with_speedup)?;
+            } else {
+                let is_funding_available = self.store.is_funding_available()?;
+                let is_enough_unconfirmed_txs = self.store.has_enough_unconfirmed_txs_for_cpfp()?;
+
+                if !is_enough_unconfirmed_txs {
+                    warn!(
+                        "{} Can not speedup, waiting for more unconfirmed transactions",
+                        style("Coordinator").green()
+                    );
+                }
+
+                if !is_funding_available {
+                    warn!(
+                        "{} Can not speedup, waiting for funding",
+                        style("Coordinator").green()
+                    );
+                    self.notify_funding_not_found()?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Process all active transactions (ToDispatch, InMempool, Confirmed) until they are finalized.
     /// This method:
     /// 1. Updates transaction states based on monitor status (confirmed, finalized, orphan)
@@ -170,98 +308,10 @@ impl BitcoinCoordinator {
         }
 
         // Update states for dispatched and confirmed transactions
-        for tx in txs_to_review {
-            let tx_status = self.monitor.get_tx_status(&tx.tx_id)?;
+        self.review_transactions(txs_to_review, &mut txs_to_dispatch)?;
 
-            if tx_status.is_in_mempool() {
-                // Skip transactions that are still in the mempool,
-                // as they are actively being monitored but not yet confirmed or finalized on the blockchain.
-                continue;
-            }
-
-            if tx_status.is_not_found() {
-                // If the transaction is not found we need to mark as dispatched and dispatch it again.
-                self.store
-                    .update_tx_state(tx_status.tx_id(), TransactionState::InMempool)?;
-
-                txs_to_dispatch.push(tx);
-
-                continue;
-            }
-
-            debug!(
-                "{} Transaction({}) | Confirmations({})",
-                style("Coordinator").green(),
-                style(tx.tx_id).yellow(),
-                style(tx_status.confirmations).blue(),
-            );
-
-            if tx_status.is_finalized() {
-                // Once the transaction is finalized, we are not monitoring it anymore.
-                self.store
-                    .update_tx_state(tx_status.tx_id(), TransactionState::Finalized)?;
-                continue;
-            }
-
-            if tx_status.is_confirmed() {
-                self.store
-                    .update_tx_state(tx_status.tx_id(), TransactionState::Confirmed)?;
-                continue;
-            }
-
-            if tx_status.is_orphan() {
-                // The transaction is orphaned, meaning it was previously mined but has become unconfirmed due to a blockchain reorganization.
-                // If the orphaned transaction is still in the mempool, it's not necessary to re-dispatch it.
-                // Note: get_tx_status will automatically mark an orphan transaction as NotFound if it's no longer present in the mempool.
-                self.store
-                    .update_tx_state(tx_status.tx_id(), TransactionState::InMempool)?;
-                continue;
-            }
-        }
-
-        // Dispatch new transactions
-        if !txs_to_dispatch.is_empty() {
-            debug!(
-                "{} Total number of transactions to be dispatched {}",
-                style("Coordinator").green(),
-                style(txs_to_dispatch.len()).yellow()
-            );
-
-            let (txs_to_dispatch_with_speedup, txs_to_dispatch_without_speedup): (Vec<_>, Vec<_>) =
-                txs_to_dispatch
-                    .into_iter()
-                    .partition(|tx| self.should_speedup(tx));
-
-            if !txs_to_dispatch_without_speedup.is_empty() {
-                info!(
-                    "{} Number of transactions to dispatch without speedup {}",
-                    style("Coordinator").green(),
-                    style(txs_to_dispatch_without_speedup.len()).yellow()
-                );
-
-                self.dispatch_txs(txs_to_dispatch_without_speedup)?;
-            }
-
-            if !txs_to_dispatch_with_speedup.is_empty() {
-                info!(
-                    "{} Number of transactions to dispatch with speedup {}",
-                    style("Coordinator").green(),
-                    style(txs_to_dispatch_with_speedup.len()).yellow()
-                );
-
-                // Check if we can send transactions or we stop the process until CPFP transactions start to be confirmed.
-                if self.store.can_speedup()? {
-                    self.speedup_and_dispatch_in_batch(txs_to_dispatch_with_speedup)?;
-                } else {
-                    warn!("{} Can not speedup", style("Coordinator").green());
-                    let is_funding_available = self.store.is_funding_available()?;
-
-                    if !is_funding_available {
-                        self.notify_funding_not_found()?;
-                    }
-                }
-            }
-        }
+        // Dispatch transactions (with or without speedup)
+        self.dispatch_transactions(txs_to_dispatch)?;
 
         Ok(())
     }
@@ -558,7 +608,7 @@ impl BitcoinCoordinator {
 
                     let error_kind = BitcoinBroadcastErrorKind::from_error_message(&error_msg);
 
-                    let (news, should_push_to_sent) = match error_kind {
+                    let news = match error_kind {
                         BitcoinBroadcastErrorKind::AlreadyKnown => {
                             let deliver_block_height = self.monitor.get_monitor_height()?;
 
@@ -570,7 +620,10 @@ impl BitcoinCoordinator {
                                 tx.tx_id,
                                 tx.context.clone(),
                             );
-                            (news, true)
+
+                            txs_sent.push(tx);
+
+                            news
                         }
                         BitcoinBroadcastErrorKind::MempoolRejection => {
                             // Retryable error - keep in ToDispatch state to retry on next tick
@@ -580,7 +633,7 @@ impl BitcoinCoordinator {
                                 tx.context.clone(),
                                 error_msg,
                             );
-                            (news, false)
+                            news
                         }
                         BitcoinBroadcastErrorKind::NetworkError => {
                             // Retryable error - keep in ToDispatch state to retry on next tick
@@ -590,10 +643,10 @@ impl BitcoinCoordinator {
                                 tx.context.clone(),
                                 error_msg,
                             );
-                            (news, false)
+                            news
                         }
                         BitcoinBroadcastErrorKind::Other => {
-                            // Unknown error
+                            // Unknown error: mark as failed, which means the transaction will no longer be dispatched. Report the error.
                             self.store
                                 .update_tx_state(tx.tx_id, TransactionState::Failed)?;
                             let news = CoordinatorNews::DispatchTransactionError(
@@ -601,14 +654,11 @@ impl BitcoinCoordinator {
                                 tx.context.clone(),
                                 error_msg,
                             );
-                            (news, false)
+                            news
                         }
                     };
 
                     self.update_news(news)?;
-                    if should_push_to_sent {
-                        txs_sent.push(tx);
-                    }
                 }
             }
         }
