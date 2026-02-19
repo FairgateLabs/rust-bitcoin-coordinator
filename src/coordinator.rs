@@ -1503,10 +1503,8 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
 
         if self.is_ready()? {
             debug!("{} Ready", style("Coordinator").green());
-            info!("{} Ready", style("Coordinator").green());
         } else {
             debug!("{} Not Ready", style("Coordinator").green());
-            info!("{} Not Ready", style("Coordinator").green());
             return Ok(());
         }
 
