@@ -188,10 +188,12 @@ impl BitcoinCoordinator {
                 continue;
             }
 
+            let tx_id = tx_status.tx_id_or_error()?;
+
             if tx_status.is_not_found() {
                 // If the transaction is not found we need to mark as dispatched and dispatch it again.
                 self.store
-                    .update_tx_state(tx_status.tx_id(), TransactionState::ToDispatch)?;
+                    .update_tx_state(tx_id, TransactionState::ToDispatch)?;
 
                 txs_to_dispatch.push(tx);
 
@@ -207,7 +209,7 @@ impl BitcoinCoordinator {
                     style(tx_status.confirmations).blue(),
                 );
                 self.store
-                    .update_tx_state(tx_status.tx_id(), TransactionState::Finalized)?;
+                    .update_tx_state(tx_id, TransactionState::Finalized)?;
                 continue;
             }
 
@@ -219,7 +221,7 @@ impl BitcoinCoordinator {
                     style(tx_status.confirmations).blue(),
                 );
                 self.store
-                    .update_tx_state(tx_status.tx_id(), TransactionState::Confirmed)?;
+                    .update_tx_state(tx_id, TransactionState::Confirmed)?;
                 continue;
             }
 
@@ -235,7 +237,7 @@ impl BitcoinCoordinator {
                     style(tx_status.confirmations).blue(),
                 );
                 self.store
-                    .update_tx_state(tx_status.tx_id(), TransactionState::InMempool)?;
+                    .update_tx_state(tx_id, TransactionState::InMempool)?;
                 continue;
             }
         }
@@ -888,15 +890,18 @@ impl BitcoinCoordinator {
                     }
                 }
 
+                let tx_id = tx_status.tx_id_or_error()?;
                 self.store
-                    .update_speedup_state(tx_status.tx_id(), TransactionState::Finalized)?;
+                    .update_speedup_state(tx_id, TransactionState::Finalized)?;
                 continue;
             }
+
+            let tx_id = tx_status.tx_id_or_error()?;
 
             if tx_status.is_confirmed() {
                 // We want to keep the confirmation on the storage to calculate the maximum speedups
                 self.store
-                    .update_speedup_state(tx_status.tx_id(), TransactionState::Confirmed)?;
+                    .update_speedup_state(tx_id, TransactionState::Confirmed)?;
                 continue;
             }
 
@@ -905,7 +910,7 @@ impl BitcoinCoordinator {
                 // If the orphaned transaction is still in the mempool, it's not necessary to re-dispatch it.
                 // Note: get_tx_status will automatically mark an orphan transaction as NotFound if it's no longer present in the mempool.
                 self.store
-                    .update_speedup_state(tx_status.tx_id(), TransactionState::InMempool)?;
+                    .update_speedup_state(tx_id, TransactionState::InMempool)?;
                 continue;
             }
         }
