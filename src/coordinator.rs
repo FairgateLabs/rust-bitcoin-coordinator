@@ -200,7 +200,7 @@ impl BitcoinCoordinator {
                 continue;
             }
 
-            if tx_status.is_finalized() {
+            if tx_status.is_finalized(self.settings.monitor_settings.max_monitoring_confirmations) {
                 // Once the transaction is finalized, we are not monitoring it anymore.
                 debug!(
                     "{} Transaction({}) | Finalized | Confirmations({})",
@@ -874,7 +874,7 @@ impl BitcoinCoordinator {
                 style(tx_status.confirmations).blue(),
             );
 
-            if tx_status.is_finalized() {
+            if tx_status.is_finalized(self.settings.monitor_settings.max_monitoring_confirmations) {
                 // Once the speedup transaction is finalized, we are not monitoring it anymore.
                 // If this speedup replaced another transaction (replaces_tx_id is Some), cancel monitoring
                 // for the transaction that was replaced, as it's no longer relevant.

@@ -34,5 +34,4 @@ settings:
     monitor_settings:
         max_monitoring_confirmations: 6
         indexer_settings:
-            confirmation_threshold: 6
             checkpoint_height: 0
