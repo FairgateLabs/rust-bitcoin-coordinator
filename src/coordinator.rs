@@ -283,26 +283,8 @@ impl BitcoinCoordinator {
             );
 
             // Check if we can send transactions or we stop the process until CPFP transactions start to be confirmed.
-            if self.store.can_speedup()? {
+            if self.can_speedup()? {
                 self.speedup_and_dispatch_in_batch(txs_to_dispatch_with_speedup)?;
-            } else {
-                let is_funding_available = self.store.is_funding_available()?;
-                let is_enough_unconfirmed_txs = self.store.has_enough_unconfirmed_txs_for_cpfp()?;
-
-                if !is_enough_unconfirmed_txs {
-                    warn!(
-                        "{} Can not speedup, waiting for more unconfirmed transactions",
-                        style("Coordinator").green()
-                    );
-                }
-
-                if !is_funding_available {
-                    warn!(
-                        "{} Can not speedup, waiting for funding",
-                        style("Coordinator").green()
-                    );
-                    self.notify_funding_not_found()?;
-                }
             }
         }
 
@@ -409,12 +391,6 @@ impl BitcoinCoordinator {
             }
         }
 
-        Ok(())
-    }
-
-    fn notify_funding_not_found(&self) -> Result<(), BitcoinCoordinatorError> {
-        let news = CoordinatorNews::FundingNotFound;
-        self.update_news(news)?;
         Ok(())
     }
 
@@ -931,13 +907,9 @@ impl BitcoinCoordinator {
             );
 
             for speedup in speedups_to_dispatch {
-                let can_speedup = self.store.can_speedup()?;
+                let can_speedup = self.can_speedup()?;
 
                 if !can_speedup {
-                    warn!(
-                        "{} Cannot speedup, waiting for funding or confirmations",
-                        style("Coordinator").green()
-                    );
                     break;
                 }
 
@@ -1023,27 +995,6 @@ impl BitcoinCoordinator {
         bump_fee: f64,
         replaces_tx_id: Option<Txid>,
     ) -> Result<(), BitcoinCoordinatorError> {
-        // Check if the funding amount is below the minimum required for a speedup.
-        // If so, notify via CoordinatorNews and exit early.
-        if funding.amount < self.settings.min_funding_amount_sats {
-            let news = CoordinatorNews::InsufficientFunds(
-                funding.txid,
-                funding.amount,
-                self.settings.min_funding_amount_sats,
-            );
-            self.update_news(news)?;
-
-            warn!(
-                "{} Insufficient funds for speedup | FundingTx({}) | Amount({}) | MinRequired({})",
-                style("Coordinator").green(),
-                style(funding.txid).yellow(),
-                style(funding.amount).red(),
-                style(self.settings.min_funding_amount_sats).blue(),
-            );
-
-            return Ok(());
-        }
-
         let txs_speedup_data = txs_data
             .iter()
             .map(|(speedup_data, tx, _)| (speedup_data.clone(), tx.vsize()))
@@ -1307,19 +1258,61 @@ impl BitcoinCoordinator {
 
     fn perform_speedup(&self) -> Result<(), BitcoinCoordinatorError> {
         // Check if we can send transactions or we stop the process until CPFP transactions start to be confirmed.
-        if self.store.can_speedup()? {
+        if self.can_speedup()? {
             self.speedup_cpfp_tx()?;
-        } else {
-            warn!("{} Can not speedup", style("Coordinator").green());
-
-            let is_funding_available = self.store.is_funding_available()?;
-
-            if !is_funding_available {
-                self.notify_funding_not_found()?;
-            }
         }
 
         Ok(())
+    }
+
+    fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorError> {
+        let is_funding_available = self.store.is_funding_available()?;
+        let is_enough_unconfirmed_txs = self.store.has_enough_unconfirmed_txs_for_cpfp()?;
+
+        if !is_enough_unconfirmed_txs {
+            warn!(
+                "{} Can not speedup, waiting for more unconfirmed transactions",
+                style("Coordinator").green()
+            );
+
+            return Ok(false);
+        }
+
+        if is_funding_available {
+            // Check if the funding amount is below the minimum required for a speedup
+            if let Some(funding) = self.store.get_funding()? {
+                if funding.amount < self.settings.min_funding_amount_sats {
+                    let news = CoordinatorNews::InsufficientFunds(
+                        funding.txid,
+                        funding.amount,
+                        self.settings.min_funding_amount_sats,
+                    );
+                    self.update_news(news)?;
+
+                    warn!(
+                        "{} Insufficient funds for speedup | FundingTx({}) | Amount({}) | MinRequired({})",
+                        style("Coordinator").green(),
+                        style(funding.txid).yellow(),
+                        style(funding.amount).red(),
+                        style(self.settings.min_funding_amount_sats).blue(),
+                    );
+
+                    return Ok(false);
+                }
+
+                return Ok(true);
+            }
+        } else {
+            warn!(
+                "{} Can not speedup, waiting for funding",
+                style("Coordinator").green()
+            );
+
+            let news = CoordinatorNews::FundingNotFound;
+            self.update_news(news)?;
+        }
+
+        return Ok(false);
     }
 
     fn calculate_speedup_fee(
