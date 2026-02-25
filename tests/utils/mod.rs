@@ -177,7 +177,7 @@ pub fn config_trace_aux() {
         "libp2p=off",
         "bitvmx_transaction_monitor=info",
         "bitcoin_indexer=off",
-        "bitcoin_coordinator=debug",
+        "bitcoin_coordinator=info",
         "bitcoin_client=off",
         "p2p_protocol=off",
         "p2p_handler=off",

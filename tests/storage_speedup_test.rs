@@ -43,6 +43,7 @@ fn dummy_speedup_tx(
 
     CoordinatedSpeedUpTransaction::new(
         *txid,
+        None,
         dummy_utxo(&txid),
         dummy_utxo(&txid),
         if is_replace { Some(*txid) } else { None }, // If is_replace, use the same txid as the replaced transaction

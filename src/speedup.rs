@@ -86,9 +86,10 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         // The broadcast block height is set to 0 and Finalized because funding should be confirmed on chain.
         let funding_to_speedup = CoordinatedSpeedUpTransaction::new(
             next_funding.txid,
-            next_funding.clone(),
-            next_funding,
-            None, // Funding is not an RBF replacement
+            None,                 // Funding transactions don't have an associated speedup tx
+            next_funding.clone(), // prev_funding
+            next_funding,         // next_funding
+            None,                 // Funding is not an RBF replacement
             0,
             TransactionState::Finalized,
             1.0,

@@ -72,6 +72,9 @@ pub struct CoordinatedSpeedUpTransaction {
 
     pub tx_id: Txid,
 
+    // The speedup transaction itself (needed for dispatch, None for funding transactions)
+    pub tx: Option<Transaction>,
+
     // The previous funding utxo.
     pub prev_funding: Utxo,
 
@@ -124,6 +127,7 @@ impl RetryInfo {
 impl CoordinatedSpeedUpTransaction {
     pub fn new(
         tx_id: Txid,
+        tx: Option<Transaction>,
         prev_funding: Utxo,
         next_funding: Utxo,
         replaces_tx_id: Option<Txid>,
@@ -154,6 +158,7 @@ impl CoordinatedSpeedUpTransaction {
                 SpeedupType::CPFP
             },
             tx_id,
+            tx,
             prev_funding,
             next_funding,
             replaced_by_tx_id: None, // Initially, no transaction replaces this one

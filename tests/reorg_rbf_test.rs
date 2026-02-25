@@ -109,7 +109,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     // Mine 3 blocks to confirm tx1 and its speedup transaction
     // Each block mined advances the blockchain, and each tick processes the new blocks
-    for _ in 0..3 {
+    for _ in 0..6 {
         info!("{} Mine and Tick", style("Test").green());
         setup
             .bitcoin_client
@@ -120,6 +120,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     // Verify that tx1 has been confirmed (1 confirmation)
     let news = coordinator.get_news()?;
+
     assert_eq!(
         news.monitor_news.len(),
         1,
