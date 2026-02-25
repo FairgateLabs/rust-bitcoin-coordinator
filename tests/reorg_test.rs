@@ -82,7 +82,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     coordinator.tick()?;
 
-    for _ in 0..4 {
+    for _ in 0..8 {
         info!("{} Mine and Tick", style("Test").green());
         // Mine a block to confirm tx1 and its speedup transaction
         setup

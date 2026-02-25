@@ -170,8 +170,6 @@ pub fn create_store() -> BitcoinCoordinatorStore {
 }
 
 pub fn config_trace_aux() {
-    use tracing_subscriber::util::SubscriberInitExt;
-
     let default_modules = [
         "info",
         "libp2p=off",
