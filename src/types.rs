@@ -1,6 +1,7 @@
 use bitcoin::{Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::types::{AckMonitorNews, MonitorNews};
+use bitvmx_transaction_monitor::TransactionBlockchainStatus;
 use protocol_builder::types::{output::SpeedupData, Utxo};
 use serde::{Deserialize, Serialize};
 
@@ -197,6 +198,19 @@ impl CoordinatedSpeedUpTransaction {
             "RBF".to_string()
         } else {
             "CPFP".to_string()
+        }
+    }
+}
+
+/// Direct, enum-to-enum mapping between the indexer blockchain status and our internal TransactionState.
+impl From<TransactionBlockchainStatus> for TransactionState {
+    fn from(status: TransactionBlockchainStatus) -> Self {
+        match status {
+            TransactionBlockchainStatus::InMempool => TransactionState::InMempool,
+            TransactionBlockchainStatus::Confirmed => TransactionState::Confirmed,
+            TransactionBlockchainStatus::Finalized => TransactionState::Finalized,
+            TransactionBlockchainStatus::NotFound => TransactionState::ToDispatch,
+            TransactionBlockchainStatus::Orphan => TransactionState::InMempool,
         }
     }
 }

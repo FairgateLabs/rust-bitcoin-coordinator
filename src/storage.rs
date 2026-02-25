@@ -258,10 +258,19 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
         // Validate state transitions
         let valid_transition = match (&tx.state, &new_state) {
-            // Valid transitions
             (TransactionState::ToDispatch, TransactionState::InMempool) => true,
             (TransactionState::ToDispatch, TransactionState::Failed) => true,
+
+            // From ToDispatch to Confirmed, Finalized is possible if the client crash and in a
+            // new tick detects that the transaction was already in the chain and is confirmed or finalized.
+            // Same happens with InMempool to Confirmed, Finalized.
+            (TransactionState::ToDispatch, TransactionState::Confirmed) => true,
+            (TransactionState::ToDispatch, TransactionState::Finalized) => true,
+
             (TransactionState::InMempool, TransactionState::Confirmed) => true,
+            (TransactionState::InMempool, TransactionState::ToDispatch) => true,
+            (TransactionState::InMempool, TransactionState::Finalized) => true,
+
             (TransactionState::Confirmed, TransactionState::Finalized) => true,
             // Allow transition from Confirmed to InMempool when transaction becomes orphan (reorg)
             (TransactionState::Confirmed, TransactionState::InMempool) => true,

@@ -566,17 +566,15 @@ impl BitcoinCoordinator {
                             error_msg
                         );
 
+                        // Ask the monitor/indexer for the current status of this transaction.
+                        let tx_status = self.monitor.get_tx_status(&tx_id)?;
                         let dispatch_block = self.client.get_best_block()?;
 
                         let mut speedup_data_with_block = speedup_data;
                         speedup_data_with_block.broadcast_block_height = dispatch_block;
-                        speedup_data_with_block.state = TransactionState::InMempool;
+                        // Set state according to the actual chain status.
+                        speedup_data_with_block.state = tx_status.status.clone().into();
 
-                        self.monitor.monitor(TypesToMonitor::Transactions(
-                            vec![tx_id],
-                            speedup_data_with_block.context.clone(),
-                            None,
-                        ))?;
                         self.store.save_speedup(speedup_data_with_block)?;
                     }
                     BitcoinBroadcastErrorKind::MempoolRejection => {
@@ -695,10 +693,23 @@ impl BitcoinCoordinator {
 
                     let news = match error_kind {
                         BitcoinBroadcastErrorKind::AlreadyKnown => {
-                            let deliver_block_height = self.monitor.get_monitor_height()?;
+                            // Transaction is already known by the node (mempool or blockchain).
+                            // Ask the monitor/indexer for the current status and set the state accordingly.
+                            let tx_status = self.monitor.get_tx_status(&tx.tx_id)?;
+                            let mapped_state = tx_status.status.clone().into();
 
-                            self.store
-                                .update_tx_to_dispatched(tx.tx_id, deliver_block_height)?;
+                            match mapped_state {
+                                TransactionState::Finalized | TransactionState::Confirmed => {
+                                    self.store.update_tx_state(tx.tx_id, mapped_state)?;
+                                }
+
+                                _ => {
+                                    // Other states are not expected here; keep previous behavior.
+                                    let deliver_block_height = self.monitor.get_monitor_height()?;
+                                    self.store
+                                        .update_tx_to_dispatched(tx.tx_id, deliver_block_height)?;
+                                }
+                            }
 
                             // The transaction is already in mempool or blockchain, so we acknowledge it.
                             let news = CoordinatorNews::TransactionAlreadyInMempool(
