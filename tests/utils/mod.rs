@@ -196,6 +196,20 @@ pub fn config_trace_aux() {
         .try_init();
 }
 
+pub fn tick_until_coordinator_ready(
+    coordinator: &Rc<BitcoinCoordinator>,
+) -> Result<(), anyhow::Error> {
+    info!(
+        "{} Waiting for coordinator to be ready",
+        style("Test").green()
+    );
+    while !coordinator.is_ready()? {
+        coordinator.tick()?;
+    }
+
+    Ok(())
+}
+
 pub fn coordinate_tx(
     coordinator: Rc<BitcoinCoordinator>,
     amount: Amount,

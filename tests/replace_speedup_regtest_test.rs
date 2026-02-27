@@ -7,7 +7,9 @@ use protocol_builder::types::Utxo;
 use std::rc::Rc;
 use tracing::info;
 
-use crate::utils::{config_trace_aux, coordinate_tx, create_test_setup, TestSetupConfig};
+use crate::utils::{
+    config_trace_aux, coordinate_tx, create_test_setup, tick_until_coordinator_ready, TestSetupConfig,
+};
 mod utils;
 
 // Almost every transaction sent in the protocol uses a CPFP (Child Pays For Parent) transaction for broadcasting.
@@ -66,12 +68,8 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         None,
     )?);
 
-    // Since we've already mined 102 blocks, we need to advance the coordinator by 102 ticks
-    // so the indexer can catch up with the current blockchain height.
     // Tick coordinator until it is ready (indexer is caught up with the current blockchain height)
-    while !coordinator.is_ready()? {
-        coordinator.tick()?;
-    }
+    tick_until_coordinator_ready(&coordinator)?;
 
     // Add funding for speed up transaction
     coordinator.add_funding(Utxo::new(

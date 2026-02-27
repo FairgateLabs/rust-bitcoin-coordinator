@@ -4,21 +4,24 @@ use bitcoin_coordinator::{
     storage::{BitcoinCoordinatorStore, BitcoinCoordinatorStoreApi},
     types::TransactionState,
 };
-use bitcoind::bitcoind::BitcoindFlags;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClientApi;
 use protocol_builder::types::Utxo;
 use std::rc::Rc;
 use tracing::info;
 
 mod utils;
-use crate::utils::{config_trace_aux, coordinate_tx, create_test_setup, TestSetupConfig};
+use crate::utils::{
+    config_trace_aux, coordinate_tx, create_test_setup, tick_until_coordinator_ready,
+    TestSetupConfig,
+};
 
-/// Indices (0-based) of the 4 invalid transactions among 40 (not consecutive).
+/// Indices (0-based) of the 4 intentionally invalid transactions among 40 (not consecutive).
 const INVALID_TX_INDICES: [usize; 4] = [3, 11, 19, 27];
 
-/// Verifies pre-validation and batching with 40 txs, 4 invalid (0 fee, rejected by testmempoolaccept).
-/// - filter_txs_allowed_by_mempool returns 36 allowed; 4 are marked Failed.
-/// - 36 txs are dispatched in 2 batches; 36 monitor notifications; 2 speedup (CPFP) batches.
+/// Integration test for the speedup pre‑validation + batching path:
+/// - Creates 40 coordinated transactions; 4 of them use fee 0 so `testmempoolaccept` rejects them.
+/// - `filter_txs_allowed_by_mempool` must mark those 4 as `Failed` and only keep the 36 valid ones.
+/// - The 36 valid txs are dispatched in 2 CPFP batches and later reported as monitor news.
 #[test]
 fn speedup_prevalidation_40_txs_4_invalid_two_batches() -> Result<(), anyhow::Error> {
     config_trace_aux();
@@ -31,7 +34,7 @@ fn speedup_prevalidation_40_txs_4_invalid_two_batches() -> Result<(), anyhow::Er
 
     let amount = Amount::from_sat(23450000);
 
-    let (funding_tx, _funding_vout) = setup
+    let _ = setup
         .bitcoin_client
         .fund_address(&setup.funding_wallet, amount)?;
     blocks_mined += 1;
@@ -59,7 +62,8 @@ fn speedup_prevalidation_40_txs_4_invalid_two_batches() -> Result<(), anyhow::Er
         &setup.public_key,
     ))?;
 
-    // 40 txs: at indices INVALID_TX_INDICES use fee 0 (rejected by testmempoolaccept); rest normal fee.
+    // Build 40 coordinated txs; at indices in INVALID_TX_INDICES we force fee = 0 so
+    // `testmempoolaccept` rejects them during pre‑validation. The rest use the default fee.
     let mut invalid_tx_ids = Vec::new();
     info!(
         "Submitting 40 transactions (4 invalid at indices {:?})",
@@ -81,17 +85,21 @@ fn speedup_prevalidation_40_txs_4_invalid_two_batches() -> Result<(), anyhow::Er
         }
     }
 
-    assert_eq!(invalid_tx_ids.len(), 4, "expected 4 invalid tx ids");
+    tick_until_coordinator_ready(&coordinator)?;
 
-    // Process: filter_txs_allowed_by_mempool should drop 4, dispatch 36 in 2 batches.
-    for _ in 0..50 {
-        coordinator.tick()?;
-    }
-
-    // First batch: mine one block so first batch confirms.
+    // First batch:
+    // Mine + tick twice so the coordinator first processes parent txs and then their CPFP speedups,
+    // and the monitor accumulates news for the first batch of valid transactions.
     setup
         .bitcoin_client
         .mine_blocks_to_address(1, &setup.funding_wallet)?;
+
+    coordinator.tick()?;
+
+    setup
+        .bitcoin_client
+        .mine_blocks_to_address(1, &setup.funding_wallet)?;
+
     coordinator.tick()?;
 
     let news = coordinator.get_news()?;
@@ -101,15 +109,25 @@ fn speedup_prevalidation_40_txs_4_invalid_two_batches() -> Result<(), anyhow::Er
         first_batch_count
     );
     assert!(
-        first_batch_count >= 20 && first_batch_count <= 25,
-        "expected first batch ~20–25 monitor notifications, got {}",
+        first_batch_count == 24,
+        "expected first batch 24 monitor notifications, got {}",
         first_batch_count
     );
 
-    // Second batch: mine again so second batch confirms.
+    tick_until_coordinator_ready(&coordinator)?;
+
+    // Second batch:
+    // Again, mine + tick twice so the remaining valid transactions are confirmed and reported.
     setup
         .bitcoin_client
         .mine_blocks_to_address(1, &setup.funding_wallet)?;
+
+    coordinator.tick()?;
+
+    setup
+        .bitcoin_client
+        .mine_blocks_to_address(1, &setup.funding_wallet)?;
+
     coordinator.tick()?;
 
     let news = coordinator.get_news()?;

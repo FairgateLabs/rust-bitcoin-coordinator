@@ -12,7 +12,9 @@ use protocol_builder::types::Utxo;
 use std::rc::Rc;
 use tracing::info;
 
-use crate::utils::{config_trace_aux, coordinate_tx, create_test_setup, TestSetupConfig};
+use crate::utils::{
+    config_trace_aux, coordinate_tx, create_test_setup, tick_until_coordinator_ready, TestSetupConfig,
+};
 mod utils;
 
 #[test]
@@ -225,9 +227,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         .unwrap();
 
     // Wait for coordinator to be ready (indexer synced with blockchain)
-    while !coordinator.is_ready()? {
-        coordinator.tick()?;
-    }
+    tick_until_coordinator_ready(&coordinator)?;
 
     // After mining a new block, tx1 should be confirmed again (re-mined in the new chain)
     let news = coordinator.get_news()?;

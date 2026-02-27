@@ -375,10 +375,7 @@ impl BitcoinCoordinator {
 
             match self.client.client.test_mempool_accept(&raw_refs) {
                 Ok(results) => {
-                    let allowed = results
-                        .first()
-                        .map(|res| res.allowed)
-                        .unwrap_or(false);
+                    let allowed = results.first().map(|res| res.allowed).unwrap_or(false);
                     if allowed {
                         allowed_txs.push(tx);
                     } else {
@@ -410,6 +407,7 @@ impl BitcoinCoordinator {
                     );
                     self.store
                         .update_tx_state(tx.tx_id, TransactionState::Failed)?;
+
                     self.update_news(CoordinatorNews::DispatchTransactionError(
                         tx.tx_id,
                         tx.context,
@@ -449,6 +447,10 @@ impl BitcoinCoordinator {
         for txs_batch in txs_in_batch_by_policies {
             // 3. Validate speedup is possible (funding, unconfirmed limit, min amount).
             if !self.can_speedup()? {
+                debug!(
+                    "{} Batch skipped: speedup not possible",
+                    style("Coordinator").green()
+                );
                 continue;
             }
 
@@ -489,33 +491,32 @@ impl BitcoinCoordinator {
 
             // 5. All validations passed: send all remaining transactions, then create CPFP
             // for the ones that were successfully sent.
+            // If there is an error in a transaction, we can skip it. This will reduce the required fee, so there is no issue with funding.
             let txs_sent: Vec<CoordinatedTransaction> = self.dispatch_txs(txs_batch)?;
 
-            if !txs_sent.is_empty() {
-                info!(
-                    "{} Sending batch of {} transactions",
-                    style("Coordinator").green(),
-                    txs_sent.len()
-                );
+            info!(
+                "{} Sending batch of {} transactions",
+                style("Coordinator").green(),
+                txs_sent.len()
+            );
 
-                let txs_data_sent = txs_sent
-                    .iter()
-                    .map(|coordinated_tx| {
-                        (
-                            coordinated_tx.speedup_data.clone().unwrap(),
-                            coordinated_tx.tx.clone(),
-                            coordinated_tx.context.clone(),
-                        )
-                    })
-                    .collect();
+            let txs_data_sent = txs_sent
+                .iter()
+                .map(|coordinated_tx| {
+                    (
+                        coordinated_tx.speedup_data.clone().unwrap(),
+                        coordinated_tx.tx.clone(),
+                        coordinated_tx.context.clone(),
+                    )
+                })
+                .collect();
 
-                self.create_cpfp_tx(
-                    txs_data_sent,
-                    funding,
-                    self.settings.base_fee_multiplier,
-                    None,
-                )?;
-            }
+            self.create_cpfp_tx(
+                txs_data_sent,
+                funding,
+                self.settings.base_fee_multiplier,
+                None,
+            )?;
         }
 
         Ok(())

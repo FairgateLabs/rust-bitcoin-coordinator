@@ -6,7 +6,9 @@ use bitcoind::bitcoind::BitcoindFlags;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClientApi;
 use std::rc::Rc;
 
-use crate::utils::{config_trace_aux, create_test_setup, TestSetupConfig};
+use crate::utils::{
+    config_trace_aux, create_test_setup, tick_until_coordinator_ready, TestSetupConfig,
+};
 mod utils;
 
 #[test]
@@ -29,9 +31,7 @@ fn stuck_in_mempool_test() -> Result<(), anyhow::Error> {
         None,
     )?);
 
-    while !coordinator.is_ready()? {
-        coordinator.tick()?;
-    }
+    tick_until_coordinator_ready(&coordinator)?;
 
     let amount = Amount::from_sat(1000000);
     let (funding_tx, funding_vout) = setup
