@@ -9,7 +9,8 @@ use crate::{
         TransactionState,
     },
 };
-use bitcoin::{Network, Transaction, Txid};
+use bitcoin::{consensus::encode::serialize_hex, Network, Transaction, Txid};
+use bitcoincore_rpc::RpcApi;
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, rpc_config::RpcConfig};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClientApi, types::BlockHeight};
 use bitvmx_transaction_monitor::{
@@ -356,28 +357,140 @@ impl BitcoinCoordinator {
         Ok(())
     }
 
+    /// Runs testmempoolaccept on each candidate transaction (one at a time).
+    /// Rejected or error transactions are marked as Failed; returns only the allowed ones.
+    fn filter_txs_allowed_by_mempool(
+        &self,
+        txs: Vec<CoordinatedTransaction>,
+    ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorError> {
+        if txs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut allowed_txs: Vec<CoordinatedTransaction> = Vec::new();
+
+        for tx in txs {
+            let raw_hex = serialize_hex(&tx.tx);
+            let raw_refs: [&str; 1] = [raw_hex.as_str()];
+
+            match self.client.client.test_mempool_accept(&raw_refs) {
+                Ok(results) => {
+                    let allowed = results
+                        .first()
+                        .map(|res| res.allowed)
+                        .unwrap_or(false);
+                    if allowed {
+                        allowed_txs.push(tx);
+                    } else {
+                        let reject_reason = results
+                            .first()
+                            .and_then(|res| res.reject_reason.clone())
+                            .unwrap_or_else(|| "rejected by testmempoolaccept".to_string());
+                        warn!(
+                            "{} Excluding Transaction({}) from batch due to testmempoolaccept rejection: {:?}",
+                            style("Coordinator").green(),
+                            style(tx.tx_id).yellow(),
+                            reject_reason
+                        );
+                        self.store
+                            .update_tx_state(tx.tx_id, TransactionState::Failed)?;
+                        self.update_news(CoordinatorNews::DispatchTransactionError(
+                            tx.tx_id,
+                            tx.context,
+                            reject_reason,
+                        ))?;
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "{} Excluding Transaction({}) due to testmempoolaccept error: {:?}",
+                        style("Coordinator").green(),
+                        style(tx.tx_id).yellow(),
+                        e
+                    );
+                    self.store
+                        .update_tx_state(tx.tx_id, TransactionState::Failed)?;
+                    self.update_news(CoordinatorNews::DispatchTransactionError(
+                        tx.tx_id,
+                        tx.context,
+                        e.to_string(),
+                    ))?;
+                }
+            }
+        }
+
+        Ok(allowed_txs)
+    }
+
+    /// Dispatches transactions with speedup in batches. Validates before sending:
+    /// 1. testmempoolaccept – rejected txs are marked Failed and excluded; only allowed ones are batched.
+    /// 2. can_speedup (funding, unconfirmed limit, min amount) – skip batch if speedup not possible.
+    /// 3. Sufficient funding for CPFP fee – skip batch and report news if insufficient.
+    /// Only if all pass do we send the batch and then create the CPFP.
     fn speedup_and_dispatch_in_batch(
         &self,
         txs: Vec<CoordinatedTransaction>,
     ) -> Result<(), BitcoinCoordinatorError> {
-        // Attempt to dispatch as many transactions as possible in a single CPFP (Child Pays For Parent) transaction,
-        // while ensuring the resulting transaction does not exceed Bitcoin's standardness limits.
-        // We have two policies to dispatch the transactions:
-        // 1. Maximum transaction size: MAX_TX_WEIGHT weight units. Exceeding these limits will result in the transaction
-        // being considered non-standard and rejected by most mempools.
-        // 2. Maximum number of unconfirmed transactions is 25 (MAX_LIMIT_UNCONFIRMED_PARENTS)
-        // If the set of transactions exceeds these limits, will fail the dispatch.
+        if txs.is_empty() {
+            return Ok(());
+        }
 
+        // 1. Test mempool acceptance; keep only transactions allowed by testmempoolaccept.
+        let allowed_txs = self.filter_txs_allowed_by_mempool(txs)?;
+
+        if allowed_txs.is_empty() {
+            return Ok(());
+        }
+
+        // 2. Apply batching policies only over transactions that passed testmempoolaccept.
         let txs_in_batch_by_policies: Vec<Vec<CoordinatedTransaction>> =
-            self.batch_txs_by_weight_limit(txs)?;
+            self.batch_txs_by_weight_limit(allowed_txs)?;
 
         for txs_batch in txs_in_batch_by_policies {
-            // For each batch, attempt to broadcast all transactions individually. After determining which transactions were successfully sent,
-            // construct and broadcast a single CPFP transaction to pay for the entire batch.
+            // 3. Validate speedup is possible (funding, unconfirmed limit, min amount).
+            if !self.can_speedup()? {
+                continue;
+            }
+
+            let funding = self.get_funding_or_error()?;
+
+            // 4. Pre-compute CPFP fee for this (already filtered) batch; if funding is insufficient,
+            // do not send any tx.
+            let txs_data: Vec<(SpeedupData, Transaction, String)> = txs_batch
+                .iter()
+                .map(|t| {
+                    (
+                        t.speedup_data.clone().unwrap(),
+                        t.tx.clone(),
+                        t.context.clone(),
+                    )
+                })
+                .collect();
+
+            let speedup_fee = self.compute_speedup_fee_for_batch(
+                &txs_data,
+                &funding,
+                self.settings.base_fee_multiplier,
+                None,
+            )?;
+
+            if speedup_fee > funding.amount {
+                let news =
+                    CoordinatorNews::InsufficientFunds(funding.txid, funding.amount, speedup_fee);
+                self.update_news(news)?;
+                warn!(
+                    "{} Batch skipped: insufficient funds for speedup | Funding({}) | Required({})",
+                    style("Coordinator").green(),
+                    style(funding.amount).red(),
+                    style(speedup_fee).blue(),
+                );
+                continue;
+            }
+
+            // 5. All validations passed: send all remaining transactions, then create CPFP
+            // for the ones that were successfully sent.
             let txs_sent: Vec<CoordinatedTransaction> = self.dispatch_txs(txs_batch)?;
 
-            // Only create a CPFP (Child Pays For Parent) transaction if there are transactions that were successfully sent in this batch.
-            // If no transactions were sent, skip CPFP creation for this batch.
             if !txs_sent.is_empty() {
                 info!(
                     "{} Sending batch of {} transactions",
@@ -385,7 +498,7 @@ impl BitcoinCoordinator {
                     txs_sent.len()
                 );
 
-                let txs_data = txs_sent
+                let txs_data_sent = txs_sent
                     .iter()
                     .map(|coordinated_tx| {
                         (
@@ -395,9 +508,13 @@ impl BitcoinCoordinator {
                         )
                     })
                     .collect();
-                // Up to here we have funding and we are sure we have funding.
-                let funding = self.store.get_funding()?.unwrap();
-                self.create_cpfp_tx(txs_data, funding, self.settings.base_fee_multiplier, None)?;
+
+                self.create_cpfp_tx(
+                    txs_data_sent,
+                    funding,
+                    self.settings.base_fee_multiplier,
+                    None,
+                )?;
             }
         }
 
@@ -418,7 +535,7 @@ impl BitcoinCoordinator {
     // It achieves this by creating an additional CPFP transaction to provide further funding to the previous one.
     // It is ensured that funding is available before invoking this function.
     fn speedup_cpfp_tx(&self) -> Result<(), BitcoinCoordinatorError> {
-        let funding = self.store.get_funding()?.unwrap();
+        let funding = self.get_funding_or_error()?;
 
         let last_speedup = self.store.get_last_pending_speedup()?;
 
@@ -435,6 +552,16 @@ impl BitcoinCoordinator {
         }
 
         Ok(())
+    }
+
+    fn get_funding_or_error(&self) -> Result<Utxo, BitcoinCoordinatorError> {
+        let funding = self.store.get_funding()?;
+        match funding {
+            Some(f) => Ok(f),
+            None => Err(BitcoinCoordinatorError::BitcoinCoordinatorError(
+                "Funding not found".to_string(),
+            )),
+        }
     }
 
     fn inform_dispatch_speedup_error(
@@ -1122,6 +1249,38 @@ impl BitcoinCoordinator {
         self.dispatch_speedup(speedup_data)?;
 
         Ok(())
+    }
+
+    /// Computes the speedup fee that would be required for a batch (without creating the CPFP).
+    /// Used to validate funding before sending any transaction in the batch.
+    fn compute_speedup_fee_for_batch(
+        &self,
+        txs_data: &[(SpeedupData, Transaction, String)],
+        funding: &Utxo,
+        bump_fee: f64,
+        replaces_tx_id: Option<Txid>,
+    ) -> Result<u64, BitcoinCoordinatorError> {
+        let txs_speedup_data = txs_data
+            .iter()
+            .map(|(speedup_data, tx, _)| (speedup_data.clone(), tx.vsize()))
+            .collect();
+
+        let new_network_fee_rate = self.get_network_fee_rate()?;
+        let (diff_fee_for_unconfirmed_chain, chain_vsize) =
+            self.get_diff_fee_for_unconfirmed_chain(new_network_fee_rate)?;
+        let is_rbf = replaces_tx_id.is_some();
+
+        let (_speedup_tx, speedup_fee) = self.get_speedup_tx(
+            &txs_speedup_data,
+            funding,
+            bump_fee,
+            is_rbf,
+            new_network_fee_rate,
+            diff_fee_for_unconfirmed_chain,
+            chain_vsize,
+        )?;
+
+        Ok(speedup_fee)
     }
 
     fn get_diff_fee_for_unconfirmed_chain(
