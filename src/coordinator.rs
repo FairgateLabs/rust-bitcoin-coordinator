@@ -156,7 +156,10 @@ impl BitcoinCoordinator {
         txs_to_dispatch: &mut Vec<CoordinatedTransaction>,
     ) -> Result<(), BitcoinCoordinatorError> {
         for tx in txs_to_review {
-            let tx_status = self.monitor.get_tx_status(&tx.tx_id, true)?;
+            // If the transaction was broadcasted, we need to search it in the mempool otherwise we just search on chain.
+            let search_in_mempool = tx.broadcast_block_height.is_some();
+
+            let tx_status = self.monitor.get_tx_status(&tx.tx_id, search_in_mempool)?;
 
             if tx_status.is_in_mempool() {
                 // Check if transaction is stuck in mempool
