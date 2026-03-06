@@ -40,6 +40,7 @@ pub struct CoordinatedTransaction {
     // Number of blocks to wait before considering the transaction stuck in mempool
     // None means this transaction doesn't have a stuck threshold
     pub stuck_in_mempool_blocks: Option<u32>,
+    pub number_confirmation_trigger: Option<u32>,
 }
 
 impl CoordinatedTransaction {
@@ -50,6 +51,7 @@ impl CoordinatedTransaction {
         target_block_height: Option<BlockHeight>,
         context: String,
         stuck_in_mempool_blocks: Option<u32>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Self {
         Self {
             tx_id: tx.compute_txid(),
@@ -60,6 +62,7 @@ impl CoordinatedTransaction {
             target_block_height,
             context,
             stuck_in_mempool_blocks,
+            number_confirmation_trigger,
         }
     }
 }
@@ -101,6 +104,8 @@ pub struct CoordinatedSpeedUpTransaction {
     pub speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
 
     pub network_fee_rate_used: u64,
+
+    pub confirmation_trigger: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -137,6 +142,7 @@ impl CoordinatedSpeedUpTransaction {
         bump_fee_percentage_used: f64,
         speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
         network_fee_rate_used: u64,
+        confirmation_trigger: Option<u32>,
     ) -> Self {
         let is_rbf = replaces_tx_id.is_some();
         let mut context = if is_rbf {
@@ -170,6 +176,7 @@ impl CoordinatedSpeedUpTransaction {
             bump_fee_percentage_used,
             speedup_tx_data,
             network_fee_rate_used,
+            confirmation_trigger,
         }
     }
 }

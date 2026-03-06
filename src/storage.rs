@@ -33,6 +33,7 @@ pub trait BitcoinCoordinatorStoreApi {
         target_block_height: Option<BlockHeight>,
         context: String,
         stuck_in_mempool_blocks: Option<u32>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn remove_tx(&self, tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
@@ -186,6 +187,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         target_block_height: Option<BlockHeight>,
         context: String,
         stuck_in_mempool_blocks: Option<u32>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let key = self.get_key(StoreKey::Transaction(tx.compute_txid()));
 
@@ -196,6 +198,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             target_block_height,
             context,
             stuck_in_mempool_blocks,
+            number_confirmation_trigger,
         );
 
         self.store.set(&key, &tx_info, None)?;

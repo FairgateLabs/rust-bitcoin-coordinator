@@ -95,6 +95,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             1.0,
             vec![],
             1,
+            None,
         );
 
         self.save_speedup(funding_to_speedup)?;

@@ -677,6 +677,13 @@ impl BitcoinCoordinator {
                     }
                 }
 
+                // Allow the monitor to track the speedup transaction in mempool.
+                self.allow_search_in_mempool(
+                    speedup_tx_id,
+                    speedup.context.clone(),
+                    speedup.confirmation_trigger,
+                )?;
+
                 self.store.save_speedup(speedup)?;
             }
             Err(e) => {
@@ -706,7 +713,14 @@ impl BitcoinCoordinator {
                         // Set state according to the actual chain status.
                         speedup_data_with_block.state = tx_status.status.clone().into();
 
-                        self.store.save_speedup(speedup_data_with_block)?;
+                        self.store.save_speedup(speedup_data_with_block.clone())?;
+
+                        // Allow the monitor to track the speedup transaction in mempool.
+                        self.allow_search_in_mempool(
+                            speedup_tx_id,
+                            speedup_data_with_block.context.clone(),
+                            speedup_data_with_block.confirmation_trigger,
+                        )?;
                     }
                     BitcoinBroadcastErrorKind::MempoolRejection => {
                         // Retryable error - keep in ToDispatch state to retry on next tick
@@ -779,6 +793,20 @@ impl BitcoinCoordinator {
         Ok(())
     }
 
+    /// Registers a transaction with the monitor, allowing search in mempool.
+    fn allow_search_in_mempool(
+        &self,
+        tx_id: Txid,
+        context: impl Into<String>,
+        number_confirmation_trigger: Option<u32>,
+    ) -> Result<(), BitcoinCoordinatorError> {
+        self.monitor.monitor(
+            TypesToMonitor::Transactions(vec![tx_id], context.into(), number_confirmation_trigger),
+            true,
+        )?;
+        Ok(())
+    }
+
     fn dispatch_txs(
         &self,
         txs: Vec<CoordinatedTransaction>,
@@ -807,6 +835,12 @@ impl BitcoinCoordinator {
 
                     self.store
                         .update_tx_to_dispatched(tx.tx_id, dispatch_block)?;
+
+                    self.allow_search_in_mempool(
+                        tx.tx_id,
+                        tx.context.clone(),
+                        tx.number_confirmation_trigger,
+                    )?;
 
                     txs_sent.push(tx);
                 }
@@ -839,6 +873,12 @@ impl BitcoinCoordinator {
                                     let deliver_block_height = self.monitor.get_monitor_height()?;
                                     self.store
                                         .update_tx_to_dispatched(tx.tx_id, deliver_block_height)?;
+
+                                    self.allow_search_in_mempool(
+                                        tx.tx_id,
+                                        tx.context.clone(),
+                                        tx.number_confirmation_trigger,
+                                    )?;
                                 }
                             }
 
@@ -1248,6 +1288,7 @@ impl BitcoinCoordinator {
             bump_fee,
             txs_data,
             new_network_fee_rate,
+            None,
         );
 
         self.dispatch_speedup(speedup_data)?;
@@ -1717,13 +1758,7 @@ impl BitcoinCoordinator {
         &self,
         speedup_data: CoordinatedSpeedUpTransaction,
     ) -> Result<(), BitcoinCoordinatorError> {
-        let to_monitor = TypesToMonitor::Transactions(
-            vec![speedup_data.tx_id],
-            speedup_data.context.clone(),
-            None,
-        );
-
-        self.monitor.monitor(to_monitor, true)?;
+        self.allow_search_in_mempool(speedup_data.tx_id, speedup_data.context.clone(), None)?;
 
         self.store.save_speedup(speedup_data.clone())?;
 
@@ -1793,11 +1828,18 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
             context.clone(),
             number_confirmation_trigger,
         );
-        self.monitor.monitor(to_monitor, true)?;
+
+        self.monitor.monitor(to_monitor, false)?;
 
         // Save the transaction to be dispatched.
-        self.store
-            .save_tx(tx.clone(), speedup_data, target_block_height, context, None)?;
+        self.store.save_tx(
+            tx.clone(),
+            speedup_data,
+            target_block_height,
+            context,
+            None,
+            number_confirmation_trigger,
+        )?;
 
         info!(
             "{} Mark Transaction({}) to dispatch",
@@ -1821,7 +1863,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
             context.clone(),
             number_confirmation_trigger,
         );
-        self.monitor.monitor(to_monitor, true)?;
+        self.monitor.monitor(to_monitor, false)?;
 
         self.store.save_tx(
             tx.clone(),
@@ -1829,6 +1871,7 @@ impl BitcoinCoordinatorApi for BitcoinCoordinator {
             target_block_height,
             context,
             Some(stuck_in_mempool_blocks),
+            number_confirmation_trigger,
         )?;
 
         info!(
