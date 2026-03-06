@@ -17,7 +17,10 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
     config_trace_aux();
 
     let mut blocks_mined = 102;
-    info!("Starting batch_txs_regtest_test with {} initial blocks mined", blocks_mined);
+    info!(
+        "Starting batch_txs_regtest_test with {} initial blocks mined",
+        blocks_mined
+    );
     let setup = create_test_setup(TestSetupConfig {
         blocks_mined,
         bitcoind_flags: None,
@@ -150,6 +153,12 @@ fn batch_txs_regtest_test() -> Result<(), anyhow::Error> {
         .mine_blocks_to_address(1, &setup.funding_wallet)?;
 
     info!("Ticking coordinator after second block mined");
+    coordinator.tick()?;
+    coordinator.tick()?;
+    setup
+        .bitcoin_client
+        .mine_blocks_to_address(1, &setup.funding_wallet)?;
+    coordinator.tick()?;
     coordinator.tick()?;
 
     let news = coordinator.get_news()?;

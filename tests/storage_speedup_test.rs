@@ -43,6 +43,7 @@ fn dummy_speedup_tx(
 
     CoordinatedSpeedUpTransaction::new(
         *txid,
+        None,
         dummy_utxo(&txid),
         dummy_utxo(&txid),
         if is_replace { Some(*txid) } else { None }, // If is_replace, use the same txid as the replaced transaction
@@ -55,6 +56,7 @@ fn dummy_speedup_tx(
             (speedup_data_3, tx_3, "Context 3".to_string()),
         ],
         1,
+        None,
     )
 }
 
@@ -127,8 +129,8 @@ fn test_save_and_get_speedup() -> Result<(), anyhow::Error> {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].tx_id, tx.compute_txid());
 
-    // can_speedup should be true (funding exists)
-    assert!(store.can_speedup()?);
+    assert!(store.is_funding_available()?);
+    assert!(store.has_enough_unconfirmed_txs_for_cpfp()?);
 
     clear_output();
     Ok(())
@@ -238,23 +240,6 @@ fn test_get_funding_with_replace_speedup_dispatched_and_no_confirmed() -> Result
     let funding = store.get_funding()?;
     assert!(funding.is_none());
 
-    clear_output();
-    Ok(())
-}
-
-#[test]
-fn test_can_speedup_none() -> Result<(), anyhow::Error> {
-    let store = create_store();
-    assert!(!store.can_speedup()?);
-
-    // Add 10 dispatched speedups (none are finalized or confirmed)
-    for _ in 0..10 {
-        let tx = generate_random_tx();
-        let s = dummy_speedup_tx(&tx.compute_txid(), SpeedupState::InMempool, false, 0);
-        store.save_speedup(s)?;
-    }
-    // After only dispatched speedups, can_speedup should still be false
-    assert!(!store.can_speedup()?);
     clear_output();
     Ok(())
 }

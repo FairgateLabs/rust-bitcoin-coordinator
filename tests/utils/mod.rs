@@ -170,15 +170,14 @@ pub fn create_store() -> BitcoinCoordinatorStore {
 }
 
 pub fn config_trace_aux() {
-    use tracing_subscriber::util::SubscriberInitExt;
-
     let default_modules = [
         "info",
         "libp2p=off",
-        "bitvmx_transaction_monitor=info",
-        "bitcoin_indexer=off",
+        "bitvmx_transaction_monitor=debug",
+        "bitcoin_indexer=debug",
         "bitcoin_coordinator=debug",
-        "bitcoin_client=off",
+        "bitcoin_rpc=debug",
+        "bitcoin_client=debug",
         "p2p_protocol=off",
         "p2p_handler=off",
         "tarpc=off",
@@ -196,6 +195,20 @@ pub fn config_trace_aux() {
         .with_target(true)
         .with_env_filter(filter)
         .try_init();
+}
+
+pub fn tick_until_coordinator_ready(
+    coordinator: &Rc<BitcoinCoordinator>,
+) -> Result<(), anyhow::Error> {
+    info!(
+        "{} Waiting for coordinator to be ready",
+        style("Test").green()
+    );
+    while !coordinator.is_ready()? {
+        coordinator.tick()?;
+    }
+
+    Ok(())
 }
 
 pub fn coordinate_tx(

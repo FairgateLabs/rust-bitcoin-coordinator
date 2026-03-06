@@ -1,6 +1,7 @@
 use bitcoin::{Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use bitvmx_transaction_monitor::types::{AckMonitorNews, MonitorNews};
+use bitvmx_transaction_monitor::TransactionBlockchainStatus;
 use protocol_builder::types::{output::SpeedupData, Utxo};
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +40,7 @@ pub struct CoordinatedTransaction {
     // Number of blocks to wait before considering the transaction stuck in mempool
     // None means this transaction doesn't have a stuck threshold
     pub stuck_in_mempool_blocks: Option<u32>,
+    pub number_confirmation_trigger: Option<u32>,
 }
 
 impl CoordinatedTransaction {
@@ -49,6 +51,7 @@ impl CoordinatedTransaction {
         target_block_height: Option<BlockHeight>,
         context: String,
         stuck_in_mempool_blocks: Option<u32>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Self {
         Self {
             tx_id: tx.compute_txid(),
@@ -59,6 +62,7 @@ impl CoordinatedTransaction {
             target_block_height,
             context,
             stuck_in_mempool_blocks,
+            number_confirmation_trigger,
         }
     }
 }
@@ -71,6 +75,9 @@ pub struct CoordinatedSpeedUpTransaction {
     pub speedup_type: SpeedupType,
 
     pub tx_id: Txid,
+
+    // The speedup transaction itself (needed for dispatch, None for funding transactions)
+    pub tx: Option<Transaction>,
 
     // The previous funding utxo.
     pub prev_funding: Utxo,
@@ -97,6 +104,8 @@ pub struct CoordinatedSpeedUpTransaction {
     pub speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
 
     pub network_fee_rate_used: u64,
+
+    pub confirmation_trigger: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -124,6 +133,7 @@ impl RetryInfo {
 impl CoordinatedSpeedUpTransaction {
     pub fn new(
         tx_id: Txid,
+        tx: Option<Transaction>,
         prev_funding: Utxo,
         next_funding: Utxo,
         replaces_tx_id: Option<Txid>,
@@ -132,6 +142,7 @@ impl CoordinatedSpeedUpTransaction {
         bump_fee_percentage_used: f64,
         speedup_tx_data: Vec<(SpeedupData, Transaction, String)>,
         network_fee_rate_used: u64,
+        confirmation_trigger: Option<u32>,
     ) -> Self {
         let is_rbf = replaces_tx_id.is_some();
         let mut context = if is_rbf {
@@ -154,6 +165,7 @@ impl CoordinatedSpeedUpTransaction {
                 SpeedupType::CPFP
             },
             tx_id,
+            tx,
             prev_funding,
             next_funding,
             replaced_by_tx_id: None, // Initially, no transaction replaces this one
@@ -164,6 +176,7 @@ impl CoordinatedSpeedUpTransaction {
             bump_fee_percentage_used,
             speedup_tx_data,
             network_fee_rate_used,
+            confirmation_trigger,
         }
     }
 }
@@ -192,6 +205,19 @@ impl CoordinatedSpeedUpTransaction {
             "RBF".to_string()
         } else {
             "CPFP".to_string()
+        }
+    }
+}
+
+/// Direct, enum-to-enum mapping between the indexer blockchain status and our internal TransactionState.
+impl From<TransactionBlockchainStatus> for TransactionState {
+    fn from(status: TransactionBlockchainStatus) -> Self {
+        match status {
+            TransactionBlockchainStatus::InMempool => TransactionState::InMempool,
+            TransactionBlockchainStatus::Confirmed => TransactionState::Confirmed,
+            TransactionBlockchainStatus::Finalized => TransactionState::Finalized,
+            TransactionBlockchainStatus::NotFound => TransactionState::ToDispatch,
+            TransactionBlockchainStatus::Orphan => TransactionState::InMempool,
         }
     }
 }

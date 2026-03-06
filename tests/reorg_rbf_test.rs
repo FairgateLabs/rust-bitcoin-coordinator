@@ -12,7 +12,9 @@ use protocol_builder::types::Utxo;
 use std::rc::Rc;
 use tracing::info;
 
-use crate::utils::{config_trace_aux, coordinate_tx, create_test_setup, TestSetupConfig};
+use crate::utils::{
+    config_trace_aux, coordinate_tx, create_test_setup, tick_until_coordinator_ready, TestSetupConfig,
+};
 mod utils;
 
 #[test]
@@ -109,7 +111,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     // Mine 3 blocks to confirm tx1 and its speedup transaction
     // Each block mined advances the blockchain, and each tick processes the new blocks
-    for _ in 0..3 {
+    for _ in 0..6 {
         info!("{} Mine and Tick", style("Test").green());
         setup
             .bitcoin_client
@@ -120,6 +122,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
 
     // Verify that tx1 has been confirmed (1 confirmation)
     let news = coordinator.get_news()?;
+
     assert_eq!(
         news.monitor_news.len(),
         1,
@@ -224,9 +227,7 @@ fn replace_speedup_regtest_test() -> Result<(), anyhow::Error> {
         .unwrap();
 
     // Wait for coordinator to be ready (indexer synced with blockchain)
-    while !coordinator.is_ready()? {
-        coordinator.tick()?;
-    }
+    tick_until_coordinator_ready(&coordinator)?;
 
     // After mining a new block, tx1 should be confirmed again (re-mined in the new chain)
     let news = coordinator.get_news()?;

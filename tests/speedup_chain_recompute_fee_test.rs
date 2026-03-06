@@ -129,10 +129,12 @@ fn speedup_chain_recompute_fee_test() -> Result<(), anyhow::Error> {
         coordinator.tick()?;
     }
 
-    setup
-        .bitcoin_client
-        .mine_blocks_to_address(1, &setup.funding_wallet)?;
-    coordinator.tick()?;
+    for _ in 0..4 {
+        setup
+            .bitcoin_client
+            .mine_blocks_to_address(1, &setup.funding_wallet)?;
+        coordinator.tick()?;
+    }
 
     let news = coordinator.get_news()?;
     assert_eq!(news.monitor_news.len(), 1);

@@ -33,6 +33,7 @@ pub trait BitcoinCoordinatorStoreApi {
         target_block_height: Option<BlockHeight>,
         context: String,
         stuck_in_mempool_blocks: Option<u32>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn remove_tx(&self, tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
@@ -186,6 +187,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         target_block_height: Option<BlockHeight>,
         context: String,
         stuck_in_mempool_blocks: Option<u32>,
+        number_confirmation_trigger: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let key = self.get_key(StoreKey::Transaction(tx.compute_txid()));
 
@@ -196,6 +198,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             target_block_height,
             context,
             stuck_in_mempool_blocks,
+            number_confirmation_trigger,
         );
 
         self.store.set(&key, &tx_info, None)?;
@@ -258,10 +261,19 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
         // Validate state transitions
         let valid_transition = match (&tx.state, &new_state) {
-            // Valid transitions
             (TransactionState::ToDispatch, TransactionState::InMempool) => true,
             (TransactionState::ToDispatch, TransactionState::Failed) => true,
+
+            // From ToDispatch to Confirmed, Finalized is possible if the client crash and in a
+            // new tick detects that the transaction was already in the chain and is confirmed or finalized.
+            // Same happens with InMempool to Confirmed, Finalized.
+            (TransactionState::ToDispatch, TransactionState::Confirmed) => true,
+            (TransactionState::ToDispatch, TransactionState::Finalized) => true,
+
             (TransactionState::InMempool, TransactionState::Confirmed) => true,
+            (TransactionState::InMempool, TransactionState::ToDispatch) => true,
+            (TransactionState::InMempool, TransactionState::Finalized) => true,
+
             (TransactionState::Confirmed, TransactionState::Finalized) => true,
             // Allow transition from Confirmed to InMempool when transaction becomes orphan (reorg)
             (TransactionState::Confirmed, TransactionState::InMempool) => true,

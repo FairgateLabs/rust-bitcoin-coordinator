@@ -520,7 +520,14 @@ fn test_transaction_state_failed_on_fatal_error() -> Result<(), anyhow::Error> {
     let tx_id = tx.compute_txid();
 
     // Save the transaction
-    store.save_tx(tx.clone(), None, None, "test_context".to_string(), None)?;
+    store.save_tx(
+        tx.clone(),
+        None,
+        None,
+        "test_context".to_string(),
+        None,
+        None,
+    )?;
 
     // Mark transaction as failed (simulating fatal error handling)
     store.update_tx_state(tx_id, TransactionState::Failed)?;

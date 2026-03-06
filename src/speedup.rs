@@ -33,8 +33,6 @@ pub trait SpeedupStore {
         txid: &Txid,
     ) -> Result<CoordinatedSpeedUpTransaction, BitcoinCoordinatorStoreError>;
 
-    fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
-
     fn is_funding_available(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
 
     fn has_enough_unconfirmed_txs_for_cpfp(&self) -> Result<bool, BitcoinCoordinatorStoreError>;
@@ -88,14 +86,16 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         // The broadcast block height is set to 0 and Finalized because funding should be confirmed on chain.
         let funding_to_speedup = CoordinatedSpeedUpTransaction::new(
             next_funding.txid,
-            next_funding.clone(),
-            next_funding,
-            None, // Funding is not an RBF replacement
+            None,                 // Funding transactions don't have an associated speedup tx
+            next_funding.clone(), // prev_funding
+            next_funding,         // next_funding
+            None,                 // Funding is not an RBF replacement
             0,
             TransactionState::Finalized,
             1.0,
             vec![],
             1,
+            None,
         );
 
         self.save_speedup(funding_to_speedup)?;
@@ -279,19 +279,6 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         active_speedups.reverse();
 
         Ok(active_speedups)
-    }
-
-    /// Determines if a speedup (CPFP) transaction can be created and dispatched.
-    ///
-    /// Returns `true` if:
-    ///   - There is a funding transaction available to pay for the speedup.
-    ///   - There are enough available unconfirmed transaction slots to satisfy Bitcoin's mempool chain limit policy.
-    ///     (At least `MIN_UNCONFIRMED_TXS_FOR_CPFP` unconfirmed transactions are required: one for the CPFP itself and at least one unconfirmed output to spend.)
-    fn can_speedup(&self) -> Result<bool, BitcoinCoordinatorStoreError> {
-        let is_funding_available = self.is_funding_available()?;
-        let is_enough_unconfirmed_txs = self.has_enough_unconfirmed_txs_for_cpfp()?;
-
-        Ok(is_funding_available && is_enough_unconfirmed_txs)
     }
 
     fn is_funding_available(&self) -> Result<bool, BitcoinCoordinatorStoreError> {
