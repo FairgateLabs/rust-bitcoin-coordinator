@@ -1,6 +1,7 @@
 use crate::types::TransactionState;
 use bitcoin::Txid;
 use bitvmx_bitcoin_rpc::errors::BitcoinClientError;
+use bitvmx_transaction_monitor::IndexerError;
 use config as settings;
 use protocol_builder::errors::ProtocolBuilderError;
 use thiserror::Error;
@@ -86,6 +87,9 @@ pub enum BitcoinCoordinatorError {
 
     #[error("Invalid configuration: {0}")]
     InvalidConfiguration(String),
+
+    #[error("Indexer error: {0}")]
+    IndexerError(#[from] IndexerError),
 }
 
 #[derive(Error, Debug)]

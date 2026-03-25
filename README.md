@@ -25,15 +25,17 @@ The following is a list of all public methods available in the `BitcoinCoordinat
 
 4. **dispatch**: Dispatches a transaction to the Bitcoin network. Includes options for speedup, additional context, and a confirmation trigger threshold.
 
-5. **cancel**: Cancels the monitor and the dispatch of a type of data, removing it from the coordinator's store.
+5. **dispatch_without_speedup**: Dispatches a transaction to the Bitcoin network without speedup support. Includes options for additional context, a confirmation trigger threshold, and a stuck in mempool threshold (number of blocks to wait before considering the transaction stuck).
 
-6. **add_funding**: Registers funding information for potential transaction speed-ups, allowing the creation of child pays for parents transactions.
+6. **cancel**: Cancels the monitor and the dispatch of a type of data, removing it from the coordinator's store.
 
-7. **get_transaction**: Retrieves the status of a specific transaction by its transaction ID.
+7. **add_funding**: Registers funding information for potential transaction speed-ups, allowing the creation of child pays for parents transactions.
 
-8. **get_news**: Retrieves news about monitored transactions, providing information about transaction confirmations.
+8. **get_transaction**: Retrieves the status of a specific transaction by its transaction ID.
 
-9. **ack_news**: Acknowledges that news has been processed, preventing the same news from being returned in subsequent calls to `get_news()`.
+9. **get_news**: Retrieves news about monitored transactions, providing information about transaction confirmations and stuck transactions.
+
+10. **ack_news**: Acknowledges that news has been processed, preventing the same news from being returned in subsequent calls to `get_news()`.
 
 ## Usage Examples
 
@@ -65,6 +67,10 @@ coordinator.monitor(tx_to_monitor);
 // number_confirmation_trigger: None means trigger news for all confirmations, Some(n) means only trigger when transaction has exactly n confirmations
 let speedup_data = Some(SpeedupData::new(speedup_utxo));
 coordinator.dispatch(transaction, speedup_data, tx_context.clone(), None, None);
+
+// Dispatch a transaction without speedup support, with a stuck in mempool threshold
+// stuck_in_mempool_blocks: number of blocks to wait before considering the transaction stuck in mempool
+coordinator.dispatch_without_speedup(transaction, tx_context.clone(), None, None, 10);
 
 // Provide funding UTXO for future speedup transactions (e.g., CPFP)
 let utxo = Utxo::new(txid, vout_index, amount.to_sat(), &public_key);

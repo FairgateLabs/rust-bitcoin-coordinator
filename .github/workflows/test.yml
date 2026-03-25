@@ -26,6 +26,5 @@ jobs:
       submodule_path: "rust-bitcoin-coordinator"
       cargo_lock_path: "rust-bitcoin-coordinator/Cargo.lock"
       target_path: "rust-bitcoin-coordinator/target"
-      submodule_branches: "{}"
       single_thread_tests: true
     secrets: inherit

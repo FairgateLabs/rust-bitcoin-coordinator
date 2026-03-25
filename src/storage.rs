@@ -1,25 +1,19 @@
 use crate::{
     errors::BitcoinCoordinatorStoreError,
-    types::{
-        AckCoordinatorNews, CoordinatedTransaction, CoordinatorNews, RetryInfo, TransactionState,
-    },
+    types::{AckCoordinatorNews, CoordinatedTransaction, CoordinatorNews, TransactionState},
 };
 
 use bitcoin::{BlockHash, Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use chrono::Utc;
 use protocol_builder::types::output::SpeedupData;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
-use tracing::info;
 pub struct BitcoinCoordinatorStore {
     pub store: Rc<Storage>,
     pub max_unconfirmed_speedups: u32,
-    pub retry_attempts_sending_tx: u32,
-    pub retry_interval_seconds: u64,
 }
 enum StoreKey {
-    PendingTransactionList,
+    ActiveTransactionList,
     Transaction(Txid),
     DispatchTransactionErrorNewsList,
     DispatchSpeedUpErrorNewsList,
@@ -29,6 +23,7 @@ enum StoreKey {
     TransactionAlreadyInMempoolNewsList,
     MempoolRejectionNewsList,
     NetworkErrorNewsList,
+    TransactionStuckInMempoolNewsList,
 }
 pub trait BitcoinCoordinatorStoreApi {
     fn save_tx(
@@ -37,6 +32,7 @@ pub trait BitcoinCoordinatorStoreApi {
         speedup_data: Option<SpeedupData>,
         target_block_height: Option<BlockHeight>,
         context: String,
+        stuck_in_mempool_blocks: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorStoreError>;
 
     fn remove_tx(&self, tx_id: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
@@ -45,7 +41,7 @@ pub trait BitcoinCoordinatorStoreApi {
         &self,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError>;
 
-    fn get_txs_to_dispatch(
+    fn get_active_transactions(
         &self,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError>;
 
@@ -70,29 +66,23 @@ pub trait BitcoinCoordinatorStoreApi {
     ) -> Result<(), BitcoinCoordinatorStoreError>;
     fn ack_news(&self, news: AckCoordinatorNews) -> Result<(), BitcoinCoordinatorStoreError>;
     fn get_news(&self) -> Result<Vec<CoordinatorNews>, BitcoinCoordinatorStoreError>;
-
-    fn increment_tx_retry_count(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError>;
 }
 
 impl BitcoinCoordinatorStore {
     pub fn new(
         store: Rc<Storage>,
         max_unconfirmed_speedups: u32,
-        retry_attempts_sending_tx: u32,
-        retry_interval_seconds: u64,
     ) -> Result<Self, BitcoinCoordinatorStoreError> {
         Ok(Self {
             store,
             max_unconfirmed_speedups,
-            retry_attempts_sending_tx,
-            retry_interval_seconds,
         })
     }
 
     fn get_key(&self, key: StoreKey) -> String {
         let prefix = "bitcoin_coordinator";
         match key {
-            StoreKey::PendingTransactionList => format!("{prefix}/tx/list"),
+            StoreKey::ActiveTransactionList => format!("{prefix}/tx/list"),
             StoreKey::Transaction(tx_id) => format!("{prefix}/tx/{tx_id}"),
 
             //NEWS
@@ -114,11 +104,14 @@ impl BitcoinCoordinatorStore {
                 format!("{prefix}/news/mempool_rejection")
             }
             StoreKey::NetworkErrorNewsList => format!("{prefix}/news/network_error"),
+            StoreKey::TransactionStuckInMempoolNewsList => {
+                format!("{prefix}/news/transaction_stuck_in_mempool")
+            }
         }
     }
 
     fn get_txs(&self) -> Result<Vec<Txid>, BitcoinCoordinatorStoreError> {
-        let key = self.get_key(StoreKey::PendingTransactionList);
+        let key = self.get_key(StoreKey::ActiveTransactionList);
 
         let all_txs = self.store.get::<&str, Vec<Txid>>(&key)?;
 
@@ -153,7 +146,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             let tx = self.get_tx(&tx_id)?;
 
             if tx.state == TransactionState::ToDispatch
-                || tx.state == TransactionState::Dispatched
+                || tx.state == TransactionState::InMempool
                 || tx.state == TransactionState::Confirmed
             {
                 txs_filter.push(tx);
@@ -163,26 +156,23 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         Ok(txs_filter)
     }
 
-    fn get_txs_to_dispatch(
+    fn get_active_transactions(
         &self,
     ) -> Result<Vec<CoordinatedTransaction>, BitcoinCoordinatorStoreError> {
+        // Get all transactions in progress (ToDispatch, InMempool, Confirmed) until they are finalized
         let txs = self.get_txs()?;
         let mut txs_filter = Vec::new();
 
         for tx_id in txs {
             let tx = self.get_tx(&tx_id)?;
 
-            if tx.state == TransactionState::ToDispatch {
-                if let Some(retry_info) = &tx.retry_info {
-                    if retry_info.retries_count < self.retry_attempts_sending_tx
-                        && Utc::now().timestamp_millis() as u64 - retry_info.last_retry_timestamp
-                            >= self.retry_interval_seconds * 1000
-                    {
-                        txs_filter.push(tx);
-                    }
-                } else {
-                    txs_filter.push(tx);
-                }
+            // Include transactions that are in progress (not finalized, not failed, not replaced)
+            // Failed and Replaced transactions are not active - they represent fatal errors or superseded transactions that cannot be retried
+            if tx.state == TransactionState::ToDispatch
+                || tx.state == TransactionState::InMempool
+                || tx.state == TransactionState::Confirmed
+            {
+                txs_filter.push(tx);
             }
         }
 
@@ -195,6 +185,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         speedup_data: Option<SpeedupData>,
         target_block_height: Option<BlockHeight>,
         context: String,
+        stuck_in_mempool_blocks: Option<u32>,
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let key = self.get_key(StoreKey::Transaction(tx.compute_txid()));
 
@@ -204,11 +195,12 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             TransactionState::ToDispatch,
             target_block_height,
             context,
+            stuck_in_mempool_blocks,
         );
 
         self.store.set(&key, &tx_info, None)?;
 
-        let txs_key = self.get_key(StoreKey::PendingTransactionList);
+        let txs_key = self.get_key(StoreKey::ActiveTransactionList);
         let mut txs = self
             .store
             .get::<&str, Vec<Txid>>(&txs_key)?
@@ -223,7 +215,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let tx_key = self.get_key(StoreKey::Transaction(tx_id));
         self.store.remove(&tx_key, None)?;
 
-        let txs_key = self.get_key(StoreKey::PendingTransactionList);
+        let txs_key = self.get_key(StoreKey::ActiveTransactionList);
         let mut txs = self
             .store
             .get::<&str, Vec<Txid>>(&txs_key)?
@@ -242,12 +234,12 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
     ) -> Result<(), BitcoinCoordinatorStoreError> {
         let mut tx = self.get_tx(&tx_id)?;
 
-        // Validate state transition: only ToDispatch can transition to Dispatched
+        // Validate state transition: only ToDispatch can transition to InMempool
         if tx.state != TransactionState::ToDispatch {
             return Err(BitcoinCoordinatorStoreError::InvalidTransactionState);
         }
 
-        tx.state = TransactionState::Dispatched;
+        tx.state = TransactionState::InMempool;
 
         tx.broadcast_block_height = Some(deliver_block_height);
 
@@ -267,10 +259,12 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         // Validate state transitions
         let valid_transition = match (&tx.state, &new_state) {
             // Valid transitions
-            (TransactionState::ToDispatch, TransactionState::Dispatched) => true,
+            (TransactionState::ToDispatch, TransactionState::InMempool) => true,
             (TransactionState::ToDispatch, TransactionState::Failed) => true,
-            (TransactionState::Dispatched, TransactionState::Confirmed) => true,
+            (TransactionState::InMempool, TransactionState::Confirmed) => true,
             (TransactionState::Confirmed, TransactionState::Finalized) => true,
+            // Allow transition from Confirmed to InMempool when transaction becomes orphan (reorg)
+            (TransactionState::Confirmed, TransactionState::InMempool) => true,
             (current, new) if current == new => true,
             // Invalid transitions
             _ => false,
@@ -291,7 +285,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
         // Remove tx from the list if it is finalized
         if new_state == TransactionState::Finalized {
-            let txs_key = self.get_key(StoreKey::PendingTransactionList);
+            let txs_key = self.get_key(StoreKey::ActiveTransactionList);
             let mut txs = self
                 .store
                 .get::<&str, Vec<Txid>>(&txs_key)?
@@ -373,8 +367,6 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 if let Some(pos) = is_new_news {
                     let (_, _, _, _, (last_block_hash, _)) = &news_list[pos];
 
-                    info!("last_block_hash: {:?} ", last_block_hash);
-                    info!("current_block_hash: {:?} ", current_block_hash);
                     if last_block_hash != &current_block_hash {
                         // Update the news if the block hash is different
                         news_list[pos] =
@@ -484,6 +476,31 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                     }
                 } else {
                     news_list.push((tx_id, context, error, (current_block_hash, false)));
+                }
+
+                self.store.set(&key, &news_list, None)?;
+            }
+
+            // Transaction is stuck in mempool for too long will be sent only once per transaction
+            CoordinatorNews::TransactionStuckInMempool(tx_id, context) => {
+                let key = self.get_key(StoreKey::TransactionStuckInMempoolNewsList);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
+                    .unwrap_or_default();
+
+                let is_new_news = news_list.iter().position(|(id, _, _)| id == &tx_id);
+
+                if let Some(pos) = is_new_news {
+                    // If already present, update it only if it is not yet acknowledged
+                    let (_, _, (_, acked)) = &news_list[pos];
+                    if !acked {
+                        // Update the entry with the new data, resetting ack to false and updating the block hash
+                        news_list[pos] = (tx_id, context, (current_block_hash, false));
+                    }
+                } else {
+                    // If not present, add a new news entry for the stuck transaction
+                    news_list.push((tx_id, context, (current_block_hash, false)));
                 }
 
                 self.store.set(&key, &news_list, None)?;
@@ -598,6 +615,19 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
 
                 if let Some(pos) = news_list.iter().position(|(id, _, _, _)| *id == tx_id) {
                     let (_, _, _, (_, ack)) = &mut news_list[pos];
+                    *ack = true;
+                    self.store.set(&key, &news_list, None)?;
+                }
+            }
+            AckCoordinatorNews::TransactionStuckInMempool(tx_id) => {
+                let key = self.get_key(StoreKey::TransactionStuckInMempoolNewsList);
+                let mut news_list = self
+                    .store
+                    .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
+                    .unwrap_or_default();
+
+                if let Some(pos) = news_list.iter().position(|(id, _, _)| *id == tx_id) {
+                    let (_, _, (_, ack)) = &mut news_list[pos];
                     *ack = true;
                     self.store.set(&key, &news_list, None)?;
                 }
@@ -720,25 +750,19 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             }
         }
 
-        Ok(all_news)
-    }
-
-    fn increment_tx_retry_count(&self, txid: Txid) -> Result<(), BitcoinCoordinatorStoreError> {
-        let mut tx = self.get_tx(&txid)?;
-        let new_count = tx.retry_info.as_ref().map_or(0, |info| info.retries_count) + 1;
-
-        if new_count >= self.retry_attempts_sending_tx {
-            tx.state = TransactionState::Failed;
-        } else {
-            tx.retry_info = Some(RetryInfo::new(
-                new_count,
-                Utc::now().timestamp_millis() as u64,
-            ));
+        // Get transaction stuck in mempool news
+        let stuck_in_mempool_key = self.get_key(StoreKey::TransactionStuckInMempoolNewsList);
+        if let Some(news_list) = self
+            .store
+            .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&stuck_in_mempool_key)?
+        {
+            for (tx_id, context, (_, acked)) in news_list {
+                if !acked {
+                    all_news.push(CoordinatorNews::TransactionStuckInMempool(tx_id, context));
+                }
+            }
         }
 
-        self.store
-            .set(self.get_key(StoreKey::Transaction(txid)), &tx, None)?;
-
-        Ok(())
+        Ok(all_news)
     }
 }

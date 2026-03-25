@@ -6,9 +6,8 @@ use bitcoin_coordinator::storage::BitcoinCoordinatorStore;
 use bitcoin_coordinator::TypesToMonitor;
 use bitcoind::bitcoind::{Bitcoind, BitcoindFlags};
 use bitcoind::config::BitcoindConfig;
-use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi, MockBitcoinClient};
+use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
-use bitvmx_transaction_monitor::monitor::MockMonitorApi;
 use console::style;
 use key_manager::config::KeyManagerConfig;
 use key_manager::create_key_manager_from_config;
@@ -38,31 +37,6 @@ pub fn generate_random_string() -> String {
     use rand::Rng;
     let mut rng = rand::rng();
     (0..10).map(|_| rng.random_range('a'..='z')).collect()
-}
-
-pub fn get_mocks() -> (
-    MockMonitorApi,
-    BitcoinCoordinatorStore,
-    MockBitcoinClient,
-    Rc<KeyManager>,
-) {
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
-    let mock_monitor = MockMonitorApi::new();
-    let path_key_manager = format!("test_output/test/key_manager/{}", generate_random_string());
-    let key_manager_storage_config = StorageConfig::new(path_key_manager, None);
-    let key_manager_config = KeyManagerConfig::new(Network::Regtest.to_string(), None, None);
-    let key_manager = Rc::new(
-        create_key_manager_from_config(&key_manager_config, &key_manager_storage_config).unwrap(),
-    );
-    let path_storage = format!("test_output/test/storage/{}", generate_random_string());
-    let storage_config = StorageConfig::new(path_storage, None);
-    let storage = Rc::new(Storage::new(&storage_config).unwrap());
-    let store =
-        BitcoinCoordinatorStore::new(storage.clone(), 1, MAX_RETRIES, RETRY_INTERVAL).unwrap();
-    let bitcoin_client = MockBitcoinClient::new();
-
-    (mock_monitor, store, bitcoin_client, key_manager)
 }
 
 pub fn get_mock_data(
@@ -152,7 +126,7 @@ fn create_tx_to_speedup(
         .unwrap();
 
     // Add the output for the speed up transaction
-    let speedup_amount: u64 = 540; // This is the minimal non-dust output.
+    let speedup_amount = 540; // This is the minimal from protocol_builder
     let speedup_output = OutputType::segwit_key(speedup_amount, &to_pubkey).unwrap();
 
     protocol
@@ -189,12 +163,10 @@ fn create_tx_to_speedup(
 }
 
 pub fn create_store() -> BitcoinCoordinatorStore {
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let path = format!("test_output/speedup/{}", generate_random_string());
     let storage_config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&storage_config).unwrap());
-    BitcoinCoordinatorStore::new(storage, 10, MAX_RETRIES, RETRY_INTERVAL).unwrap()
+    BitcoinCoordinatorStore::new(storage, 10).unwrap()
 }
 
 pub fn config_trace_aux() {
@@ -203,9 +175,9 @@ pub fn config_trace_aux() {
     let default_modules = [
         "info",
         "libp2p=off",
-        "bitvmx_transaction_monitor=off",
+        "bitvmx_transaction_monitor=info",
         "bitcoin_indexer=off",
-        "bitcoin_coordinator=info",
+        "bitcoin_coordinator=debug",
         "bitcoin_client=off",
         "p2p_protocol=off",
         "p2p_handler=off",

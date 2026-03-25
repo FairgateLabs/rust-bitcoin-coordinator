@@ -11,20 +11,13 @@ mod utils;
 #[test]
 fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     const MAX_UNCONFIRMED_SPEEDUPS: u32 = 1;
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let storage_config = StorageConfig::new(
         format!("test_output/test/{}", generate_random_string()),
         None,
     );
     let storage = Rc::new(Storage::new(&storage_config)?);
 
-    let store = BitcoinCoordinatorStore::new(
-        storage,
-        MAX_UNCONFIRMED_SPEEDUPS,
-        MAX_RETRIES,
-        RETRY_INTERVAL,
-    )?;
+    let store = BitcoinCoordinatorStore::new(storage, MAX_UNCONFIRMED_SPEEDUPS)?;
 
     // Storage is empty, so all states should return empty vectors
     let empty_txs = store.get_txs_in_progress()?;
@@ -40,7 +33,7 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     let tx_id = tx.compute_txid();
 
     // Save transaction
-    store.save_tx(tx.clone(), None, None, "context_tx".to_string())?;
+    store.save_tx(tx.clone(), None, None, "context_tx".to_string(), None)?;
 
     // Get transactions by state
     let txs = store.get_txs_in_progress()?;
@@ -49,7 +42,7 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
     assert_eq!(txs[0].state, TransactionState::ToDispatch);
 
     // Update transaction state
-    store.update_tx_state(tx_id, TransactionState::Dispatched)?;
+    store.update_tx_state(tx_id, TransactionState::InMempool)?;
 
     // Verify no transactions in ReadyToSend state
     let ready_txs = store.get_txs_in_progress()?;
@@ -71,19 +64,12 @@ fn test_save_and_get_tx() -> Result<(), anyhow::Error> {
 #[test]
 fn test_multiple_transactions() -> Result<(), anyhow::Error> {
     const MAX_UNCONFIRMED_SPEEDUPS: u32 = 1;
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let storage_config = StorageConfig::new(
         format!("test_output/test/{}", generate_random_string()),
         None,
     );
     let storage = Rc::new(Storage::new(&storage_config)?);
-    let store = BitcoinCoordinatorStore::new(
-        storage,
-        MAX_UNCONFIRMED_SPEEDUPS,
-        MAX_RETRIES,
-        RETRY_INTERVAL,
-    )?;
+    let store = BitcoinCoordinatorStore::new(storage, MAX_UNCONFIRMED_SPEEDUPS)?;
 
     // Create a transaction
     let tx = Transaction {
@@ -96,7 +82,7 @@ fn test_multiple_transactions() -> Result<(), anyhow::Error> {
     let tx_id = tx.compute_txid();
 
     // Save transaction
-    store.save_tx(tx.clone(), None, None, "context_tx".to_string())?;
+    store.save_tx(tx.clone(), None, None, "context_tx".to_string(), None)?;
 
     // Test adding multiple transactions and verifying transaction list
 
@@ -119,8 +105,8 @@ fn test_multiple_transactions() -> Result<(), anyhow::Error> {
     let tx3_id = tx3.compute_txid();
 
     // Save additional transactions
-    store.save_tx(tx2.clone(), None, None, "context_tx2".to_string())?;
-    store.save_tx(tx3.clone(), None, None, "context_tx3".to_string())?;
+    store.save_tx(tx2.clone(), None, None, "context_tx2".to_string(), None)?;
+    store.save_tx(tx3.clone(), None, None, "context_tx3".to_string(), None)?;
 
     // Get all transactions in ReadyToSend state (should be all three)
     let ready_txs = store.get_txs_in_progress()?;
@@ -133,12 +119,12 @@ fn test_multiple_transactions() -> Result<(), anyhow::Error> {
     assert!(tx_ids.contains(&tx3_id));
 
     // Update states of transactions to different states
-    store.update_tx_state(tx_id, TransactionState::Dispatched)?;
+    store.update_tx_state(tx_id, TransactionState::InMempool)?;
     store.update_tx_state(tx_id, TransactionState::Confirmed)?;
     store.update_tx_state(tx_id, TransactionState::Finalized)?;
-    store.update_tx_state(tx2_id, TransactionState::Dispatched)?;
+    store.update_tx_state(tx2_id, TransactionState::InMempool)?;
     store.update_tx_state(tx2_id, TransactionState::Confirmed)?;
-    store.update_tx_state(tx3_id, TransactionState::Dispatched)?;
+    store.update_tx_state(tx3_id, TransactionState::InMempool)?;
     store.update_tx_state(tx3_id, TransactionState::Confirmed)?;
     store.update_tx_state(tx3_id, TransactionState::Finalized)?;
 
@@ -154,8 +140,6 @@ fn test_multiple_transactions() -> Result<(), anyhow::Error> {
 #[test]
 fn test_cancel_monitor() -> Result<(), anyhow::Error> {
     const MAX_UNCONFIRMED_SPEEDUPS: u32 = 1;
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
     let storage_config = StorageConfig::new(
         format!(
             "test_output/test_cancel_monitor/{}",
@@ -164,12 +148,7 @@ fn test_cancel_monitor() -> Result<(), anyhow::Error> {
         None,
     );
     let storage = Rc::new(Storage::new(&storage_config)?);
-    let coordinator = BitcoinCoordinatorStore::new(
-        storage,
-        MAX_UNCONFIRMED_SPEEDUPS,
-        MAX_RETRIES,
-        RETRY_INTERVAL,
-    )?;
+    let coordinator = BitcoinCoordinatorStore::new(storage, MAX_UNCONFIRMED_SPEEDUPS)?;
     // Create first transaction
     let tx1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -189,8 +168,8 @@ fn test_cancel_monitor() -> Result<(), anyhow::Error> {
     let tx_id_2 = tx2.compute_txid();
 
     // Save transaction to be monitored, this will be mark as pending dispatch
-    coordinator.save_tx(tx1.clone(), None, None, "context_tx1".to_string())?;
-    coordinator.save_tx(tx2.clone(), None, None, "context_tx2".to_string())?;
+    coordinator.save_tx(tx1.clone(), None, None, "context_tx1".to_string(), None)?;
+    coordinator.save_tx(tx2.clone(), None, None, "context_tx2".to_string(), None)?;
 
     // Remove one of the transactions
     coordinator.remove_tx(tx_id_1)?;
@@ -204,105 +183,5 @@ fn test_cancel_monitor() -> Result<(), anyhow::Error> {
 
     clear_output();
 
-    Ok(())
-}
-
-#[test]
-fn test_increment_tx_retry_count_and_get_txs_to_dispatch() -> Result<(), anyhow::Error> {
-    const RETRY_INTERVAL: u64 = 2;
-    const MAX_RETRIES: u32 = 3;
-    const MAX_UNCONFIRMED_SPEEDUPS: u32 = 1;
-
-    let storage_config = StorageConfig::new(
-        format!("test_output/test/{}/retry", generate_random_string()),
-        None,
-    );
-    let storage = Rc::new(Storage::new(&storage_config)?);
-    let store = BitcoinCoordinatorStore::new(
-        storage,
-        MAX_UNCONFIRMED_SPEEDUPS,
-        MAX_RETRIES,
-        RETRY_INTERVAL,
-    )?;
-
-    let tx = Transaction {
-        version: bitcoin::transaction::Version::TWO,
-        lock_time: LockTime::from_time(1653195600).unwrap(),
-        input: vec![],
-        output: vec![],
-    };
-
-    let tx_id = tx.compute_txid();
-
-    // Save the transaction
-    store.save_tx(tx.clone(), None, None, "context_tx".to_string())?;
-
-    // Test get_txs_to_dispatch
-    let to_dispatch = store.get_txs_to_dispatch()?;
-    assert_eq!(to_dispatch.len(), 1);
-    assert_eq!(to_dispatch[0].tx.compute_txid(), tx_id);
-
-    // Test increment_tx_retry_count
-    store.increment_tx_retry_count(tx_id)?;
-    let tx_after_retry = store.get_tx(&tx_id)?;
-    assert_eq!(tx_after_retry.retry_info.unwrap().retries_count, 1);
-
-    // Test get_txs_to_dispatch again after incrementing the retry count, should be empty because the retry interval is not reached
-    let to_dispatch = store.get_txs_to_dispatch()?;
-    assert_eq!(to_dispatch.len(), 0);
-
-    // Test increment_tx_retry_count again
-    store.increment_tx_retry_count(tx_id)?;
-    let tx_after_retry = store.get_tx(&tx_id)?;
-    assert_eq!(tx_after_retry.retry_info.unwrap().retries_count, 2);
-
-    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL));
-
-    // Test get_txs_to_dispatch again after incrementing the retry count, should be empty because the retry interval is not reached
-    let to_dispatch = store.get_txs_to_dispatch()?;
-    assert_eq!(to_dispatch.len(), 1);
-    clear_output();
-    Ok(())
-}
-
-#[test]
-fn test_tx_marked_as_failed_after_max_retries() -> Result<(), anyhow::Error> {
-    const MAX_UNCONFIRMED_SPEEDUPS: u32 = 1;
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_INTERVAL: u64 = 2;
-    let storage_config = StorageConfig::new(
-        format!("test_output/test/{}", generate_random_string()),
-        None,
-    );
-    let storage = Rc::new(Storage::new(&storage_config)?);
-    let store = BitcoinCoordinatorStore::new(
-        storage,
-        MAX_UNCONFIRMED_SPEEDUPS,
-        MAX_RETRIES,
-        RETRY_INTERVAL,
-    )?;
-
-    let tx = Transaction {
-        version: bitcoin::transaction::Version::TWO,
-        lock_time: LockTime::from_time(1653195600).unwrap(),
-        input: vec![],
-        output: vec![],
-    };
-
-    let tx_id = tx.compute_txid();
-
-    // Save the transaction
-    store.save_tx(tx.clone(), None, None, "context_tx".to_string())?;
-
-    // Increment retry count 3 times
-    for _ in 0..3 {
-        store.increment_tx_retry_count(tx_id)?;
-    }
-
-    // Check if the transaction is marked as failed
-    let tx_after_retries = store.get_tx(&tx_id)?;
-    assert_eq!(tx_after_retries.state, TransactionState::Failed);
-
-    clear_output();
     Ok(())
 }

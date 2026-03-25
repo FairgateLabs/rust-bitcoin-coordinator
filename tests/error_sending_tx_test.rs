@@ -178,8 +178,6 @@ fn error_sending_speedup_test() -> Result<(), anyhow::Error> {
         news.coordinator_news[0]
     );
 
-    println!("Coordinator news: {:?}", news.coordinator_news);
-    println!("Monitor news: {:?}", news.monitor_news);
     assert_eq!(news.monitor_news.len(), 1);
 
     setup.bitcoind.stop()?;

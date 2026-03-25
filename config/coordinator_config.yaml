@@ -17,7 +17,6 @@ key_storage:
     password: secret_password
     path: data/key_manager
 
-
 # Each setting is optional and will use the default values if not provided
 settings:
     max_unconfirmed_speedups: 10
@@ -33,7 +32,6 @@ settings:
     retry_attempts_sending_tx: 3
     min_network_fee_rate: 1
     monitor_settings:
-        confirmation_threshold: 6
         max_monitoring_confirmations: 6
         indexer_settings:
             checkpoint_height: 0
