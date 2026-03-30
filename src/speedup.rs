@@ -231,7 +231,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
         let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
-        let speedups = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
+        let speedups = self.store.get::<&str, Vec<Txid>>(&key, None)?.unwrap_or_default();
 
         let mut pending_speedups = Vec::new();
 
@@ -256,7 +256,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
         let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
-        let speedups = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
+        let speedups = self.store.get::<&str, Vec<Txid>>(&key, None)?.unwrap_or_default();
 
         let mut pending_speedups = Vec::new();
 
@@ -280,7 +280,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         &self,
     ) -> Result<Vec<CoordinatedSpeedUpTransaction>, BitcoinCoordinatorStoreError> {
         let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
-        let speedup_ids = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
+        let speedup_ids = self.store.get::<&str, Vec<Txid>>(&key, None)?.unwrap_or_default();
 
         let mut pending_speedups = Vec::new();
 
@@ -327,7 +327,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         // Also speedup should be saved at the end of the list. Because is gonna be the new way to fund next speedups.
 
         let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
-        let mut speedups = self.store.get::<&str, Vec<Txid>>(&key)?.unwrap_or_default();
+        let mut speedups = self.store.get::<&str, Vec<Txid>>(&key, None)?.unwrap_or_default();
         speedups.push(speedup.tx_id);
 
         self.store.set(&key, speedups, None)?;
@@ -346,7 +346,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         let key = SpeedupStoreKey::SpeedUpTransaction(*txid).get_key();
         let speedup = self
             .store
-            .get::<&str, CoordinatedSpeedUpTransaction>(&key)?
+            .get::<&str, CoordinatedSpeedUpTransaction>(&key, None)?
             .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
         Ok(speedup)
@@ -380,7 +380,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
             let key = SpeedupStoreKey::PendingSpeedUpList.get_key();
             let mut speedups = self
                 .store
-                .get::<&str, Vec<Txid>>(&key)?
+                .get::<&str, Vec<Txid>>(&key, None)?
                 .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
             let index = speedups
@@ -406,7 +406,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
 
         let mut speedup = self
             .store
-            .get::<&str, CoordinatedSpeedUpTransaction>(&key)?
+            .get::<&str, CoordinatedSpeedUpTransaction>(&key, None)?
             .ok_or(BitcoinCoordinatorStoreError::SpeedupNotFound)?;
 
         speedup.state = state;
@@ -457,7 +457,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
         let speedups: Vec<CoordinatedSpeedUpTransaction> = self
             .store
-            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
+            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key, None)?
             .unwrap_or_default();
 
         let mut eligible_speedups = Vec::new();
@@ -493,7 +493,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
         let mut speedups = self
             .store
-            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
+            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key, None)?
             .unwrap_or_default();
 
         speedup.retry_info = Some(RetryInfo::new(0, Utc::now().timestamp_millis() as u64));
@@ -508,7 +508,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
         let mut speedups = self
             .store
-            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
+            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key, None)?
             .unwrap_or_default();
         speedups.retain(|s| s.tx_id != txid);
         self.store.set(&key, &speedups, None)?;
@@ -523,7 +523,7 @@ impl SpeedupStore for BitcoinCoordinatorStore {
         let key = SpeedupStoreKey::RetrySpeedUpTransactionList.get_key();
         let mut speedups = self
             .store
-            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key)?
+            .get::<&str, Vec<CoordinatedSpeedUpTransaction>>(&key, None)?
             .unwrap_or_default();
 
         for speedup in speedups.iter_mut() {
