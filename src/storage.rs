@@ -120,7 +120,7 @@ impl BitcoinCoordinatorStore {
     fn get_txs(&self) -> Result<Vec<Txid>, BitcoinCoordinatorStoreError> {
         let key = self.get_key(StoreKey::PendingTransactionList);
 
-        let all_txs = self.store.get::<&str, Vec<Txid>>(&key)?;
+        let all_txs = self.store.get::<&str, Vec<Txid>>(&key, None)?;
 
         match all_txs {
             Some(txs) => Ok(txs),
@@ -132,7 +132,7 @@ impl BitcoinCoordinatorStore {
 impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
     fn get_tx(&self, tx_id: &Txid) -> Result<CoordinatedTransaction, BitcoinCoordinatorStoreError> {
         let key = self.get_key(StoreKey::Transaction(*tx_id));
-        let tx = self.store.get::<&str, CoordinatedTransaction>(&key)?;
+        let tx = self.store.get::<&str, CoordinatedTransaction>(&key, None)?;
 
         if let Some(tx) = tx {
             Ok(tx)
@@ -211,7 +211,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let txs_key = self.get_key(StoreKey::PendingTransactionList);
         let mut txs = self
             .store
-            .get::<&str, Vec<Txid>>(&txs_key)?
+            .get::<&str, Vec<Txid>>(&txs_key, None)?
             .unwrap_or_default();
         txs.push(tx.compute_txid());
         self.store.set(&txs_key, &txs, None)?;
@@ -226,7 +226,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let txs_key = self.get_key(StoreKey::PendingTransactionList);
         let mut txs = self
             .store
-            .get::<&str, Vec<Txid>>(&txs_key)?
+            .get::<&str, Vec<Txid>>(&txs_key, None)?
             .unwrap_or_default();
 
         txs.retain(|id| *id != tx_id);
@@ -294,7 +294,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             let txs_key = self.get_key(StoreKey::PendingTransactionList);
             let mut txs = self
                 .store
-                .get::<&str, Vec<Txid>>(&txs_key)?
+                .get::<&str, Vec<Txid>>(&txs_key, None)?
                 .unwrap_or_default();
             txs.retain(|id| *id != tx_id);
             self.store.set(&txs_key, &txs, None)?;
@@ -313,7 +313,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::InsufficientFundsNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, u64, u64, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(Txid, u64, u64, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
@@ -338,7 +338,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::DispatchTransactionErrorNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
@@ -363,6 +363,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                     .store
                     .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String, (BlockHash, bool))>>(
                         &key,
+                        None
                     )?
                     .unwrap_or_default();
 
@@ -389,7 +390,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             }
             CoordinatorNews::FundingNotFound => {
                 let key = self.get_key(StoreKey::FundingNotFoundNews);
-                let news = self.store.get::<&str, (BlockHash, bool)>(&key)?;
+                let news = self.store.get::<&str, (BlockHash, bool)>(&key, None)?;
 
                 if let Some((last_block_hash, _)) = news {
                     // If there is existing news, check if the block hash differs
@@ -405,7 +406,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::EstimateFeerateTooHighNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(u64, u64, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(u64, u64, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 let is_new_news = news_list
@@ -430,7 +431,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::TransactionAlreadyInMempoolNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 let is_new_news = news_list.iter().position(|(id, _, _)| id == &tx_id);
@@ -451,7 +452,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::MempoolRejectionNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
@@ -472,7 +473,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::NetworkErrorNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 let is_new_news = news_list.iter().position(|(id, _, _, _)| id == &tx_id);
@@ -498,7 +499,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::InsufficientFundsNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, u64, u64, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(Txid, u64, u64, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 if let Some(pos) = news_list.iter().position(|(id, _, _, _)| *id == tx_id) {
@@ -511,7 +512,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::DispatchTransactionErrorNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 if let Some(pos) = news_list.iter().position(|(id, _, _, _)| *id == tx_id) {
@@ -526,6 +527,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                     .store
                     .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String, (BlockHash, bool))>>(
                         &key,
+                        None
                     )?
                     .unwrap_or_default();
 
@@ -542,7 +544,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::EstimateFeerateTooHighNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(u64, u64, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(u64, u64, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 if let Some(pos) = news_list
@@ -556,7 +558,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             }
             AckCoordinatorNews::FundingNotFound => {
                 let key = self.get_key(StoreKey::FundingNotFoundNews);
-                let mut news = self.store.get::<&str, (BlockHash, bool)>(&key)?;
+                let mut news = self.store.get::<&str, (BlockHash, bool)>(&key, None)?;
 
                 if let Some((block_hash, _)) = news {
                     news = Some((block_hash, true));
@@ -567,7 +569,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::TransactionAlreadyInMempoolNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 if let Some(pos) = news_list.iter().position(|(id, _, _)| *id == tx_id) {
@@ -580,7 +582,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::MempoolRejectionNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 if let Some(pos) = news_list.iter().position(|(id, _, _, _)| *id == tx_id) {
@@ -593,7 +595,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
                 let key = self.get_key(StoreKey::NetworkErrorNewsList);
                 let mut news_list = self
                     .store
-                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key)?
+                    .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&key, None)?
                     .unwrap_or_default();
 
                 if let Some(pos) = news_list.iter().position(|(id, _, _, _)| *id == tx_id) {
@@ -613,7 +615,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let insufficient_funds_key = self.get_key(StoreKey::InsufficientFundsNewsList);
         if let Some(news_list) = self
             .store
-            .get::<&str, Vec<(Txid, u64, u64, (BlockHash, bool))>>(&insufficient_funds_key)?
+            .get::<&str, Vec<(Txid, u64, u64, (BlockHash, bool))>>(&insufficient_funds_key, None)?
         {
             for (txid, amount, required, (_, acked)) in news_list {
                 if !acked {
@@ -626,7 +628,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let dispatch_error_key = self.get_key(StoreKey::DispatchTransactionErrorNewsList);
         if let Some(news_list) = self
             .store
-            .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&dispatch_error_key)?
+            .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&dispatch_error_key, None)?
         {
             for (tx_id, context, error, (_, acked)) in news_list {
                 if !acked {
@@ -643,6 +645,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
             self.store
                 .get::<&str, Vec<(Vec<Txid>, Vec<String>, Txid, String, (BlockHash, bool))>>(
                     &speed_up_error_key,
+                    None
                 )?
         {
             for (tx_ids, contexts, txid, error, (_, acked)) in news_list {
@@ -658,7 +661,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let funding_not_found_key = self.get_key(StoreKey::FundingNotFoundNews);
         if let Some((_, acked)) = self
             .store
-            .get::<&str, (BlockHash, bool)>(&funding_not_found_key)?
+            .get::<&str, (BlockHash, bool)>(&funding_not_found_key, None)?
         {
             if !acked {
                 all_news.push(CoordinatorNews::FundingNotFound);
@@ -669,7 +672,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let estimate_feerate_too_high_key = self.get_key(StoreKey::EstimateFeerateTooHighNewsList);
         if let Some(news_list) = self
             .store
-            .get::<&str, Vec<(u64, u64, (BlockHash, bool))>>(&estimate_feerate_too_high_key)?
+            .get::<&str, Vec<(u64, u64, (BlockHash, bool))>>(&estimate_feerate_too_high_key, None)?
         {
             for (estimate_fee, max_allowed, (_, acked)) in news_list {
                 if !acked {
@@ -685,7 +688,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let already_in_mempool_key = self.get_key(StoreKey::TransactionAlreadyInMempoolNewsList);
         if let Some(news_list) = self
             .store
-            .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&already_in_mempool_key)?
+            .get::<&str, Vec<(Txid, String, (BlockHash, bool))>>(&already_in_mempool_key, None)?
         {
             for (tx_id, context, (_, acked)) in news_list {
                 if !acked {
@@ -698,7 +701,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let mempool_rejection_key = self.get_key(StoreKey::MempoolRejectionNewsList);
         if let Some(news_list) = self
             .store
-            .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&mempool_rejection_key)?
+            .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&mempool_rejection_key, None)?
         {
             for (tx_id, context, error, (_, acked)) in news_list {
                 if !acked {
@@ -711,7 +714,7 @@ impl BitcoinCoordinatorStoreApi for BitcoinCoordinatorStore {
         let network_error_key = self.get_key(StoreKey::NetworkErrorNewsList);
         if let Some(news_list) = self
             .store
-            .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&network_error_key)?
+            .get::<&str, Vec<(Txid, String, String, (BlockHash, bool))>>(&network_error_key, None)?
         {
             for (tx_id, context, error, (_, acked)) in news_list {
                 if !acked {
